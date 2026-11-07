@@ -86,4 +86,9 @@ export class CoarseField {
     pass.dispatchWorkgroups(cellWorkgroups);
     pass.end();
   }
+
+  destroy() {
+    Object.values(this.buffers).forEach((buffer) => buffer.destroy());
+    this.densityAccumulator.destroy();
+  }
 }

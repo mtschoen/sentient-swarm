@@ -114,4 +114,9 @@ export class SpatialGrid {
     pass.dispatchWorkgroups(agentWorkgroups);
     pass.end();
   }
+
+  destroy() {
+    Object.values(this.buffers).forEach((buffer) => buffer.destroy());
+    this.blockSums.destroy();
+  }
 }

@@ -67,4 +67,9 @@ export class StagingRing {
     oldest.state = 'free';
     return data;
   }
+
+  // A slot still mapping rejects its mapAsync, which marks it free; nothing is left pending.
+  destroy() {
+    this.slots.forEach((slot) => slot.buffer.destroy());
+  }
 }
