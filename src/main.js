@@ -31,7 +31,7 @@ async function boot() {
 
   const viewport = new Viewport();
   let renderer = null;
-  const resizeCanvas = ({ width, height }) => {
+  const resizeCanvas = ({ width, height, devicePixelRatio }) => {
     canvas.width = width;
     canvas.height = height;
     viewport.setCanvasSize(width, height, devicePixelRatio);

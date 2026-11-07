@@ -79,36 +79,103 @@ test('gamepad dead zone zeroes a 0.1 stick and a 0.6 right stick fires', () => {
 
 test('pointer converts to world, tracks primary button and right-button zoom', () => {
   const { canvas, windowObject, viewport, input } = createFixture();
-  canvas.dispatchEvent(pointerEvent('pointermove', { clientX: 300, clientY: 100 }));
+  canvas.dispatchEvent(pointerEvent('pointermove', { clientX: 300, clientY: 100, buttons: 0 }));
   input.update();
   assert.deepEqual(input.state.pointerWorld, { x: 3, y: 1 });
-  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 300, clientY: 100, button: 0 }));
+  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 300, clientY: 100, button: 0, buttons: 1 }));
   input.update();
   assert.equal(input.state.pointerPrimaryDown, true);
-  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 300, clientY: 100, button: 2 }));
-  assert.equal(viewport.inspectZoom, 4);
-  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 2 }));
-  assert.equal(viewport.inspectZoom, 1);
-  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 0 }));
+  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 0, buttons: 0 }));
   input.update();
   assert.equal(input.state.pointerPrimaryDown, false);
+  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 300, clientY: 100, button: 2, buttons: 2 }));
+  assert.equal(viewport.inspectZoom, 4);
+  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 2, buttons: 0 }));
+  assert.equal(viewport.inspectZoom, 1);
   const menu = new Event('contextmenu', { cancelable: true });
   canvas.dispatchEvent(menu);
   assert.equal(menu.defaultPrevented, true);
+});
+
+test('chord: down 0, down 2, up 0 with buttons 2, up 2 ends neutral', () => {
+  const { canvas, windowObject, viewport, input } = createFixture();
+  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 10, clientY: 10, button: 0, buttons: 1 }));
+  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 10, clientY: 10, button: 2, buttons: 3 }));
+  input.update();
+  assert.equal(input.state.pointerPrimaryDown, true);
+  assert.equal(viewport.inspectZoom, 4);
+  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 0, buttons: 2 }));
+  input.update();
+  assert.equal(input.state.pointerPrimaryDown, false);
+  assert.equal(viewport.inspectZoom, 4);
+  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 2, buttons: 0 }));
+  input.update();
+  assert.equal(input.state.pointerPrimaryDown, false);
+  assert.equal(viewport.inspectZoom, 1);
+});
+
+test('chord as a browser sends it (inner changes arrive as pointermove) ends neutral in both orders', () => {
+  for (const [first, second] of [[1, 2], [2, 1]]) {
+    const { canvas, windowObject, viewport, input } = createFixture();
+    canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 10, clientY: 10, button: first === 1 ? 0 : 2, buttons: first }));
+    canvas.dispatchEvent(pointerEvent('pointermove', { clientX: 10, clientY: 10, button: second === 1 ? 0 : 2, buttons: 3 }));
+    input.update();
+    assert.equal(input.state.pointerPrimaryDown, true);
+    assert.equal(viewport.inspectZoom, 4);
+    canvas.dispatchEvent(pointerEvent('pointermove', { clientX: 10, clientY: 10, button: first === 1 ? 0 : 2, buttons: second }));
+    windowObject.dispatchEvent(pointerEvent('pointerup', { button: second === 1 ? 0 : 2, buttons: 0 }));
+    input.update();
+    assert.equal(input.state.pointerPrimaryDown, false, `order ${first} then ${second}`);
+    assert.equal(viewport.inspectZoom, 1, `order ${first} then ${second}`);
+  }
+});
+
+test('pointercancel, lostpointercapture and window blur each release both buttons', () => {
+  for (const [target, type] of [['canvas', 'pointercancel'], ['canvas', 'lostpointercapture'], ['window', 'blur']]) {
+    const fixture = createFixture();
+    const { canvas, windowObject, viewport, input } = fixture;
+    canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 10, clientY: 10, button: 0, buttons: 3 }));
+    input.update();
+    assert.equal(input.state.pointerPrimaryDown, true);
+    const releaseEvent = type === 'blur' ? new Event('blur') : pointerEvent(type, { buttons: 0 });
+    (target === 'canvas' ? canvas : windowObject).dispatchEvent(releaseEvent);
+    input.update();
+    assert.equal(input.state.pointerPrimaryDown, false, type);
+    assert.equal(viewport.inspectZoom, 1, type);
+  }
+});
+
+test('the world point is recomputed every update, so zoom and resize changes apply without a move', () => {
+  const { canvas, viewport, input } = createFixture();
+  canvas.dispatchEvent(pointerEvent('pointermove', { clientX: 300, clientY: 100, buttons: 0 }));
+  input.update();
+  assert.deepEqual(input.state.pointerWorld, { x: 3, y: 1 });
+  viewport.screenToWorld = (x, y) => ({ x: x / 50, y: y / 50 });
+  input.update();
+  assert.deepEqual(input.state.pointerWorld, { x: 6, y: 2 });
+});
+
+test('pointerdown captures the pointer so the release reaches the canvas', () => {
+  const { canvas, input } = createFixture();
+  const captured = [];
+  canvas.setPointerCapture = (pointerId) => captured.push(pointerId);
+  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 10, clientY: 10, button: 0, buttons: 1, pointerId: 7 }));
+  input.update();
+  assert.deepEqual(captured, [7]);
 });
 
 test('dispose removes every listener', () => {
   const { canvas, windowObject, input } = createFixture();
   input.dispose();
   canvas.dispatchEvent(touchEvent('touchstart', [{ identifier: 2, clientX: 700, clientY: 250 }]));
-  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 1, clientY: 1, button: 0 }));
+  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 1, clientY: 1, button: 0, buttons: 1 }));
   input.update();
   assert.equal(input.state.firing, false);
   assert.equal(input.state.pointerPrimaryDown, false);
   const menu = new Event('contextmenu', { cancelable: true });
   canvas.dispatchEvent(menu);
   assert.equal(menu.defaultPrevented, false);
-  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 0 }));
+  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 0, buttons: 0 }));
 });
 
 function keyEvent(type, key, target = null) {

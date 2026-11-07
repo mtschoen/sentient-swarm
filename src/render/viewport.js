@@ -12,28 +12,41 @@ export class Viewport {
     this.arenaRectDevicePixels = { x: 0, y: 0, width: 1, height: 1 };
   }
 
+  // Sizes below 1 device pixel (a collapsed canvas) are stored as 1, so no transform divides by zero.
   setCanvasSize(widthDevicePixels, heightDevicePixels, devicePixelRatio = 1) {
-    this.canvasWidth = widthDevicePixels;
-    this.canvasHeight = heightDevicePixels;
-    this.devicePixelRatio = devicePixelRatio;
-    const scale = Math.min(widthDevicePixels / this.arenaWidth, heightDevicePixels / this.arenaHeight);
-    const width = Math.floor(this.arenaWidth * scale);
-    const height = Math.floor(this.arenaHeight * scale);
+    const canvasWidth = Math.max(1, widthDevicePixels || 0);
+    const canvasHeight = Math.max(1, heightDevicePixels || 0);
+    this.canvasWidth = canvasWidth;
+    this.canvasHeight = canvasHeight;
+    this.devicePixelRatio = devicePixelRatio > 0 ? devicePixelRatio : 1;
+    const scale = Math.min(canvasWidth / this.arenaWidth, canvasHeight / this.arenaHeight);
+    const width = Math.max(1, Math.floor(this.arenaWidth * scale));
+    const height = Math.max(1, Math.floor(this.arenaHeight * scale));
     this.arenaRectDevicePixels = {
-      x: Math.floor((widthDevicePixels - width) / 2),
-      y: Math.floor((heightDevicePixels - height) / 2),
+      x: Math.floor((canvasWidth - width) / 2),
+      y: Math.floor((canvasHeight - height) / 2),
       width,
       height,
     };
   }
 
-  screenToWorld(px, py) {
+  // A zoom of 0 or less (never set by the app) is treated as 1 rather than dividing by it.
+  get effectiveZoom() {
+    return this.inspectZoom > 0 ? this.inspectZoom : 1;
+  }
+
+  // CSS pixels relative to the canvas to world units: the exact inverse of worldToClip, including
+  // inspectZoom about the arena center. The world is drawn centered on the canvas center, so this
+  // maps through clip space rather than through the floored arenaRect origin.
+  screenToWorld(cssX, cssY) {
     const rect = this.arenaRectDevicePixels;
-    const deviceX = px * this.devicePixelRatio;
-    const deviceY = py * this.devicePixelRatio;
+    const clipX = ((cssX * this.devicePixelRatio) / this.canvasWidth) * 2 - 1;
+    const clipY = 1 - ((cssY * this.devicePixelRatio) / this.canvasHeight) * 2;
+    const normalizedX = clipX / ((rect.width / this.canvasWidth) * this.effectiveZoom);
+    const normalizedY = clipY / ((rect.height / this.canvasHeight) * this.effectiveZoom);
     return {
-      x: ((deviceX - rect.x) / rect.width) * this.arenaWidth,
-      y: ((deviceY - rect.y) / rect.height) * this.arenaHeight,
+      x: (normalizedX / 2 + 0.5) * this.arenaWidth,
+      y: (0.5 - normalizedY / 2) * this.arenaHeight,
     };
   }
 
@@ -43,8 +56,8 @@ export class Viewport {
     const normalizedX = (x / this.arenaWidth - 0.5) * 2;
     const normalizedY = (0.5 - y / this.arenaHeight) * 2;
     return {
-      x: normalizedX * (rect.width / this.canvasWidth) * this.inspectZoom,
-      y: normalizedY * (rect.height / this.canvasHeight) * this.inspectZoom,
+      x: normalizedX * (rect.width / this.canvasWidth) * this.effectiveZoom,
+      y: normalizedY * (rect.height / this.canvasHeight) * this.effectiveZoom,
     };
   }
 }

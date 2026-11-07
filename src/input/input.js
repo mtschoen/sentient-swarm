@@ -53,6 +53,7 @@ export function createInput(canvas, viewport, { windowObject = window, navigator
     state.aim = sumClamped(gamepad.aim, touch.aim);
     state.firing = gamepad.firing || touch.firing;
     state.bomb = gamepad.bomb;
+    pointer.update();
     state.pointerWorld = pointer.world;
     state.pointerPrimaryDown = pointer.primaryDown;
   }
