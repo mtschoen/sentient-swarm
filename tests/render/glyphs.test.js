@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GLYPH_VIEW_BYTES, packGlyphView } from '../../src/render/glyphs.js';
+import { GLYPH_VIEW_BYTES, glyphCoverageScale, packGlyphView } from '../../src/render/glyphs.js';
 import { Viewport } from '../../src/render/viewport.js';
 
 const settings = { glyphDevicePixels: 4, glowScale: 2, trailDecay: 0.9, bloomStrength: 0.8 };
@@ -12,9 +12,21 @@ function applyTransform(view, x, y) {
 test('packGlyphView fills the 48-byte GlyphView layout', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(1600, 900);
-  const view = packGlyphView({ viewport, settings, alpha: 0.25, time: 3 });
+  const view = packGlyphView({ viewport, settings, alpha: 0.25, time: 3, emissionScale: 0.5 });
   assert.equal(view.byteLength, GLYPH_VIEW_BYTES);
-  assert.deepEqual(Array.from(view.slice(4)), Array.from(new Float32Array([2 / 1600, 2 / 900, 4, 2, 0.25, 3, 0, 0])));
+  // A 1600 by 900 arena has 25 by 25 device-pixel coarse cells; a 4-pixel glyph covers 16 / 625.
+  assert.deepEqual(Array.from(view.slice(4)), Array.from(new Float32Array([2 / 1600, 2 / 900, 4, 2, 0.25, 3, 16 / 625, 0.5])));
+});
+
+test('glyph coverage grows as the arena shrinks and ignores the inspect zoom', () => {
+  const large = new Viewport();
+  large.setCanvasSize(1280, 720);
+  const small = new Viewport();
+  small.setCanvasSize(800, 1200);
+  assert.ok(Math.abs(glyphCoverageScale(large, 4) - 16 / 400) < 1e-12);
+  assert.ok(Math.abs(glyphCoverageScale(small, 4) / glyphCoverageScale(large, 4) - (1280 * 720) / (800 * 450)) < 1e-9);
+  small.inspectZoom = 4;
+  assert.equal(packGlyphView({ viewport: small, settings, alpha: 0, time: 0 })[10], Math.fround(glyphCoverageScale(small, 4)));
 });
 
 test('packGlyphView world-to-clip transform matches viewport.worldToClip, zoom included', () => {

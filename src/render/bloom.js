@@ -1,4 +1,5 @@
-// Bloom: downsample the scene to half resolution (bloom_downsample.wgsl), then blur it separably
+// Bloom: downsample the scene plus the warp grid layer to half resolution (bloom_downsample.wgsl),
+// so threat-lit grid ripples glow too, then blur it separably
 // (bloom_blur.wgsl): horizontal from first into second, vertical from second back into first.
 // outputTexture holds the result after encode.
 import { createUniformBuffer } from '../gpu/buffers.js';
@@ -47,7 +48,7 @@ export class BloomPass {
   get outputTexture() { return this.textures[0]; }
 
   // Recreates both half-resolution textures and every bind group that references a texture.
-  resize(sceneTextures, widthDevicePixels, heightDevicePixels) {
+  resize(sceneTextures, gridTexture, widthDevicePixels, heightDevicePixels) {
     this.destroyTextures();
     const size = [Math.max(1, Math.floor(widthDevicePixels / 2)), Math.max(1, Math.floor(heightDevicePixels / 2))];
     this.textures = [0, 1].map((index) => this.device.createTexture({
@@ -57,10 +58,11 @@ export class BloomPass {
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     }));
     this.views = this.textures.map((texture) => texture.createView());
+    const gridView = gridTexture.createView();
     this.downsampleBindGroups = sceneTextures.map((texture, index) => this.device.createBindGroup({
       label: 'bloom-downsample-' + index,
       layout: this.downsamplePipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: texture.createView() }, { binding: 1, resource: this.sampler }],
+      entries: [{ binding: 0, resource: texture.createView() }, { binding: 1, resource: this.sampler }, { binding: 2, resource: gridView }],
     }));
     const blurBindGroup = (label, buffer, view) => this.device.createBindGroup({
       label,

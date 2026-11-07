@@ -25,6 +25,10 @@ const MINIMUM_ALIVE_TOTAL = 1000;
 const MINIMUM_LUMINANCE = 0.02;
 const MAXIMUM_LUMINANCE = 0.6;
 const RESIZE_WINDOW_FRAMES = 60;
+// A resize recreates (clears) the trail textures; 60 frames at decay 0.9 bring them back to their
+// steady state (0.9^60 is 0.2 percent), so the luminance capture after the resize check is not
+// read from half-built trails.
+const TRAIL_SETTLE_FRAMES = 60;
 const RESIZE_TOLERANCE = 0.05;
 const PORTRAIT_VIEWPORT = { width: 800, height: 1200 };
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
@@ -100,7 +104,7 @@ async function checkResize(page) {
   console.log(`smoke: resize aliveTotal ${earlier} -> ${before} -> ${after}, arenaRect ${JSON.stringify(arenaRect)}, top band luminance ${band.toFixed(4)}`);
   await page.setViewportSize(DEFAULT_VIEWPORT);
   const restored = await readFrame();
-  await waitForFrame(page, restored + 5);
+  await waitForFrame(page, restored + TRAIL_SETTLE_FRAMES);
   return page.consoleErrors.length > 0 ? `smoke: console errors after resize: ${page.consoleErrors.join(' | ')}` : null;
 }
 

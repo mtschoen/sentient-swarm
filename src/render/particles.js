@@ -14,14 +14,14 @@ const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 
 // Matches the ParticleView table in particles.wgsl. Same affine world-to-clip sampling as
 // packGlyphView, so the inspect zoom applies; the quad size also grows with the zoom.
-export function packParticleView({ viewport, particleDevicePixels = PARTICLE_DEVICE_PIXELS }) {
+export function packParticleView({ viewport, particleDevicePixels = PARTICLE_DEVICE_PIXELS, emissionScale = 1 }) {
   const origin = viewport.worldToClip(0, 0);
   const unit = viewport.worldToClip(1, 1);
   return new Float32Array([
     unit.x - origin.x, unit.y - origin.y,
     origin.x, origin.y,
     2 / viewport.canvasWidth, 2 / viewport.canvasHeight,
-    particleDevicePixels * viewport.inspectZoom, 0,
+    particleDevicePixels * viewport.effectiveZoom, emissionScale,
   ]);
 }
 
@@ -56,8 +56,8 @@ export class ParticleRenderer {
 
   // Draws into an open render pass whose color target is a scene texture; Renderer passes
   // simulation.particlePool every frame.
-  encode(pass, pool) {
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packParticleView({ viewport: this.viewport }));
+  encode(pass, pool, emissionScale = 1) {
+    this.device.queue.writeBuffer(this.viewBuffer, 0, packParticleView({ viewport: this.viewport, emissionScale }));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, pool.buffers.particles]));
     pass.draw(VERTICES_PER_PARTICLE, pool.capacity);

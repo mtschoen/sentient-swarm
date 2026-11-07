@@ -1,4 +1,5 @@
-// Fixed-step accumulator loop: update runs in whole fixed steps, render gets the leftover fraction.
+// Fixed-step accumulator loop: update runs in whole fixed steps, render gets the leftover fraction
+// and the seconds since the previous frame.
 export class FrameLoop {
   constructor({
     update,
@@ -52,7 +53,7 @@ export class FrameLoop {
       this.accumulator -= this.fixedStep;
     }
     this.accumulator = Math.max(0, this.accumulator);
-    this.render(this.accumulator / this.fixedStep);
+    this.render(this.accumulator / this.fixedStep, elapsedSeconds);
     this.frameCount += 1;
     if (this.running) this.schedule();
   }

@@ -82,9 +82,9 @@ async function boot() {
     }
   };
 
-  const render = (alpha) => {
+  const render = (alpha, deltaSeconds) => {
     const encoder = gpu.device.createCommandEncoder();
-    renderer.render(encoder, { alpha, time: simulation.time });
+    renderer.render(encoder, { alpha, time: simulation.time, deltaSeconds });
     gpu.device.queue.submit([encoder.finish()]);
     renderer.afterSubmit();
     window.__murmuration.frame = loop.frameCount;

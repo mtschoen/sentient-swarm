@@ -6,9 +6,9 @@ import { Viewport } from '../../src/render/viewport.js';
 test('packParticleView fills the 32-byte ParticleView layout', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(1600, 900);
-  const view = packParticleView({ viewport });
+  const view = packParticleView({ viewport, emissionScale: 0.25 });
   assert.equal(view.byteLength, PARTICLE_VIEW_BYTES);
-  assert.deepEqual(Array.from(view.slice(4)), Array.from(new Float32Array([2 / 1600, 2 / 900, PARTICLE_DEVICE_PIXELS, 0])));
+  assert.deepEqual(Array.from(view.slice(4)), Array.from(new Float32Array([2 / 1600, 2 / 900, PARTICLE_DEVICE_PIXELS, 0.25])));
 });
 
 test('packParticleView world-to-clip matches viewport.worldToClip and the size grows with the zoom', () => {

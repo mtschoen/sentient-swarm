@@ -46,8 +46,18 @@ The spawn ramp takes 90 seconds, so the alive count passes 900,000 only near the
 
 The same run held a plateau of 304,727 alive agents from about 10 to 20 seconds. That was a spawn overshoot: read-back stats lag the GPU by several steps (more when one animation frame runs several fixed steps), and the spawner requested the same deficit again on every lagging step, so the alive count overshot the ramping target about twofold and then waited for the target to pass it. SpawnPressure now counts the spawns requested for steps newer than the stats it has seen, and the simulation browser check runs main.js's cadence and fails above 1.05 times the target. The table predates that fix. Reproduce with a script that launches `launchWebGpuBrowser({ measuring: true })` from `tests/browser/launch.mjs`, opens the page with `?capacity=1048576`, and samples `window.__murmuration.frame` and `stats.aliveTotal` every 10 seconds.
 
+Arena mean luminance (Rec. 709 over the arena rect of a captured frame, 0 black to 1 white), 262,144 slots, 1280 by 720, the same machine:
+
+| When | Arena mean luminance |
+| --- | --- |
+| `npm run smoke -- --frames 300` capture | 0.2844 |
+| Full ramp, about 95 seconds in (235,929 alive) | 0.5049 |
+
+The smoke fails above 0.6. Reproduce the full-ramp number with a script that opens the page with `?capacity=262144`, waits about 95 seconds and reads `meanLuminance` from `window.__murmuration.capture()`.
+
 ## Tuning notes
 
 - Averaged separation cancels inside a uniform crowd, so the coarse pressure term sets spacing. Lattice with `targetDensity` 150 per coarse cell settles at about 0.02 world units, one fifth of the neighbor radius.
 - Lattice sheets breathe: an undamped pressure spring against low acceleration. Damping is a lab item for Plan C.
+- Brightness: each glyph is divided by 1 + 4 times the fraction of its coarse cell that glyph bodies cover on screen (`COVERAGE_ATTENUATION` in `glyphs.wgsl`), so a crowd levels off near a quarter of a glyph per pixel at any arena size. The composite tonemaps luminance and keeps hue, so dense cores stay colored instead of white. Trails decay per elapsed time (`trailDecay` is the fraction kept per 1/60 second) and emission is scaled to match, so trail length and brightness do not depend on the refresh rate.
 - Straight seek brakes near the player (`ARRIVAL_BRAKING` 0.7 in `steer.wgsl`), so swarms with pressure off collapse onto the player instead of oscillating through it.

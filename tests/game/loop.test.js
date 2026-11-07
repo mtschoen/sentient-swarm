@@ -5,10 +5,13 @@ import { FrameLoop } from '../../src/game/loop.js';
 function createHarness(options = {}) {
   let time = 0;
   let pending = null;
-  const calls = { update: [], render: [] };
+  const calls = { update: [], render: [], renderDelta: [] };
   const loop = new FrameLoop({
     update: (step) => calls.update.push(step),
-    render: (alpha) => calls.render.push(alpha),
+    render: (alpha, deltaSeconds) => {
+      calls.render.push(alpha);
+      calls.renderDelta.push(deltaSeconds);
+    },
     now: () => time,
     requestFrame: (callback) => {
       pending = callback;
@@ -39,6 +42,14 @@ test('a 50 ms gap runs three fixed updates and one render', () => {
   const expectedAlpha = (50 / 1000 - 3 / 60) * 60;
   assert.ok(Math.abs(harness.calls.render[0] - expectedAlpha) < 1e-9);
   assert.equal(harness.loop.frameCount, 1);
+});
+
+test('render receives the elapsed seconds since the previous frame', () => {
+  const harness = createHarness();
+  harness.loop.start();
+  harness.advance(8);
+  harness.advance(25);
+  assert.deepEqual(harness.calls.renderDelta.map((seconds) => Math.round(seconds * 1000)), [8, 25]);
 });
 
 test('a 1 s gap clamps to maximumSubsteps updates', () => {

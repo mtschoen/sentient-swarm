@@ -5,7 +5,7 @@
 //
 // Frame contract, its own submission after the simulation's:
 //   const encoder = device.createCommandEncoder();
-//   renderer.render(encoder, { alpha, time });
+//   renderer.render(encoder, { alpha, time, deltaSeconds }); // deltaSeconds: since the last render
 //   device.queue.submit([encoder.finish()]);
 //   renderer.afterSubmit(); // maps a pending captureNextFrame readback
 // settings are read every frame, so they can be changed live.
@@ -17,7 +17,7 @@ import { CompositePass } from './composite.js';
 import { GlyphPass } from './glyphs.js';
 import { ParticleRenderer } from './particles.js';
 import { SCENE_FORMAT, loadFullscreenHeader } from './render-shaders.js';
-import { TrailDecayPass } from './trails.js';
+import { TrailDecayPass, trailFrameFactors } from './trails.js';
 import { WarpGrid } from './warpgrid.js';
 
 export const DEFAULT_RENDER_SETTINGS = {
@@ -88,13 +88,13 @@ export class Renderer {
     });
     this.gridView = this.gridTexture.createView();
     this.trails.setSceneTextures(this.sceneTextures);
-    this.bloom.resize(this.sceneTextures, size[0], size[1]);
+    this.bloom.resize(this.sceneTextures, this.gridTexture, size[0], size[1]);
     this.composite.setTextures(this.sceneTextures, this.bloom.outputTexture, this.gridTexture);
     this.currentIndex = 0;
   }
 
   // Returns false, encoding nothing, while a just-installed simulation has not stepped yet.
-  render(encoder, { alpha, time }) {
+  render(encoder, { alpha, time, deltaSeconds = 1 / 60 }) {
     if (this.simulation.frameSequence < this.firstDrawableSequence) return false;
     const previousIndex = this.currentIndex;
     const currentIndex = 1 - previousIndex;
@@ -112,9 +112,10 @@ export class Renderer {
       label: 'scene',
       colorAttachments: [{ view: this.sceneViews[currentIndex], loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 0 } }],
     });
-    this.trails.draw(scenePass, previousIndex, settings.trailDecay);
-    this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time });
-    this.particles.encode(scenePass, simulation.particlePool);
+    const { decay, emissionScale } = trailFrameFactors(settings.trailDecay, deltaSeconds);
+    this.trails.draw(scenePass, previousIndex, decay);
+    this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time, emissionScale });
+    this.particles.encode(scenePass, simulation.particlePool, emissionScale);
     scenePass.end();
     this.bloom.encode(encoder, currentIndex);
     const swapchainTexture = this.gpu.context.getCurrentTexture();

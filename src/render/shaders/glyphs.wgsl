@@ -3,6 +3,11 @@
 // The quad is glyphDevicePixels * glowScale device pixels wide, rotated to face the velocity;
 // local coordinates put the glyph body inside radius 1 and the glow out to radius glowScale.
 // Position is extrapolated by velocity * alpha * dt so rendering between fixed steps stays smooth.
+// Density attenuation works in screen coverage: the coarse density (agents per cell) times
+// coverageScale (glyph body area over coarse cell area, in device pixels) is the fraction of the
+// cell that glyph bodies cover, and each glyph is divided by 1 + COVERAGE_ATTENUATION * coverage,
+// so a crowd's summed radiance per pixel levels off near 1 / COVERAGE_ATTENUATION glyphs at any
+// arena size. emissionScale (trailFrameFactors) keeps steady-state brightness refresh-independent.
 
 // Uniform layout (byte offsets), total 48 bytes; packGlyphView in glyphs.js writes it.
 //   0 worldToClipScale    vec2f
@@ -12,7 +17,8 @@
 //  28 glowScale           f32
 //  32 alpha               f32
 //  36 time                f32
-//  40 padding             vec2f
+//  40 coverageScale       f32 (glyph body area / coarse cell area, device pixels)
+//  44 emissionScale       f32
 struct GlyphView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
@@ -21,7 +27,8 @@ struct GlyphView {
   glowScale: f32,
   alpha: f32,
   time: f32,
-  padding: vec2f,
+  coverageScale: f32,
+  emissionScale: f32,
 }
 
 @group(0) @binding(0) var<uniform> view: GlyphView;
@@ -32,7 +39,7 @@ struct GlyphView {
 
 const HUE_JITTER_RANGE: f32 = 0.03;
 const GLYPH_SATURATION: f32 = 0.8;
-const DENSITY_ATTENUATION: f32 = 0.02;
+const COVERAGE_ATTENUATION: f32 = 4.0;
 const GLOW_INTENSITY: f32 = 0.35;
 const GLOW_FALLOFF: f32 = 2.5;
 const SPAWN_PULSE_RATE: f32 = 18.0;
@@ -48,7 +55,9 @@ struct GlyphVaryings {
 fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> GlyphVaryings {
   var output: GlyphVaryings;
   let agent = agents[instanceIndex];
-  if (!isAlive(agent.flags)) {
+  // A zero glyph or glow size (the smoke hides glyphs this way) collapses early, so the fragment
+  // stage never divides by it.
+  if (!isAlive(agent.flags) || view.glyphDevicePixels <= 0.0 || view.glowScale <= 0.0) {
     output.position = vec4f(2.0, 2.0, 0.0, 1.0);
     output.local = vec2f(0.0);
     output.color = vec3f(0.0);
@@ -74,11 +83,12 @@ fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
   let cell = coarseCellIndexFor(position);
   let densities = field[cell * 2u];
   let localDensity = densities.x + densities.y + densities.z + densities.w + field[cell * 2u + 1u].x;
-  var alpha = select(calmPulse, spawnPulse, spawning) / (1.0 + DENSITY_ATTENUATION * localDensity);
+  let coverage = localDensity * view.coverageScale;
+  var alpha = select(calmPulse, spawnPulse, spawning) / (1.0 + COVERAGE_ATTENUATION * coverage);
   if (spawning) {
     alpha *= 0.5;
   }
-  output.color = rgb * alpha;
+  output.color = rgb * alpha * view.emissionScale;
   output.shape = agent.species;
   return output;
 }

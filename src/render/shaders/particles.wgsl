@@ -8,13 +8,13 @@
 //   8 worldToClipOffset      vec2f
 //  16 devicePixelToClip      vec2f
 //  24 particleDevicePixels   f32 (already multiplied by the inspect zoom)
-//  28 padding                f32
+//  28 emissionScale          f32 (trailFrameFactors)
 struct ParticleView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
   devicePixelToClip: vec2f,
   particleDevicePixels: f32,
-  padding: f32,
+  emissionScale: f32,
 }
 
 @group(0) @binding(0) var<uniform> view: ParticleView;
@@ -44,7 +44,7 @@ fn particleVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_ind
   output.position = vec4f(center + offsetDevicePixels * view.devicePixelToClip * vec2f(1.0, -1.0), 0.0, 1.0);
   output.local = corner;
   let fade = 1.0 - clamp(particle.age / particle.lifetime, 0.0, 1.0);
-  output.color = unpack4x8unorm(particle.color).rgb * fade * PARTICLE_INTENSITY;
+  output.color = unpack4x8unorm(particle.color).rgb * fade * PARTICLE_INTENSITY * view.emissionScale;
   return output;
 }
 
