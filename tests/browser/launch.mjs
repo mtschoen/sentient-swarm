@@ -7,6 +7,8 @@ const WEBGPU_FLAGS = [
   '--enable-unsafe-webgpu',
   '--use-angle=d3d11',
   '--ignore-gpu-blocklist',
+  // Without this, requestDevice fails here: dxcompiler.dll cannot load (Windows Error 87).
+  '--disable-dawn-features=use_dxc',
 ];
 const UNCAPPED_FRAME_FLAGS = ['--disable-gpu-vsync', '--disable-frame-rate-limit'];
 
