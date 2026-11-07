@@ -447,7 +447,8 @@ async function checkNeighborCap(gpu, common) {
 // (f) The default species mix (equal shares, all five species) at the 262144 capacity, seeded
 // uniformly with the player fixed at the center, for 900 steps: fewer than 15 percent of the
 // agents sit within 1.0 world unit of the player, and no coarse cell holds more than 4 times the
-// capacity-average density per cell (the average of the population under test, stricter than the capacity average at the sparse sizes).
+// capacity-average density per cell (the average of the population under test, which is stricter
+// than the capacity average at the sparse sizes).
 // Seeding is uniform over the arena; it does not mirror the spawner's geography (at least a quarter
 // arena width from the player).
 // The same check also runs at SPARSE_CLUMP_COUNT agents, the population while the demo ramps up

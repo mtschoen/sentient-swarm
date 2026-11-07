@@ -12,13 +12,16 @@
 //   sameSpeciesCohesion is 0), faded by clamp(1 - density / targetDensity)
 //   where density is the total at the agent's cell; the matrix row along the signed sum of the
 //   other species' gradients; flee down the threat gradient; pressure down the total-density
-//   gradient with weight min(pressure * (density - targetDensity), PRESSURE_MAXIMUM_MULTIPLE) once density exceeds targetDensity;
-//   like the other field terms its direction saturates (saturatedDirection), so float noise in a
-//   flat over-dense interior pushes weakly instead of at full strength in a random direction.
+//   gradient with weight min(pressure * (density - targetDensity), PRESSURE_MAXIMUM_MULTIPLE) once
+//   density exceeds targetDensity. The clamp is one-sided: negative pressure is not valid (species
+//   defaults are non-negative). Like the other field terms its direction saturates
+//   (saturatedDirection), so float noise in a flat over-dense interior pushes weakly instead of at
+//   full strength in a random direction.
 //
 // Every term adds to a desired velocity: weight times a direction of length at most 1 times
-// maximumSpeed, except seek (weight times seekVelocity, which brakes near the player) and
-// alignment (weight times the average neighbor velocity). The steering acceleration is
+// maximumSpeed, except seek (weight times seekVelocity, which brakes near the player), alignment
+// (weight times the average neighbor velocity) and pressure (at most PRESSURE_MAXIMUM_MULTIPLE
+// times maximumSpeed, so up to 2x maximumSpeed). The steering acceleration is
 // (desired - velocity) * STEERING_RESPONSE, clamped to maximumTurn * maximumSpeed; the new
 // speed is clamped to maximumSpeed.
 
@@ -94,6 +97,8 @@ fn saturatedDirection(gradient: vec2f) -> vec2f {
 // the circle of that radius around the player (inward when outside it, outward when inside),
 // except within ORBIT_TANGENT_BAND * orbitRadius of the circle, where the agent follows the
 // counterclockwise tangent so every orbiter circles with the same handedness. Orbits never brake.
+// Straight seek (orbitRadius 0) also fades by smoothstep over COMFORT_RADIUS around the player;
+// orbit seek is unchanged.
 fn seekVelocity(position: vec2f, orbitRadius: f32, maximumSpeed: f32, maximumAcceleration: f32) -> vec2f {
   let toPlayer = params.playerPosition - position;
   let distance = length(toPlayer);
