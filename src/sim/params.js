@@ -1,12 +1,15 @@
 // Packs the SimParams uniform. Byte layout matches the table at the top of common.wgsl.
 import { SPECIES_COUNT } from './layout.js';
 
-export const SIM_PARAMS_BYTES = 96;
+export const SIM_PARAMS_BYTES = 112;
 
-const FLOAT_FIELDS = { dt: 0, time: 4, neighborRadius: 16, cellSize: 28, debugKillRadius: 80 };
+const FLOAT_FIELDS = { dt: 0, time: 4, neighborRadius: 16, cellSize: 28, debugKillRadius: 80, playerRadius: 92 };
 // aliveTarget is reserved: Simulation.step never writes it and no shader reads it (SpawnPressure
 // keeps the target on the CPU).
-const UNSIGNED_FIELDS = { gridColumns: 20, gridRows: 24, capacity: 32, aliveTarget: 36, frameSequence: 84 };
+const UNSIGNED_FIELDS = {
+  gridColumns: 20, gridRows: 24, capacity: 32, aliveTarget: 36, frameSequence: 84,
+  playerInvulnerable: 96, acknowledgedHitSequence: 100, killAllRequested: 104,
+};
 // 1 steers cohesion up the own-species density gradient, 0 up the total-density gradient.
 const SAME_SPECIES_COHESION_OFFSET = 88;
 const VECTOR_FIELDS = { playerPosition: 8, debugKillPosition: 40 };

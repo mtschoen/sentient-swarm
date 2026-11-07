@@ -26,6 +26,22 @@ export function agentBufferBytes(capacity) {
   return capacity * AGENT_STRIDE_BYTES;
 }
 
+// Stats buffer words (u32). Words below STATS_PERSISTENT_WORD are per frame: the step clears them
+// before any pass runs. Words from STATS_PERSISTENT_WORD on persist across steps (the clear skips
+// them) and carry cross-frame state: the cumulative scored kills and the player hit latch. Both regions keep spare words
+// so later stats extend the layout without moving existing indices.
+export const STATS_INDICES = {
+  aliveTotal: 0,
+  firstSpecies: 1,
+  frameSequence: 7,
+  killsUnscored: 8,
+  playerHitSequence: 16,
+  hitLatch: 17,
+  kills: 18,
+};
+export const STATS_PERSISTENT_WORD = 16;
+export const STATS_WORD_COUNT = 24;
+
 // Token values for substituteConstants on common.wgsl and every compute shader.
 export const SHADER_CONSTANTS = {
   WORKGROUP_SIZE,
@@ -34,4 +50,12 @@ export const SHADER_CONSTANTS = {
   COARSE_COLUMNS,
   COARSE_ROWS,
   COARSE_CHANNELS,
+  STATS_WORD_COUNT,
+  STAT_ALIVE_TOTAL: STATS_INDICES.aliveTotal,
+  STAT_FIRST_SPECIES: STATS_INDICES.firstSpecies,
+  STAT_KILLS: STATS_INDICES.kills,
+  STAT_FRAME_SEQUENCE: STATS_INDICES.frameSequence,
+  STAT_KILLS_UNSCORED: STATS_INDICES.killsUnscored,
+  STAT_PLAYER_HIT_SEQUENCE: STATS_INDICES.playerHitSequence,
+  STAT_HIT_LATCH: STATS_INDICES.hitLatch,
 };

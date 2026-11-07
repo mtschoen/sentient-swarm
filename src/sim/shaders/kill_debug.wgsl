@@ -21,12 +21,11 @@ struct AtomicAgent {
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read_write> agents: array<AtomicAgent>;
-@group(0) @binding(2) var<storage, read_write> stats: array<atomic<u32>, 8>;
+@group(0) @binding(2) var<storage, read_write> stats: array<atomic<u32>, STATS_WORD_COUNT>;
 @group(0) @binding(3) var<storage, read_write> pool: ParticlePool;
 @group(0) @binding(4) var<storage, read_write> threatAccumulator: array<atomic<u32>>;
 @group(0) @binding(5) var<storage, read> speciesTable: array<f32>;
 
-const STAT_KILLS: u32 = 6u;
 const KILL_PARTICLE_COUNT: u32 = 6u;
 
 var<workgroup> workgroupKills: atomic<u32>;

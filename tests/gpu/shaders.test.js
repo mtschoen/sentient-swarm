@@ -2,15 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { loadShader, substituteConstants, prependCommon } from '../../src/gpu/shaders.js';
-
-const constants = {
-  WORKGROUP_SIZE: 256,
-  SPECIES_COUNT: 5,
-  MAXIMUM_NEIGHBOR_SAMPLES: 32,
-  COARSE_COLUMNS: 64,
-  COARSE_ROWS: 36,
-  COARSE_CHANNELS: 8,
-};
+import { SHADER_CONSTANTS } from '../../src/sim/layout.js';
 
 test('substituteConstants replaces every token occurrence', () => {
   assert.equal(substituteConstants('a __X__ b __X__ __Y__', { X: 1, Y: 'two' }), 'a 1 b 1 two');
@@ -48,7 +40,7 @@ test('prependCommon puts the common header first', () => {
 
 test('common.wgsl resolves fully with the standard constants', async () => {
   const text = await readFile(new URL('../../src/sim/shaders/common.wgsl', import.meta.url), 'utf8');
-  const result = substituteConstants(text, constants);
+  const result = substituteConstants(text, SHADER_CONSTANTS);
   assert.ok(!result.includes('__'));
   assert.ok(result.includes('struct Agent'));
   assert.ok(result.includes('struct SimParams'));

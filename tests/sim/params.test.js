@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SIM_PARAMS_BYTES, packSimParams } from '../../src/sim/params.js';
 
-test('packSimParams produces the 96-byte uniform layout', () => {
+test('packSimParams produces the 112-byte uniform layout', () => {
   const buffer = packSimParams({
     dt: 0.5,
     gridColumns: 160,
@@ -12,7 +12,7 @@ test('packSimParams produces the 96-byte uniform layout', () => {
     playerPosition: [3, 4],
     spawnPerSpecies: [1, 2, 3, 4, 5],
   });
-  assert.equal(SIM_PARAMS_BYTES, 96);
+  assert.equal(SIM_PARAMS_BYTES, 112);
   assert.equal(buffer.byteLength, SIM_PARAMS_BYTES);
   const view = new DataView(buffer);
   assert.equal(view.getFloat32(0, true), 0.5);
@@ -41,4 +41,13 @@ test('packSimParams writes sameSpeciesCohesion at byte offset 88', () => {
 
 test('packSimParams rejects more spawn counts than species', () => {
   assert.throws(() => packSimParams({ spawnPerSpecies: [1, 1, 1, 1, 1, 1] }), /at most 5 species/);
+});
+
+test('packSimParams writes the player contact and kill-all fields', () => {
+  const view = new DataView(packSimParams({ playerRadius: 0.25, playerInvulnerable: 1, acknowledgedHitSequence: 77, killAllRequested: 1 }));
+  assert.equal(view.getFloat32(92, true), 0.25);
+  assert.equal(view.getUint32(96, true), 1);
+  assert.equal(view.getUint32(100, true), 77);
+  assert.equal(view.getUint32(104, true), 1);
+  assert.equal(view.getUint32(108, true), 0);
 });

@@ -56,7 +56,6 @@ struct SpeciesHues {
 @group(0) @binding(8) var<storage, read_write> threatAccumulator: array<atomic<u32>>;
 @group(0) @binding(9) var<storage, read_write> stats: array<atomic<u32>>;
 
-const STAT_KILLS: u32 = 6u;
 const KILL_PARTICLE_COUNT: u32 = 4u;
 const CAPSULE_KILL_MARGIN: f32 = 0.02;
 const CAPSULE_CELL_BUDGET: u32 = 64u;

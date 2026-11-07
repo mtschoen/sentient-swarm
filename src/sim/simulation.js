@@ -13,29 +13,40 @@
 // ring and returns the newest ready frame, a few frames behind, so poll it every step.
 //
 // step order: frameSequence and time advance; params and spawn budget are written; the stats
-// alive counters are cleared (kills stay cumulative); spawn on agentsIn; grid and coarse field on
-// agentsIn; steer agentsIn to agentsOut plus integrate; registered passes in registration order
-// (registerPass); debug kill on agentsOut (skipped when no kill is armed; the arm lasts one step,
-// so callers re-arm every frame while the button is held); particle step; stats on agentsOut;
-// copy stats into the staging ring; swap, so agentsBuffer is the newest output.
+// buffer's per-frame prefix is cleared (its persistent tail, holding the cumulative kills, the hit
+// latch and playerHitSequence, is not); spawn on agentsIn; grid and coarse field on agentsIn; steer agentsIn
+// to agentsOut plus integrate; kill-all (only in the step after requestKillAll); registered passes
+// in registration order (registerPass); player contact (once setPlayerState has been called);
+// debug kill on agentsOut (skipped when no kill is armed; the arm lasts one step, so callers
+// re-arm every frame while the button is held); particle step; stats on agentsOut; copy stats
+// into the staging ring; swap, so agentsBuffer is the newest output. So a bomb kills before
+// projectiles, and projectiles kill before contact is tested.
+//
+// Player contact: the GPU latches the first touch (stats playerHitSequence = that frameSequence,
+// hitLatch = 1) and reports no further hit until acknowledgeHit(sequence) reaches it; the latch
+// clears in the first step whose params carry the acknowledgement. The game acknowledges every
+// sequence it reads, accepted or not, and ignores sequences that predate its current respawn.
 //
 // A registered pass is encodeFunction(encoder, context) with context { agentsBuffer (agentsOut,
 // freshly integrated), gridBuffers (built from agentsIn, so cell membership is one step stale),
-// fieldBuffers, particlePool, statsBuffer (alive counters cleared this step; kill passes add to its
-// cumulative kills index), paramsBuffer, speciesTableBuffer }.
+// fieldBuffers, particlePool, statsBuffer (per-frame prefix cleared this step; kill passes add to
+// its cumulative kills index), paramsBuffer, speciesTableBuffer }.
 import { StagingRing, createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { AgentCompaction } from './compact.js';
 import { CoarseField } from './field.js';
 import { SpatialGrid } from './grid.js';
-import { DebugKillPass } from './kill.js';
+import { DebugKillPass, KillAllPass, PlayerContactPass } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
 import { SIM_PARAMS_BYTES, packSimParams } from './params.js';
 import { Spawner } from './spawn.js';
 import { defaultMatrix, defaultSpecies, normalizeShares, packSpeciesTable } from './species.js';
-import { STATS_BYTES, STATS_CLEARED_BYTES, StatsPass, decodeStats } from './stats.js';
+import { STATS_BYTES, STATS_PERSISTENT_OFFSET_BYTES, StatsPass, decodeStats } from './stats.js';
 import { Steering } from './steer.js';
+
+// PlayerShip's default radius (src/game/player.js).
+const DEFAULT_PLAYER_RADIUS = 0.12;
 
 export class Simulation {
   static async create(gpu, {
@@ -67,6 +78,8 @@ export class Simulation {
       simulation.spawner.initialize(),
       simulation.statsPass.initialize(),
       simulation.killPass.initialize(),
+      simulation.killAllPass.initialize(),
+      simulation.playerContactPass.initialize(),
       simulation.particlePoolValue.initialize(),
     ]);
     return simulation;
@@ -86,6 +99,8 @@ export class Simulation {
     this.spawner = new Spawner(gpu, { common });
     this.statsPass = new StatsPass(gpu, { common });
     this.killPass = new DebugKillPass(gpu, { common });
+    this.killAllPass = new KillAllPass(gpu, { common });
+    this.playerContactPass = new PlayerContactPass(gpu, { common });
     this.particlePoolValue = new ParticlePool(gpu, { capacity: particleCapacity, common });
     // New buffers are zero-filled, so every slot starts dead.
     this.agentBuffers = [0, 1].map((index) => createStorageBuffer(this.device, agentBufferBytes(capacity), 'agents-' + index));
@@ -95,6 +110,10 @@ export class Simulation {
     this.statsBufferValue = createStorageBuffer(this.device, STATS_BYTES, 'stats');
     this.stagingRing = new StagingRing(this.device, STATS_BYTES);
     this.playerPosition = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
+    // Contact is off until the first setPlayerState, so the Plan A demo's pointer never hits.
+    this.playerContact = null;
+    this.acknowledgedHitSequence = 0;
+    this.killAllRequested = false;
     this.debugKillPosition = [0, 0];
     this.debugKillRadius = 0;
     this.frameSequenceValue = 0;
@@ -118,8 +137,28 @@ export class Simulation {
   get time() { return this.timeValue; }
   get shares() { return this.sharesValue; }
 
+  // Moves the player (the seek target) without touching the contact state.
   setPlayer(x, y) {
     this.playerPosition = [x, y];
+  }
+
+  // Moves the player and turns contact on with this radius and invulnerability; the game calls
+  // it every step.
+  setPlayerState({ x, y, radius = DEFAULT_PLAYER_RADIUS, invulnerable = false }) {
+    this.playerPosition = [x, y];
+    this.playerContact = { radius, invulnerable: Boolean(invulnerable) };
+  }
+
+  // Releases the hit latch once the GPU's playerHitSequence is at or below frameSequence. Never
+  // moves backwards.
+  acknowledgeHit(frameSequence) {
+    this.acknowledgedHitSequence = Math.max(this.acknowledgedHitSequence, frameSequence);
+  }
+
+  // Kills every agent, spawning ones included, in the next step only; those kills land in
+  // killsUnscored.
+  requestKillAll() {
+    this.killAllRequested = true;
   }
 
   // Arms a kill for the next step only (step consumes it); radius 0 disarms.
@@ -172,11 +211,17 @@ export class Simulation {
       spawnPerSpecies: Array.from(spawnPerSpecies),
       frameSequence: this.frameSequenceValue,
       sameSpeciesCohesion: this.sameSpeciesCohesion ? 1 : 0,
+      playerRadius: this.playerContact?.radius ?? 0,
+      playerInvulnerable: this.playerContact?.invulnerable ? 1 : 0,
+      acknowledgedHitSequence: this.acknowledgedHitSequence,
+      killAllRequested: this.killAllRequested ? 1 : 0,
     }));
     const killRadius = this.debugKillRadius;
     this.debugKillRadius = 0;
+    const killAll = this.killAllRequested;
+    this.killAllRequested = false;
     this.spawner.writeBudget(spawnPerSpecies);
-    encoder.clearBuffer(this.statsBufferValue, 0, STATS_CLEARED_BYTES);
+    encoder.clearBuffer(this.statsBufferValue, 0, STATS_PERSISTENT_OFFSET_BYTES);
     const agentsIn = this.agentBuffers[this.inputIndex];
     const agentsOut = this.agentBuffers[1 - this.inputIndex];
     const params = this.paramsBufferValue;
@@ -184,6 +229,15 @@ export class Simulation {
     this.grid.encode(encoder, agentsIn, params);
     this.field.encode(encoder, agentsIn, this.grid.buffers, params);
     this.steering.encode(encoder, agentsIn, agentsOut, this.grid.buffers, this.field.buffers.blurred, this.speciesTableBufferValue, params);
+    const killBuffers = {
+      agentsBuffer: agentsOut,
+      statsBuffer: this.statsBufferValue,
+      particleBuffers: this.particlePoolValue.buffers,
+      threatAccumulator: this.field.buffers.threatAccumulator,
+      speciesTableBuffer: this.speciesTableBufferValue,
+      paramsBuffer: params,
+    };
+    if (killAll) this.killAllPass.encode(encoder, killBuffers);
     if (this.registeredPasses.length > 0) {
       const context = {
         agentsBuffer: agentsOut,
@@ -196,16 +250,8 @@ export class Simulation {
       };
       this.registeredPasses.forEach((encodeFunction) => encodeFunction(encoder, context));
     }
-    if (killRadius > 0) {
-      this.killPass.encode(encoder, {
-        agentsBuffer: agentsOut,
-        statsBuffer: this.statsBufferValue,
-        particleBuffers: this.particlePoolValue.buffers,
-        threatAccumulator: this.field.buffers.threatAccumulator,
-        speciesTableBuffer: this.speciesTableBufferValue,
-        paramsBuffer: params,
-      });
-    }
+    if (this.playerContact !== null) this.playerContactPass.encode(encoder, { ...killBuffers, gridBuffers: this.grid.buffers });
+    if (killRadius > 0) this.killPass.encode(encoder, killBuffers);
     this.particlePoolValue.encodeStep(encoder, params);
     this.statsPass.encode(encoder, agentsOut, this.statsBufferValue, params);
     this.stagingRing.copyFrom(encoder, this.statsBufferValue);
@@ -243,7 +289,9 @@ export class Simulation {
   // (main.js pauses stepping through CapacitySwap), so the carried state is the final one.
   // The alive agents are compacted into the first slots of the new buffer: the grid is rebuilt on
   // the newest agents and compact.wgsl copies its listed agents in grid order, so a shrink keeps
-  // every alive agent that fits. The registered passes carry over. Species, matrix, shares and the cohesion mode are read again
+  // every alive agent that fits. The stats persistent tail (cumulative kills, hit latch and
+  // playerHitSequence), the registered passes, player state, acknowledged hit sequence and a
+  // pending kill-all carry over too. Species, matrix, shares and the cohesion mode are read again
   // after the awaits, so edits made meanwhile are not lost. On a rejection (allocation or
   // pipeline failure) this instance is untouched and still usable. Stats resume after the new
   // instance's next step.
@@ -272,6 +320,7 @@ export class Simulation {
       agentsOut: next.agentBuffers[next.inputIndex],
       targetCapacity: newCapacity,
     });
+    encoder.copyBufferToBuffer(this.statsBufferValue, STATS_PERSISTENT_OFFSET_BYTES, next.statsBufferValue, STATS_PERSISTENT_OFFSET_BYTES, STATS_BYTES - STATS_PERSISTENT_OFFSET_BYTES);
     this.device.queue.submit([encoder.finish()]);
     await this.device.queue.onSubmittedWorkDone();
     compaction.destroy();
@@ -282,6 +331,11 @@ export class Simulation {
     next.frameSequenceValue = this.frameSequenceValue;
     next.timeValue = this.timeValue;
     next.setPlayer(...this.playerPosition);
+    next.playerContact = this.playerContact === null ? null : { ...this.playerContact };
+    next.acknowledgedHitSequence = this.acknowledgedHitSequence;
+    // The kills counter came over with the tail, so differences continue from the last read.
+    next.lastKillsTotal = this.lastKillsTotal;
+    next.killAllRequested = this.killAllRequested;
     next.setDebugKill(...this.debugKillPosition, this.debugKillRadius);
     this.destroy();
     return next;

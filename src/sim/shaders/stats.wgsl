@@ -1,18 +1,17 @@
-// Stats, one thread per agent slot. Layout of stats (u32):
-//   0 aliveTotal, 1..5 alive per species, 6 kills, 7 frameSequence.
+// Stats, one thread per agent slot. Layout of stats (u32, STATS_INDICES in layout.js):
+//   0 aliveTotal, 1..5 alive per species, 6 spare, 7 frameSequence, 8 killsUnscored, then the
+//   persistent tail from 16 (playerHitSequence, hitLatch, kills).
 // Each workgroup counts its alive agents in workgroup atomics, then thread 0 flushes every
-// nonzero counter with one global atomicAdd. Global thread 0 stores params.frameSequence.
-// kills (index 6) is never touched here: the encoder clears only the alive counters (0..5) at the
-// start of the frame, and kill passes add to kills, which is cumulative. Threads past capacity read no agent but still reach the
+// nonzero counter with one global atomicAdd (the counters are words 0..SPECIES_COUNT). Global
+// thread 0 stores params.frameSequence. The kill words and the tail are never touched here: the
+// step clears the per-frame prefix at its start and kill passes add to killsUnscored there and to
+// kills, which sits in the tail and is cumulative. Threads past capacity read no agent but still reach the
 // barrier, which must stay in uniform control flow (FXC enforces this).
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read> agents: array<Agent>;
-@group(0) @binding(2) var<storage, read_write> stats: array<atomic<u32>, 8>;
+@group(0) @binding(2) var<storage, read_write> stats: array<atomic<u32>, STATS_WORD_COUNT>;
 
-const STAT_ALIVE_TOTAL: u32 = 0u;
-const STAT_FIRST_SPECIES: u32 = 1u;
-const STAT_FRAME_SEQUENCE: u32 = 7u;
 const COUNTER_COUNT: u32 = SPECIES_COUNT + 1u;
 
 var<workgroup> workgroupCounters: array<atomic<u32>, COUNTER_COUNT>;

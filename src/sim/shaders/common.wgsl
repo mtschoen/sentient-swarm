@@ -14,6 +14,17 @@ const ARENA_HEIGHT: f32 = 9.0;
 
 const TAU: f32 = 6.283185307;
 
+// Stats buffer word indices (STATS_INDICES in layout.js). Words from STATS_PERSISTENT_WORD on
+// survive the per-step clear.
+const STATS_WORD_COUNT: u32 = __STATS_WORD_COUNT__u;
+const STAT_ALIVE_TOTAL: u32 = __STAT_ALIVE_TOTAL__u;
+const STAT_FIRST_SPECIES: u32 = __STAT_FIRST_SPECIES__u;
+const STAT_KILLS: u32 = __STAT_KILLS__u;
+const STAT_FRAME_SEQUENCE: u32 = __STAT_FRAME_SEQUENCE__u;
+const STAT_KILLS_UNSCORED: u32 = __STAT_KILLS_UNSCORED__u;
+const STAT_PLAYER_HIT_SEQUENCE: u32 = __STAT_PLAYER_HIT_SEQUENCE__u;
+const STAT_HIT_LATCH: u32 = __STAT_HIT_LATCH__u;
+
 const FLAG_ALIVE: u32 = 1u;
 const SPAWN_FRAMES_SHIFT: u32 = 8u;
 const SPAWN_FRAMES_MASK: u32 = 255u;
@@ -30,7 +41,7 @@ struct Agent {
   hueJitter: f32,
 }
 
-// Uniform layout (byte offsets), total 96 bytes:
+// Uniform layout (byte offsets), total 112 bytes:
 //   0 dt                 f32
 //   4 time               f32
 //   8 playerPosition     vec2f
@@ -46,7 +57,11 @@ struct Agent {
 //  80 debugKillRadius    f32
 //  84 frameSequence      u32
 //  88 sameSpeciesCohesion u32 (1: own-species gradient, 0: total-density gradient)
-//  92 padding1           u32
+//  92 playerRadius       f32 (player contact reach is playerRadius + 0.02)
+//  96 playerInvulnerable u32 (1: contact never hits)
+// 100 acknowledgedHitSequence u32 (newest hit frameSequence the CPU has read)
+// 104 killAllRequested   u32 (1 only in the step that runs kill_all.wgsl)
+// 108 padding1           u32
 struct SimParams {
   dt: f32,
   time: f32,
@@ -63,6 +78,10 @@ struct SimParams {
   debugKillRadius: f32,
   frameSequence: u32,
   sameSpeciesCohesion: u32,
+  playerRadius: f32,
+  playerInvulnerable: u32,
+  acknowledgedHitSequence: u32,
+  killAllRequested: u32,
   padding1: u32,
 }
 
