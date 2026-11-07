@@ -30,12 +30,13 @@ Each animation frame `FrameLoop` runs zero or more fixed update steps, then one 
 
 ## File map
 
+- `src/audio/`: `audio.js` (`AudioEngine`, unlock on the first gesture), `sequencer.js` (`StepSequencer`), `music.js` (`ProceduralMusic`), `sfx.js` (`EffectsSynth`), `voices.js`, `intensity.js`, `audio-hook.js` (wiring, M to mute).
 - `src/game/`: `loop.js` (fixed-step `FrameLoop`).
 - `src/gpu/`: `device.js` (adapter, device, unsupported-browser copy), `buffers.js` (buffer helpers, `StagingRing`), `shaders.js` (shader loading and constant substitution), `bind-group-cache.js`.
 - `src/input/`: `input.js` (unified `InputState`), `keyboard.js`, `pointer.js`, `touch.js`, `gamepad.js`.
-- `src/render/`: `renderer.js` (frame order, settings), `viewport.js` (letterbox, inspect zoom), `canvas-size.js`, `glyphs.js`, `particles.js`, `trails.js`, `bloom.js`, `warpgrid.js`, `composite.js`, `render-shaders.js`, `capture.js` and `capture-hook.js` (frame readback for the smoke), `shaders/*.wgsl`.
+- `src/render/`: `renderer.js` (frame order, settings), `viewport.js` (letterbox, inspect zoom), `canvas-size.js`, `glyphs.js`, `particles.js`, `trails.js`, `bloom.js`, `warpgrid.js`, `composite.js`, `render-shaders.js`, `capture.js` and `capture-hook.js` (frame readback for the smoke), `shaders/*.wgsl` (`ships.wgsl` holds the per-species ship silhouettes prepended to `glyphs.wgsl`).
 - `src/sim/`: `simulation.js` (facade), `layout.js` (shared constants and sizes), `params.js` (`SimParams` packing), `species.js` (rows, matrix, table packing), `grid.js`, `field.js`, `steer.js`, `spawn.js` (GPU spawn) and `spawner.js` (`SpawnPressure`), `kill.js`, `particles.js`, `stats.js`, `shaders/*.wgsl` (including `common.wgsl`, the shared header).
 - `src/ui/`: `debugPanel.js` (DOM panel), `panelModel.js` (slider specs, capacity list, frames-per-second meter, readout text).
 - `src/main.js`: boot, wiring, capacity change.
-- `tests/<area>/`: node:test files mirroring `src/` (`game`, `gpu`, `input`, `render`, `sim`, `ui`), plus `build.test.js`, `sanity.test.js` and `pages_assembly_test.py`.
+- `tests/<area>/`: node:test files mirroring `src/` (`audio`, `game`, `gpu`, `input`, `render`, `sim`, `ui`), plus `build.test.js`, `sanity.test.js` and `pages_assembly_test.py`.
 - `tests/browser/`: `smoke.mjs`, GPU checks (`grid.mjs`, `steer.mjs`, `simulation.mjs` with their pages under `pages/`), `launch.mjs` and `server.mjs` shared launchers.
