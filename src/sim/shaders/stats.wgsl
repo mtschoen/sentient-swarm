@@ -2,8 +2,8 @@
 //   0 aliveTotal, 1..5 alive per species, 6 kills, 7 frameSequence.
 // Each workgroup counts its alive agents in workgroup atomics, then thread 0 flushes every
 // nonzero counter with one global atomicAdd. Global thread 0 stores params.frameSequence.
-// kills (index 6) is never touched here: the encoder clears the buffer at the start of the
-// frame and kill passes add to it. Threads past capacity read no agent but still reach the
+// kills (index 6) is never touched here: the encoder clears only the alive counters (0..5) at the
+// start of the frame, and kill passes add to kills, which is cumulative. Threads past capacity read no agent but still reach the
 // barrier, which must stay in uniform control flow (FXC enforces this).
 
 @group(0) @binding(0) var<uniform> params: SimParams;

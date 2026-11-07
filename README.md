@@ -42,7 +42,9 @@ Caveats:
 | Alive agents when the run stopped (about 90 seconds in) | 979,039 |
 | Render frames per second over the last 10 seconds | 1,393 |
 
-The spawn ramp takes 90 seconds, so the alive count passes 900,000 only near the end of it. Render frames per second counts animation frames with vsync and the frame rate limit disabled. The simulation still advances in fixed 1/60 second steps, so about 60 steps per second ran under those frames. Reproduce with a script that launches `launchWebGpuBrowser({ measuring: true })` from `tests/browser/launch.mjs`, opens the page with `?capacity=1048576`, and samples `window.__murmuration.frame` and `stats.aliveTotal` every 10 seconds.
+The spawn ramp takes 90 seconds, so the alive count passes 900,000 only near the end of it. The 1,393 is a render-only rate in headless Chromium, not a gameplay frame rate: it counts animation frames with vsync and the frame rate limit disabled, and the simulation still advances in fixed 1/60 second steps, so about 60 simulation steps per second ran under those frames. Simulation step cost was not measured separately.
+
+The same run held a plateau of 304,727 alive agents from about 10 to 20 seconds. That was a spawn overshoot: read-back stats lag the GPU by several steps (more when one animation frame runs several fixed steps), and the spawner requested the same deficit again on every lagging step, so the alive count overshot the ramping target about twofold and then waited for the target to pass it. SpawnPressure now counts the spawns requested for steps newer than the stats it has seen, and the simulation browser check runs main.js's cadence and fails above 1.05 times the target. The table predates that fix. Reproduce with a script that launches `launchWebGpuBrowser({ measuring: true })` from `tests/browser/launch.mjs`, opens the page with `?capacity=1048576`, and samples `window.__murmuration.frame` and `stats.aliveTotal` every 10 seconds.
 
 ## Tuning notes
 

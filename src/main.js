@@ -70,7 +70,7 @@ async function boot() {
     movePlayer(player, input.state, fixedStep);
     if (capacitySwap.simulationPaused) return;
     applyControlsToSimulation(simulation, input.state, player);
-    const spawnPerSpecies = spawnPressure.update(fixedStep, lastStats?.aliveTotal ?? 0, simulation.shares);
+    const spawnPerSpecies = spawnPressure.update(fixedStep, lastStats, simulation.shares, simulation.frameSequence + 1);
     const encoder = gpu.device.createCommandEncoder();
     simulation.step(encoder, fixedStep, spawnPerSpecies);
     gpu.device.queue.submit([encoder.finish()]);

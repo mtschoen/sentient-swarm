@@ -21,10 +21,13 @@ export function createUniformBuffer(device, bytes, label) {
 }
 
 // Ring of MAP_READ buffers so readback never stalls the frame; results may arrive late.
+// copyFrom skips a frame when every slot is busy (counted in skippedCopies); readAll drains every
+// ready slot each call, so a backlog from several steps in one frame does not persist.
 export class StagingRing {
   constructor(device, bytes, depth = 3) {
     const size = alignBytes(bytes);
     this.sequence = 0;
+    this.skippedCopies = 0;
     this.slots = [];
     for (let index = 0; index < depth; index += 1) {
       const buffer = device.createBuffer({
@@ -38,7 +41,10 @@ export class StagingRing {
 
   copyFrom(encoder, sourceBuffer) {
     const slot = this.slots.find((candidate) => candidate.state === 'free');
-    if (!slot) return;
+    if (!slot) {
+      this.skippedCopies += 1;
+      return;
+    }
     encoder.copyBufferToBuffer(sourceBuffer, 0, slot.buffer, 0, slot.buffer.size);
     slot.state = 'copied';
   }
@@ -56,16 +62,20 @@ export class StagingRing {
     }
   }
 
-  tryRead() {
-    let oldest = null;
-    for (const slot of this.slots) {
-      if (slot.state === 'ready' && (oldest === null || slot.order < oldest.order)) oldest = slot;
+  // Every ready slot's bytes, oldest first, stopping at the first older slot still mapping so the
+  // result is always in submission order; those slots become free.
+  readAll() {
+    const pending = this.slots
+      .filter((slot) => slot.state === 'ready' || slot.state === 'mapping')
+      .sort((first, second) => first.order - second.order);
+    const results = [];
+    for (const slot of pending) {
+      if (slot.state !== 'ready') break;
+      results.push(slot.buffer.getMappedRange().slice(0));
+      slot.buffer.unmap();
+      slot.state = 'free';
     }
-    if (oldest === null) return null;
-    const data = oldest.buffer.getMappedRange().slice(0);
-    oldest.buffer.unmap();
-    oldest.state = 'free';
-    return data;
+    return results;
   }
 
   // A slot still mapping rejects its mapAsync, which marks it free; nothing is left pending.

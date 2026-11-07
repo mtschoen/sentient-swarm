@@ -57,15 +57,36 @@ test('StagingRing returns data only after mapAsync resolves, once', async () => 
   const encoder = createFakeEncoder();
   ring.copyFrom(encoder, {});
   ring.markSubmitted();
-  assert.equal(ring.tryRead(), null);
+  assert.deepEqual(ring.readAll(), []);
   device.buffers[0].fillValue = 7;
   device.buffers[0].resolveMap();
   await Promise.resolve();
-  const data = ring.tryRead();
-  assert.ok(data instanceof ArrayBuffer);
-  assert.equal(new Uint8Array(data)[0], 7);
+  const data = ring.readAll();
+  assert.equal(data.length, 1);
+  assert.ok(data[0] instanceof ArrayBuffer);
+  assert.equal(new Uint8Array(data[0])[0], 7);
   assert.equal(device.buffers[0].unmapCount, 1);
-  assert.equal(ring.tryRead(), null);
+  assert.deepEqual(ring.readAll(), []);
+});
+
+test('StagingRing.readAll drains every ready slot oldest first and stops at an older slot still mapping', async () => {
+  const device = createFakeDevice();
+  const ring = new StagingRing(device, 32, 3);
+  const encoder = createFakeEncoder();
+  for (let frame = 0; frame < 3; frame += 1) {
+    ring.copyFrom(encoder, {});
+    ring.markSubmitted();
+    device.buffers[frame].fillValue = frame + 1;
+  }
+  // The newest slot maps first: nothing may be returned ahead of the two older ones.
+  device.buffers[2].resolveMap();
+  await Promise.resolve();
+  assert.deepEqual(ring.readAll(), []);
+  device.buffers[0].resolveMap();
+  device.buffers[1].resolveMap();
+  await Promise.resolve();
+  assert.deepEqual(ring.readAll().map((bytes) => new Uint8Array(bytes)[0]), [1, 2, 3]);
+  assert.ok(ring.slots.every((slot) => slot.state === 'free'));
 });
 
 test('StagingRing skips copyFrom when every slot is pending', () => {
@@ -78,6 +99,7 @@ test('StagingRing skips copyFrom when every slot is pending', () => {
   }
   ring.copyFrom(encoder, {});
   assert.equal(encoder.copies, 3);
+  assert.equal(ring.skippedCopies, 1);
 });
 
 test('StagingRing reuses a slot after it is read', async () => {
@@ -88,7 +110,7 @@ test('StagingRing reuses a slot after it is read', async () => {
   ring.markSubmitted();
   device.buffers[0].resolveMap();
   await Promise.resolve();
-  ring.tryRead();
+  ring.readAll();
   ring.copyFrom(encoder, {});
   assert.equal(encoder.copies, 2);
 });

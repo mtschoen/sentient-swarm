@@ -1,9 +1,15 @@
 // CPU spawn pressure: decides how many agents of each species the GPU spawner adds this frame.
 // The alive target ramps from floorFraction to ceilingFraction of capacity over rampSeconds; each
-// frame spawns the deficit between the target and the last known alive count, capped at
+// frame spawns the deficit between the target and the estimated alive count, capped at
 // capacity / 60, split across species by shares with largest-remainder rounding so the per-species
 // counts add up to exactly the frame's total. Each species carries its rounding error to the next
 // frame, so small frames rotate the leftover units and long-run totals follow the shares.
+// Read-back stats lag the GPU by a few steps (more with several fixed steps per frame), so the
+// estimate is the newest stats' alive total plus every request made for a step newer than those
+// stats: those spawns are in flight and not counted yet. Without them, each lagging step requests
+// the same deficit again and the alive count overshoots the target (about 1.33 times at a lag of
+// two steps on a cold start). A request the GPU could not fully place only makes the estimate
+// high until newer stats arrive, which errs toward spawning less.
 import { SPECIES_COUNT } from './layout.js';
 
 // A frame spawns at most capacity / SPAWN_CAP_DIVISOR agents: a full arena refills in a second at 60 fps.
@@ -51,6 +57,9 @@ export class SpawnPressure {
     this.maximumPerFrame = Math.floor(capacity / SPAWN_CAP_DIVISOR);
     this.elapsed = 0;
     this.carry = new Float64Array(SPECIES_COUNT);
+    // Requested totals keyed by the frameSequence of the step they were requested for.
+    this.requests = new Map();
+    this.newestStats = null;
   }
 
   get targetAlive() {
@@ -69,10 +78,27 @@ export class SpawnPressure {
     this.carry.fill(0);
   }
 
-  // aliveCount is the latest read-back alive total; it may lag a few frames behind the GPU.
-  update(deltaSeconds, aliveCount, shares) {
+  // Alive agents counted by the newest stats plus the spawns requested for steps after them.
+  get estimatedAlive() {
+    const seenSequence = this.newestStats?.frameSequence ?? 0;
+    let inFlight = 0;
+    for (const [sequence, count] of this.requests) {
+      if (sequence <= seenSequence) this.requests.delete(sequence);
+      else inFlight += count;
+    }
+    return (this.newestStats?.aliveTotal ?? 0) + inFlight;
+  }
+
+  // stats: the newest decoded stats read back ({ aliveTotal, frameSequence }), or null when none
+  // has arrived; older stats than ones already seen are ignored. frameSequence: the sequence of
+  // the step this request is for (simulation.frameSequence + 1 before simulation.step).
+  update(deltaSeconds, stats, shares, frameSequence) {
     this.elapsed += deltaSeconds;
-    const deficit = Math.max(0, Math.floor(this.targetAlive - aliveCount));
-    return splitByShares(Math.min(deficit, this.maximumPerFrame), shares, this.carry);
+    if (stats && (this.newestStats === null || stats.frameSequence >= this.newestStats.frameSequence)) this.newestStats = stats;
+    const deficit = Math.max(0, Math.floor(this.targetAlive - this.estimatedAlive));
+    const counts = splitByShares(Math.min(deficit, this.maximumPerFrame), shares, this.carry);
+    const total = counts.reduce((sum, count) => sum + count, 0);
+    if (total > 0) this.requests.set(frameSequence, (this.requests.get(frameSequence) ?? 0) + total);
+    return counts;
   }
 }

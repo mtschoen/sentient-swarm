@@ -1,5 +1,5 @@
-// Steps a 65536-slot Simulation fed by SpawnPressure for 300 frames at dt 1/60, polling the stats
-// ring after every submit, and checks: (a) the alive total tracks the ramping target (0.6 to 1.02
+// Steps a 65536-slot Simulation fed by SpawnPressure for 300 frames at dt 1/60, awaiting the GPU
+// and polling the stats ring after every submit (stats lag one step), and checks: (a) the alive total tracks the ramping target (0.6 to 1.02
 // of it) and never exceeds what was requested (no double-spent budget); (b) every species holds
 // its share within 10 percent relative; (c) the read-back frameSequence lags the CPU frame by at
 // most 3; (d) after frame 1 every agent was spawned that frame: it sits at least ARENA_WIDTH / 4
@@ -10,7 +10,11 @@
 // aliveTotal by exactly that many, reports zero kills a frame later, fills at least 6 particle slots
 // per kill (capped at the pool capacity) all within 2.5 of the center, and adds threat near the center;
 // (g) shrinking a 131072-slot simulation whose only alive agents sit in slots 100000 and up to
-// 65536 slots keeps every one of them (compaction, not a slot prefix).
+// 65536 slots keeps every one of them (compaction, not a slot prefix);
+// (h) main.js's cadence: one readStats per step with no await between steps, a 4-step frame every
+// CADENCE_BURST_INTERVAL frames, rAF between frames; stats then lag 2 or more steps (asserted, so
+// the check cannot fall back to the lag-1 case), and the peak alive / target ratio over the run,
+// target taken at each step's request, stays at or below 1.05.
 import { createGpuContext } from '/src/gpu/device.js';
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT } from '/src/sim/layout.js';
 import { normalizeShares } from '/src/sim/species.js';
@@ -39,6 +43,11 @@ const SHRINK_FROM_CAPACITY = 131072;
 const SHRINK_TO_CAPACITY = 65536;
 const SHRINK_FIRST_SLOT = 100000;
 const SHRINK_AGENT_COUNT = 1000;
+const CADENCE_FRAMES = 300;
+const CADENCE_BURST_INTERVAL = 50;
+const CADENCE_BURST_STEPS = 4;
+const CADENCE_MAXIMUM_RATIO = 1.05;
+const CADENCE_MINIMUM_LAG = 2;
 
 // Steps once, submits, and waits for the GPU so the stats ring can map; returns the frame's step.
 async function submitStep(device, simulation, spawnPerSpecies) {
@@ -105,7 +114,7 @@ function spawnPlacement(agentBytes) {
 
 // Drains every ready ring slot into collected, keyed by frameSequence.
 function collectStats(simulation, collected) {
-  for (let stats = simulation.readStats(); stats !== null; stats = simulation.readStats()) collected.set(stats.frameSequence, stats);
+  for (const stats of simulation.readAllStats()) collected.set(stats.frameSequence, stats);
 }
 
 async function waitForStats(device, simulation, collected, sequence) {
@@ -166,12 +175,12 @@ async function runKillCheck(device, simulation) {
 
   const particles = liveParticles(particleBytes, PLAYER);
   const threat = threatNearCenter(threatBytes, PLAYER);
-  const expectedParticles = Math.min(PARTICLES_PER_KILL * kill.killsThisFrame, simulation.particlePool.capacity);
+  const expectedParticles = Math.min(PARTICLES_PER_KILL * kill.killsSinceLastRead, simulation.particlePool.capacity);
   const removed = baseline.aliveTotal - kill.aliveTotal;
   const verdicts = [
-    [kill.killsThisFrame > 0, `kills ${kill.killsThisFrame} (need > 0)`],
-    [removed === kill.killsThisFrame, `alive ${baseline.aliveTotal} before and ${kill.aliveTotal} after, removed ${removed} (need exactly the kills)`],
-    [later.killsThisFrame === 0, `kills the next frame ${later.killsThisFrame} (need 0, the arm lasts one frame)`],
+    [kill.killsSinceLastRead > 0, `kills ${kill.killsSinceLastRead} (need > 0)`],
+    [removed === kill.killsSinceLastRead, `alive ${baseline.aliveTotal} before and ${kill.aliveTotal} after, removed ${removed} (need exactly the kills)`],
+    [later.killsSinceLastRead === 0, `kills the next frame ${later.killsSinceLastRead} (need 0, the arm lasts one frame)`],
     [particles.count >= expectedParticles, `live particles ${particles.count} (need >= ${expectedParticles})`],
     [particles.farthest <= PARTICLE_SPREAD_LIMIT, `farthest particle ${particles.farthest.toFixed(3)} from center (need <= ${PARTICLE_SPREAD_LIMIT})`],
     [threat > 0, `threat near center ${threat.toFixed(1)} units (need > 0)`],
@@ -213,6 +222,49 @@ async function runShrinkCheck(gpu) {
   };
 }
 
+function nextAnimationFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+// (h) Runs main.js's update cadence on a fresh simulation and returns the peak ratio and lag.
+async function runCadenceCheck(gpu) {
+  const { device } = gpu;
+  const shares = normalizeShares([1, 1, 1, 1, 1]);
+  const simulation = await Simulation.create(gpu, { capacity: INITIAL_CAPACITY, shares });
+  simulation.setPlayer(PLAYER[0], PLAYER[1]);
+  const pressure = new SpawnPressure({ capacity: INITIAL_CAPACITY });
+  const targetBySequence = new Map();
+  let lastStats = null;
+  let peak = { ratio: 0, sequence: 0 };
+  let maximumLag = 0;
+  for (let frame = 1; frame <= CADENCE_FRAMES; frame += 1) {
+    const steps = frame % CADENCE_BURST_INTERVAL === 0 ? CADENCE_BURST_STEPS : 1;
+    for (let step = 0; step < steps; step += 1) {
+      const sequence = simulation.frameSequence + 1;
+      const spawnPerSpecies = pressure.update(STEP_SECONDS, lastStats, shares, sequence);
+      targetBySequence.set(sequence, pressure.targetAlive);
+      const encoder = device.createCommandEncoder({ label: 'simulation-check-cadence' });
+      simulation.step(encoder, STEP_SECONDS, spawnPerSpecies);
+      device.queue.submit([encoder.finish()]);
+      simulation.afterSubmit();
+      const frames = simulation.readAllStats();
+      for (const stats of frames) {
+        const ratio = stats.aliveTotal / targetBySequence.get(stats.frameSequence);
+        if (ratio > peak.ratio) peak = { ratio, sequence: stats.frameSequence };
+      }
+      if (frames.length > 0) lastStats = frames[frames.length - 1];
+      maximumLag = Math.max(maximumLag, simulation.frameSequence - (lastStats?.frameSequence ?? 0));
+    }
+    await nextAnimationFrame();
+  }
+  simulation.destroy();
+  const pass = lastStats !== null && peak.ratio <= CADENCE_MAXIMUM_RATIO && maximumLag >= CADENCE_MINIMUM_LAG;
+  return {
+    pass,
+    detail: `${pass ? 'PASS' : 'FAIL'} main.js cadence over ${CADENCE_FRAMES} frames (a ${CADENCE_BURST_STEPS}-step frame every ${CADENCE_BURST_INTERVAL}): peak alive / target ${peak.ratio.toFixed(3)} at step ${peak.sequence} (need <= ${CADENCE_MAXIMUM_RATIO}), maximum stats lag ${maximumLag} steps (need >= ${CADENCE_MINIMUM_LAG})`,
+  };
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   const { device } = gpu;
@@ -229,7 +281,7 @@ async function runCheck() {
   let maximumLag = 0;
   let placement = null;
   for (let frame = 1; frame <= FRAME_COUNT; frame += 1) {
-    const spawnPerSpecies = pressure.update(STEP_SECONDS, latest?.aliveTotal ?? 0, shares);
+    const spawnPerSpecies = pressure.update(STEP_SECONDS, latest, shares, simulation.frameSequence + 1);
     requested += spawnPerSpecies.reduce((sum, count) => sum + count, 0);
     await submitStep(device, simulation, spawnPerSpecies);
     if (frame === 1) placement = spawnPlacement(await readBuffer(device, simulation.agentsBuffer));
@@ -276,7 +328,10 @@ async function runCheck() {
   const shrinkResult = await runShrinkCheck(gpu);
   if (lostReason !== null) return { pass: false, detail: `device lost during the shrink check: ${lostReason}` };
   details.push(shrinkResult.detail);
-  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass;
+  const cadenceResult = await runCadenceCheck(gpu);
+  if (lostReason !== null) return { pass: false, detail: `device lost during the cadence check: ${lostReason}` };
+  details.push(cadenceResult.detail);
+  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass && cadenceResult.pass;
   return { pass, detail: details.join('; ') };
 }
 

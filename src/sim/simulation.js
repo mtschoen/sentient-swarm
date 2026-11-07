@@ -3,16 +3,17 @@
 //
 // Frame contract, one step per submitted command buffer (params and the spawn budget go through
 // queue.writeBuffer, so two steps in one submission would both see the last values):
-//   const spawnPerSpecies = spawnPressure.update(deltaSeconds, lastStats?.aliveTotal ?? 0, simulation.shares);
+//   const spawnPerSpecies = spawnPressure.update(deltaSeconds, lastStats, simulation.shares, simulation.frameSequence + 1);
 //   simulation.step(encoder, deltaSeconds, spawnPerSpecies);
 //   device.queue.submit([encoder.finish()]);
 //   simulation.afterSubmit();
 //   const stats = simulation.readStats(); // synchronous, null until a ring slot has mapped
-// The caller owns the SpawnPressure and feeds it the last stats it read; readStats() returns the
-// oldest ready frame, a few frames behind, so poll it every frame.
+// The caller owns the SpawnPressure and feeds it the last stats it read with the sequence of the
+// step it requests for, so spawns still in flight are not requested twice. readStats() drains the
+// ring and returns the newest ready frame, a few frames behind, so poll it every step.
 //
 // step order: frameSequence and time advance; params and spawn budget are written; the stats
-// buffer is cleared; spawn on agentsIn; grid and coarse field on agentsIn; steer agentsIn to
+// alive counters are cleared (kills stay cumulative); spawn on agentsIn; grid and coarse field on agentsIn; steer agentsIn to
 // agentsOut plus integrate; debug kill on agentsOut (skipped when no kill is armed; the arm lasts
 // one step, so callers re-arm every frame while the button is held); particle step; stats on agentsOut; copy stats
 // into the staging ring; swap, so agentsBuffer is the newest output.
@@ -27,7 +28,7 @@ import { ARENA_HEIGHT, ARENA_WIDTH, SHADER_CONSTANTS, SPECIES_COUNT, agentBuffer
 import { SIM_PARAMS_BYTES, packSimParams } from './params.js';
 import { Spawner } from './spawn.js';
 import { defaultMatrix, defaultSpecies, normalizeShares, packSpeciesTable } from './species.js';
-import { STATS_BYTES, StatsPass, decodeStats } from './stats.js';
+import { STATS_BYTES, STATS_CLEARED_BYTES, StatsPass, decodeStats } from './stats.js';
 import { Steering } from './steer.js';
 
 export class Simulation {
@@ -92,6 +93,7 @@ export class Simulation {
     this.debugKillRadius = 0;
     this.frameSequenceValue = 0;
     this.timeValue = 0;
+    this.lastKillsTotal = 0;
     this.sameSpeciesCohesion = true;
     this.setSpecies(species, matrix);
     this.setShares(shares);
@@ -155,7 +157,7 @@ export class Simulation {
     const killRadius = this.debugKillRadius;
     this.debugKillRadius = 0;
     this.spawner.writeBudget(spawnPerSpecies);
-    encoder.clearBuffer(this.statsBufferValue);
+    encoder.clearBuffer(this.statsBufferValue, 0, STATS_CLEARED_BYTES);
     const agentsIn = this.agentBuffers[this.inputIndex];
     const agentsOut = this.agentBuffers[1 - this.inputIndex];
     const params = this.paramsBufferValue;
@@ -184,10 +186,25 @@ export class Simulation {
     this.stagingRing.markSubmitted();
   }
 
-  // Synchronous: the oldest ready frame's stats, or null when no ring slot has mapped yet.
+  // Synchronous: every ready frame's stats, oldest first (empty when none has mapped yet). Each
+  // carries killsSinceLastRead, the kills since the previous frame this instance returned (the
+  // difference of the cumulative GPU counter), so no kill is lost to a skipped readback.
+  readAllStats() {
+    return this.stagingRing.readAll().map((bytes) => {
+      const stats = decodeStats(bytes);
+      stats.killsSinceLastRead = (stats.killsTotal - this.lastKillsTotal) >>> 0;
+      this.lastKillsTotal = stats.killsTotal;
+      return stats;
+    });
+  }
+
+  // Synchronous: drains every ready frame and returns the newest one's stats, with
+  // killsSinceLastRead summed over all of them; null when no ring slot has mapped yet.
   readStats() {
-    const bytes = this.stagingRing.tryRead();
-    return bytes === null ? null : decodeStats(bytes);
+    const frames = this.readAllStats();
+    if (frames.length === 0) return null;
+    const newest = frames[frames.length - 1];
+    return { ...newest, killsSinceLastRead: frames.reduce((sum, stats) => sum + stats.killsSinceLastRead, 0) };
   }
 
   // Builds a Simulation with the same settings at newCapacity, carries the alive agents over and
