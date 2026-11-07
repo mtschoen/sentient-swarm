@@ -304,16 +304,21 @@ async function checkDenseCell(gpu, common) {
 }
 
 // (c) A Lattice square seeded off target, expanded to SEED_SPACING_FACTOR times the
-// density-implied spacing (targetDensity agents per coarse cell), contracts toward it: after
-// LATTICE_STEPS steps the mean nearest-neighbor distance is within 25 percent of that spacing, so
-// steering that does nothing (ratio stays about 1.5) fails. The sheet breathes rather than
-// settling: measured ratios were 1.15, 0.82, 1.49, 0.99, 0.84 and 0.76 after 60, 120, 240, 480,
-// 720 and 900 steps, and a seed compressed to 0.6 times reached the band only after 360 steps.
-// 120 steps is the step count this check is pinned to; 60 steps also lands in the band.
+// density-implied spacing (targetDensity agents per coarse cell), is pulled toward it. The sheet
+// breathes rather than settling (ratios between about 0.8 and 1.5 over 900 steps), so the check
+// samples the mean nearest-neighbor ratio every LATTICE_SAMPLE_INTERVAL steps from step
+// LATTICE_FIRST_SAMPLE to LATTICE_STEPS and asserts (1) the mean of the samples lies within 25
+// percent of the implied spacing and (2) the first sample differs from the seed ratio by at least
+// 20 percent, so steering that does nothing fails.
 const SEED_SPACING_FACTOR = 1.6;
-const LATTICE_STEPS = 120;
+const LATTICE_FIRST_SAMPLE = 120;
+const LATTICE_SAMPLE_INTERVAL = 60;
+const LATTICE_STEPS = 600;
 
-async function latticeNearestNeighbor(gpu, common, seedSpacing, steps, speciesRows) {
+async function checkLatticeSpacing(gpu, common) {
+  const coarseCellArea = (ARENA_WIDTH / COARSE_COLUMNS) * (ARENA_HEIGHT / COARSE_ROWS);
+  const expectedSpacing = Math.sqrt(coarseCellArea / defaultSpecies()[LATTICE].targetDensity);
+  const seedSpacing = SEED_SPACING_FACTOR * expectedSpacing;
   const side = 48;
   const random = randomSource(3);
   const positions = [];
@@ -325,23 +330,23 @@ async function latticeNearestNeighbor(gpu, common, seedSpacing, steps, speciesRo
   }
   const harness = new Harness(gpu, common, positions.length);
   await harness.initialize();
-  harness.seed(packAgents(positions, LATTICE, random), speciesRows);
-  const initial = meanNearestNeighborDistance(positions.map(([x, y]) => ({ x, y })));
-  await harness.run(steps);
-  const agents = await harness.readAgents();
-  return { initial, final: meanNearestNeighborDistance(agents), failure: validityFailure(agents) };
-}
-
-async function checkLatticeSpacing(gpu, common) {
-  const coarseCellArea = (ARENA_WIDTH / COARSE_COLUMNS) * (ARENA_HEIGHT / COARSE_ROWS);
-  const expectedSpacing = Math.sqrt(coarseCellArea / defaultSpecies()[LATTICE].targetDensity);
-  const result = await latticeNearestNeighbor(gpu, common, SEED_SPACING_FACTOR * expectedSpacing, LATTICE_STEPS, defaultSpecies());
-  if (result.failure) return { pass: false, detail: `lattice: ${result.failure}` };
-  const initialRatio = result.initial / expectedSpacing;
-  const finalRatio = result.final / expectedSpacing;
+  harness.seed(packAgents(positions, LATTICE, random), defaultSpecies());
+  const seedRatio = meanNearestNeighborDistance(positions.map(([x, y]) => ({ x, y }))) / expectedSpacing;
+  const samples = [];
+  let stepsDone = 0;
+  for (let sampleStep = LATTICE_FIRST_SAMPLE; sampleStep <= LATTICE_STEPS; sampleStep += LATTICE_SAMPLE_INTERVAL) {
+    await harness.run(sampleStep - stepsDone);
+    stepsDone = sampleStep;
+    const agents = await harness.readAgents();
+    const failure = validityFailure(agents);
+    if (failure) return { pass: false, detail: `lattice at step ${sampleStep}: ${failure}` };
+    samples.push(meanNearestNeighborDistance(agents) / expectedSpacing);
+  }
+  const sampleMean = mean(samples);
+  const firstChange = Math.abs(samples[0] - seedRatio) / seedRatio;
   return {
-    pass: finalRatio >= 0.75 && finalRatio <= 1.25,
-    detail: `lattice nearest neighbor ${result.initial.toFixed(4)} -> ${result.final.toFixed(4)}, density-implied spacing ${expectedSpacing.toFixed(4)} (ratio ${initialRatio.toFixed(2)} -> ${finalRatio.toFixed(2)}, need 0.75 to 1.25)`,
+    pass: sampleMean >= 0.75 && sampleMean <= 1.25 && firstChange >= 0.2,
+    detail: `lattice spacing ratio to the density-implied ${expectedSpacing.toFixed(4)}: seed ${seedRatio.toFixed(2)}, steps ${LATTICE_FIRST_SAMPLE} to ${LATTICE_STEPS} every ${LATTICE_SAMPLE_INTERVAL} [${samples.map((sample) => sample.toFixed(2)).join(' ')}], mean ${sampleMean.toFixed(2)} (need 0.75 to 1.25), step ${LATTICE_FIRST_SAMPLE} change ${(firstChange * 100).toFixed(0)}% (need >= 20%)`,
   };
 }
 
