@@ -1,6 +1,7 @@
 // Run state machine: lives, bombs, death and respawn timing, invulnerability.
 // Actions are queued by playerHit, useBomb and the phase timers, and are returned
 // (in queue order) by the next update call; update is the only way to drain them.
+// Actions queued by playerHit and useBomb therefore drain on the next update call, not immediately.
 
 export const RunPhase = {
   Ready: 'ready',
@@ -45,6 +46,10 @@ export class RunState {
     this._queue = [];
   }
 
+  // RunState never learns the frame sequence on its own: the respawn action carries no
+  // sequence. The game must call setRespawnSequence(nextFrameSequence) when it handles the
+  // respawn action, using the sequence of the first step simulated with the respawned player.
+  // Hits with a smaller frameSequence are then rejected as stale.
   setRespawnSequence(frameSequence) {
     this._respawnSequence = frameSequence;
   }

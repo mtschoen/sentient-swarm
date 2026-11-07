@@ -74,3 +74,34 @@ test('useBomb requires bombs and Playing, and queues bomb then shockwave', () =>
   assert.equal(run.bombs, 1);
   assert.equal(run.lives, 4);
 });
+
+test('playerHit in Dying returns false and leaves lives unchanged', () => {
+  const run = playing();
+  assert.equal(run.playerHit(1), true);
+  assert.equal(run.phase, RunPhase.Dying);
+  assert.equal(run.playerHit(2), false);
+  assert.equal(run.lives, 2);
+});
+
+test('playerHit in Respawning returns false and leaves lives unchanged', () => {
+  const run = playing();
+  run.playerHit(1);
+  run.update(0.8);
+  assert.equal(run.phase, RunPhase.Respawning);
+  assert.equal(run.playerHit(2), false);
+  assert.equal(run.lives, 2);
+});
+
+test('late hit below respawnSequence is rejected after invulnerability expires', () => {
+  const run = playing();
+  run.playerHit(1);
+  run.update(1.4);
+  run.setRespawnSequence(50);
+  run.update(2.1);
+  assert.equal(run.phase, RunPhase.Playing);
+  assert.equal(run.invulnerable, false);
+  assert.equal(run.playerHit(49), false);
+  assert.equal(run.lives, 2);
+  assert.equal(run.playerHit(50), true);
+  assert.equal(run.lives, 1);
+});
