@@ -277,15 +277,51 @@ test('mouse aim is the pointer minus the player and the primary button fires', a
 test('the expiry frame sends no beam even when the weapon still returned one', async () => {
   const { game, input, projectiles } = await createGame();
   game.start();
+  // Record what the weapon itself returns each frame, so the expiry frame can be checked against it.
+  const weaponReturns = [];
+  const updateWeapons = game.weapons.update.bind(game.weapons);
+  game.weapons.update = (deltaSeconds, controls) => {
+    const result = updateWeapons(deltaSeconds, controls);
+    weaponReturns.push(result);
+    return result;
+  };
   game.weapons.collect('beam');
   input.state.aim = { x: 1, y: 0 };
   input.state.firing = true;
-  game.update(STEP);
-  assert.notEqual(projectiles.beams[projectiles.beams.length - 1], null);
-  runFor(game, 8);
+  const MAXIMUM_FRAMES = 1000;
+  for (let frame = 0; frame < MAXIMUM_FRAMES; frame += 1) {
+    game.update(STEP);
+    if (weaponReturns[weaponReturns.length - 1].expired) break;
+  }
+  const expiryReturn = weaponReturns[weaponReturns.length - 1];
+  assert.equal(expiryReturn.expired, true, 'the beam charge should expire within the frame budget');
   assert.equal(game.state.armed, 'base');
-  const expiryIndex = projectiles.beams.findIndex((beam, index) => index > 0 && beam === null);
-  assert.ok(expiryIndex > 0);
+  // The weapon's own return carried a beam on the expiry frame; the game must still send null.
+  assert.notEqual(expiryReturn.beam, null);
+  assert.equal(projectiles.beams[projectiles.beams.length - 1], null);
+  // The frame before expiry sent the weapon's beam, so the null is the override, not the weapon.
+  assert.notEqual(projectiles.beams[projectiles.beams.length - 2], null);
+});
+
+test('a pickup collected on the frame the charge would reach zero keeps the weapon armed and refills it', async () => {
+  const { game, input } = await createGame();
+  game.start();
+  game.weapons.collect('rail');
+  const drainPerStep = STEP / game.weapons.types.rail.tiers[0].chargeSeconds;
+  input.state.aim = { x: 1, y: 0 };
+  input.state.firing = true;
+  // Drain while firing, stopping with a margin so float rounding cannot expire the weapon early.
+  while (game.weapons.charge > 2 * drainPerStep) game.update(STEP);
+  assert.equal(game.state.armed, 'rail');
+  // Within one step of zero: the next firing step alone would expire the weapon.
+  game.weapons.charge = drainPerStep / 2;
+  // Put a scatter pickup under the ship; it is collected in the same update as the expiry step.
+  const { x, y } = game.player.position;
+  game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 });
+  game.update(STEP);
+  assert.equal(game.state.armed, 'scatter');
+  assert.equal(game.state.tier, 1);
+  assert.ok(Math.abs(game.state.charge - (1 - drainPerStep)) < 1e-9);
 });
 
 test('restart after game over resets every module and clears the arena once', async () => {
