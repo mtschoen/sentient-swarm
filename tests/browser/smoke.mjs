@@ -17,6 +17,11 @@ const MINIMUM_ALIVE_TOTAL = 1000;
 // Something is drawn, and it is not a white smear.
 const MINIMUM_LUMINANCE = 0.02;
 const MAXIMUM_LUMINANCE = 0.6;
+const RESIZE_WINDOW_FRAMES = 60;
+const RESIZE_TOLERANCE = 0.05;
+const PORTRAIT_VIEWPORT = { width: 800, height: 1200 };
+const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
+const MAXIMUM_BAND_LUMINANCE = 0.01;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
 async function writeDataUrl(name, dataUrl) {
@@ -31,6 +36,46 @@ function parseFrameCount(argumentList) {
   const frames = Number.parseInt(argumentList[index + 1], 10);
   if (!Number.isInteger(frames) || frames < 0) throw new Error('--frames needs a non-negative integer');
   return frames;
+}
+
+function waitForFrame(page, target) {
+  return page.waitForFunction((frame) => window.__murmuration.frame >= frame, target, { timeout: READY_TIMEOUT_MILLISECONDS });
+}
+
+// Resizes to a portrait viewport and back, checking the agent count survives, the arena letterboxes
+// and the bands stay black. Returns a failure message, or null. The spawner ramps the alive target
+// for 90 seconds (about 4 percent of the count per 60 frames at this point), so a flat 5 percent
+// comparison would fail on the ramp alone. Instead the growth over the 60 frames after the resize
+// must match the growth over the 60 frames before it, within 5 percent of the count.
+async function checkResize(page) {
+  const readFrame = () => page.evaluate(() => window.__murmuration.frame);
+  const readAlive = async () => (await page.evaluate(() => window.__murmuration.stats)).aliveTotal;
+  const start = await readFrame();
+  const earlier = await readAlive();
+  await waitForFrame(page, start + RESIZE_WINDOW_FRAMES);
+  const before = await readAlive();
+  await page.setViewportSize(PORTRAIT_VIEWPORT);
+  const resized = await readFrame();
+  await waitForFrame(page, resized + RESIZE_WINDOW_FRAMES);
+  const after = await readAlive();
+  const portrait = await page.evaluate(() => window.__murmuration.capture());
+  const { arenaRect } = portrait;
+  const expected = { x: 0, y: 375, width: 800, height: 450 };
+  if (portrait.width !== PORTRAIT_VIEWPORT.width || JSON.stringify(arenaRect) !== JSON.stringify(expected)) {
+    return `smoke: expected ${PORTRAIT_VIEWPORT.width}px canvas with arenaRect ${JSON.stringify(expected)}, got ${portrait.width}x${portrait.height} ${JSON.stringify(arenaRect)}`;
+  }
+  const band = portrait.bandLuminance;
+  if (!(band < MAXIMUM_BAND_LUMINANCE)) return `smoke: expected top band luminance < ${MAXIMUM_BAND_LUMINANCE}, got ${band}`;
+  const growthBefore = before - earlier;
+  const growthAfter = after - before;
+  if (Math.abs(growthAfter - growthBefore) > RESIZE_TOLERANCE * before) {
+    return `smoke: aliveTotal ${earlier} -> ${before} before the resize and ${before} -> ${after} after it differ by more than ${RESIZE_TOLERANCE * 100} percent`;
+  }
+  console.log(`smoke: resize aliveTotal ${earlier} -> ${before} -> ${after}, arenaRect ${JSON.stringify(arenaRect)}, top band luminance ${band.toFixed(4)}`);
+  await page.setViewportSize(DEFAULT_VIEWPORT);
+  const restored = await readFrame();
+  await waitForFrame(page, restored + 5);
+  return page.consoleErrors.length > 0 ? `smoke: console errors after resize: ${page.consoleErrors.join(' | ')}` : null;
 }
 
 async function run() {
@@ -79,6 +124,12 @@ async function run() {
     const stats = await page.evaluate(() => window.__murmuration.stats);
     if (!stats || !(stats.aliveTotal > MINIMUM_ALIVE_TOTAL)) {
       console.error(`smoke: expected stats.aliveTotal > ${MINIMUM_ALIVE_TOTAL}, got ${JSON.stringify(stats)}`);
+      return EXIT_FAILURE;
+    }
+    const resizeFailure = await checkResize(page);
+    if (resizeFailure) {
+      console.error(resizeFailure);
+      page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
     }
     const capture = await page.evaluate(() => window.__murmuration.capture());

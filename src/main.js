@@ -5,6 +5,7 @@ import { FrameLoop } from './game/loop.js';
 import { createInput } from './input/input.js';
 import { Viewport } from './render/viewport.js';
 import { Renderer } from './render/renderer.js';
+import { observeCanvasSize } from './render/canvas-size.js';
 import { meanLuminance } from './render/capture.js';
 import { ARENA_WIDTH, ARENA_HEIGHT } from './sim/layout.js';
 
@@ -26,7 +27,18 @@ function describeCapture(frame, arenaRect) {
   canvas.width = width;
   canvas.height = height;
   canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength), width, height), 0, 0);
-  return { width, height, arenaRect, meanLuminance: meanLuminance(pixels, width, arenaRect), pngDataUrl: canvas.toDataURL('image/png') };
+  // The letterbox band (top strip, or left strip when the canvas is wider than the arena) should stay black.
+  const band = arenaRect.y > 0
+    ? { x: 0, y: 0, width, height: arenaRect.y }
+    : { x: 0, y: 0, width: arenaRect.x, height };
+  return {
+    width,
+    height,
+    arenaRect,
+    meanLuminance: meanLuminance(pixels, width, arenaRect),
+    bandLuminance: meanLuminance(pixels, width, band),
+    pngDataUrl: canvas.toDataURL('image/png'),
+  };
 }
 
 function waitAnimationFrames(count) {
@@ -56,13 +68,20 @@ async function boot() {
     throw error;
   }
 
-  canvas.width = Math.round(canvas.clientWidth * devicePixelRatio);
-  canvas.height = Math.round(canvas.clientHeight * devicePixelRatio);
   const viewport = new Viewport();
-  viewport.setCanvasSize(canvas.width, canvas.height, devicePixelRatio);
+  let renderer = null;
+  const resizeCanvas = ({ width, height }) => {
+    canvas.width = width;
+    canvas.height = height;
+    viewport.setCanvasSize(width, height, devicePixelRatio);
+    renderer?.resize(width, height);
+  };
+  // Sized explicitly before the first frame; the observer then keeps it current.
+  const sizeCanvasNow = observeCanvasSize(canvas, resizeCanvas);
+  sizeCanvasNow();
 
   const simulation = await Simulation.create(gpu, { capacity: DESKTOP_CAPACITY });
-  const renderer = await Renderer.create(gpu, { simulation, viewport });
+  renderer = await Renderer.create(gpu, { simulation, viewport });
   const spawnPressure = new SpawnPressure({ capacity: DESKTOP_CAPACITY });
   const input = createInput(canvas, viewport);
 
