@@ -1,3 +1,4 @@
+// Over 500 lines on purpose: every scenario shares one GPU Harness and seeding helpers defined here.
 // Runs the grid, coarse field and steering pipeline on seeded agent layouts and checks the
 // resulting motion: (a) Chasers close on the player and ping-pong buffers reuse bind groups,
 // (b) a single overfull cell stays valid and its field is exact, (c) a Lattice square holds the
