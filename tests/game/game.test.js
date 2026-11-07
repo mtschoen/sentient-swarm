@@ -1,3 +1,4 @@
+// Over 500 lines: every Game scenario shares the one fake simulation, gpu and input harness here.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../../src/game/game.js';
@@ -449,4 +450,79 @@ test('scene hides the ship from death until respawn and carries the armed weapon
   game.run.start();
   game.run.playerHit(game.simulation.frameSequence + 1, game.player.position);
   assert.equal(game.scene().ship, null);
+});
+
+test('an accepted bomb press and an accepted hit play the bomb and death effects', async () => {
+  const gpu = createFakeGpu();
+  const simulation = createFakeSimulation();
+  const input = createFakeInput();
+  const played = [];
+  const effects = { bomb: () => played.push('bomb'), death: () => played.push('death') };
+  const game = await Game.create({
+    gpu, simulation, projectiles: createFakeProjectiles(), renderer: createFakeRenderer(), input, capacity: CAPACITY, random: () => 0.5, effects,
+  });
+  game.start();
+  game.update(STEP);
+  input.state.bomb = true;
+  game.update(STEP);
+  game.update(STEP);
+  assert.deepEqual(played, ['bomb']);
+  input.state.bomb = false;
+  game.update(STEP);
+  hitNow(game, simulation);
+  assert.deepEqual(played, ['bomb', 'death']);
+});
+
+test('freshStats is the newest frame read this update with the kills of every frame summed', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  game.update(STEP);
+  assert.equal(game.freshStats, null);
+  simulation.readAllStats = () => [
+    stats({ frameSequence: 2, killsSinceLastRead: 4, aliveTotal: 900 }),
+    stats({ frameSequence: 3, killsSinceLastRead: 6, aliveTotal: 800 }),
+  ];
+  game.update(STEP);
+  assert.equal(game.freshStats.killsSinceLastRead, 10);
+  assert.equal(game.freshStats.aliveTotal, 800);
+  assert.equal(game.freshStats.frameSequence, 3);
+  assert.equal(game.latestStats.frameSequence, 3);
+});
+
+test('a capacity change pauses stepping until the new simulation is installed, then follows it', async () => {
+  const { game, simulation, renderer } = await createGame();
+  let finishRecreate;
+  const next = createFakeSimulation();
+  next.capacity = CAPACITY * 4;
+  simulation.recreateWithCapacity = () => new Promise((resolve) => { finishRecreate = () => resolve(next); });
+  let installed = null;
+  renderer.setSimulation = (installedSimulation) => { installed = installedSimulation; };
+  game.start();
+  game.update(STEP);
+  const stepsBefore = simulation.frameSequence;
+  const request = game.setCapacity(CAPACITY * 4);
+  assert.equal(await game.setCapacity(CAPACITY * 2), false, 'one change at a time');
+  game.update(STEP);
+  game.update(STEP);
+  assert.equal(simulation.frameSequence, stepsBefore, 'no step while the swap is pending');
+  finishRecreate();
+  assert.equal(await request, true);
+  assert.equal(game.simulation, next);
+  assert.equal(installed, next);
+  assert.equal(game.spawnPressure.capacity, CAPACITY * 4);
+  assert.equal(game.score.capacity, CAPACITY * 4);
+  game.update(STEP);
+  assert.equal(next.frameSequence, 1);
+  assert.equal(simulation.frameSequence, stepsBefore);
+});
+
+test('a failed capacity change keeps the old simulation and resumes stepping', async () => {
+  const { game, simulation } = await createGame();
+  simulation.recreateWithCapacity = async () => { throw new Error('out of memory'); };
+  game.start();
+  await assert.rejects(game.setCapacity(CAPACITY * 4), /out of memory/);
+  assert.equal(game.simulation, simulation);
+  const before = simulation.frameSequence;
+  game.update(STEP);
+  assert.equal(simulation.frameSequence, before + 1);
 });

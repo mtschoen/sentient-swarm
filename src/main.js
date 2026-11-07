@@ -59,9 +59,10 @@ async function boot() {
   const audio = installAudio();
   window.__murmuration.audio = audio;
   // The game waits in Ready, the swarm running without player contact, until the first gesture.
-  const game = await Game.create({ gpu, simulation, renderer, input, capacity: initialCapacity });
+  const game = await Game.create({ gpu, simulation, renderer, input, capacity: initialCapacity, effects: audio.effects });
 
-  // The game steps the simulation; stats carry the latest read-back frame plus the game state.
+  // The game steps the simulation; stats carry the latest read-back frame plus the game state. The
+  // audio follows the stats read this update (kills and the alive count drive the music intensity).
   const update = (fixedStep) => {
     game.update(fixedStep);
     if (game.latestStats) window.__murmuration.stats = { ...game.latestStats, ...game.state };

@@ -44,19 +44,22 @@ function isGesture(inputState) {
 
 export class Game {
   // projectiles is created (and registered with the simulation) when omitted; spawnPressure,
-  // random and clock (seconds, used to stamp impulses) are injectable for tests.
-  static async create({ gpu, simulation, projectiles, renderer, input, capacity, clock, spawnPressure, random = Math.random }) {
+  // random and clock (seconds, used to stamp impulses) are injectable for tests. effects
+  // (optional, the audio hook's EffectsSynth) gets bomb() for an accepted bomb press and death()
+  // for an accepted hit.
+  static async create({ gpu, simulation, projectiles, renderer, input, capacity, clock, spawnPressure, random = Math.random, effects = null }) {
     const projectileSet = projectiles ?? await Projectiles.create(gpu);
-    return new Game({ gpu, simulation, projectiles: projectileSet, renderer, input, capacity, clock, spawnPressure, random });
+    return new Game({ gpu, simulation, projectiles: projectileSet, renderer, input, capacity, clock, spawnPressure, random, effects });
   }
 
   // Use Game.create.
-  constructor({ gpu, simulation, projectiles, renderer, input, capacity = simulation.capacity, clock, spawnPressure, random }) {
+  constructor({ gpu, simulation, projectiles, renderer, input, capacity = simulation.capacity, clock, spawnPressure, random, effects = null }) {
     this.gpu = gpu;
     this.simulation = simulation;
     this.projectiles = projectiles;
     this.renderer = renderer;
     this.input = input;
+    this.effects = effects;
     this.capacity = capacity;
     this.clock = clock ?? (() => this.simulation.time);
     this.spawnPressure = spawnPressure ?? new SpawnPressure({ capacity });
@@ -144,7 +147,10 @@ export class Game {
 
     const bombPressed = inputState.bomb && !this.bombHeld;
     this.bombHeld = inputState.bomb;
-    if (bombPressed && this.run.useBomb(this.player.position)) this.simulation.requestKillAll();
+    if (bombPressed && this.run.useBomb(this.player.position)) {
+      this.simulation.requestKillAll();
+      this.effects?.bomb();
+    }
 
     const playing = this.run.phase === RunPhase.Playing;
     const controls = this.controlsFrom(inputState);
@@ -237,6 +243,7 @@ export class Game {
       if (this.run.playerHit(hitSequence, this.player.position)) {
         this.weapons.dropAll();
         this.score.recordHit();
+        this.effects?.death();
       }
     }
   }

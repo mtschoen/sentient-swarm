@@ -9,7 +9,8 @@
 // --play N instead drives a synthetic gamepad (navigator.getGamepads stubbed before the page
 // loads, read by the real input path): the left stick moves the ship 2 units left of center and
 // starts the run, then the right stick fires toward the arena center for N frames; the score
-// must be positive, the box around the ship brighter than the arena mean, and no console errors.
+// must be positive, the box around the ship (captured 60 frames into the fire, while the ship is
+// alive) brighter than the arena mean, and no console errors.
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 // Liveness: every page.evaluate is bounded by EVALUATE_TIMEOUT_MILLISECONDS (a capture resolves only
 // on a later rendered frame, so a renderer that throws or stops would leave it pending forever),
@@ -51,6 +52,8 @@ const PLAY_MOVE_FRAMES = 20;
 const PLAY_TIMEOUT_MILLISECONDS = 60_000;
 // The box around the ship, in device pixels, must be brighter than the arena as a whole.
 const SHIP_BOX_DEVICE_PIXELS = 40;
+// --play: fire frames before the ship capture.
+const PLAY_SHIP_CAPTURE_FRAMES = 60;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
 async function writeDataUrl(name, dataUrl) {
@@ -187,9 +190,10 @@ async function checkPlay(page, frames) {
   await waitForFrame(page, begin + PLAY_MOVE_FRAMES);
   await setSticks(page, [0, 0, 1, 0]);
   const firing = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
-  await page.waitForFunction((target) => window.__murmuration.frame >= target, firing + frames, { timeout: PLAY_TIMEOUT_MILLISECONDS });
-  // Captured while still firing: the ship and its fire are what must stand out from the arena.
-  const stats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  // Captured early in the fire, while the ship is surely alive (it hides from a death until its
+  // respawn, and a run can end before frames frames): the ship and its fire must stand out.
+  await waitForFrame(page, firing + Math.min(PLAY_SHIP_CAPTURE_FRAMES, frames));
+  const early = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
   const shipBox = await evaluateWithin(page, 'placing the ship box', ({ playerX, playerY, size }) => {
     const rect = window.__murmuration.arenaRect();
     return {
@@ -198,15 +202,18 @@ async function checkPlay(page, frames) {
       width: size,
       height: size,
     };
-  }, { playerX: stats.playerX, playerY: stats.playerY, size: SHIP_BOX_DEVICE_PIXELS });
+  }, { playerX: early.playerX, playerY: early.playerY, size: SHIP_BOX_DEVICE_PIXELS });
   const capture = await evaluateWithin(page, 'the play capture', (regions) => window.__murmuration.capture({ regions }), [shipBox]);
-  await setSticks(page, [0, 0, 0, 0]);
   await writeDataUrl('smoke-play.png', capture.pngDataUrl);
   const shipLuminance = capture.regionLuminances[0];
-  console.log(`smoke: play ship box luminance ${shipLuminance.toFixed(4)}, arena mean ${capture.meanLuminance.toFixed(4)}`);
+  console.log(`smoke: play ship box luminance ${shipLuminance.toFixed(4)}, arena mean ${capture.meanLuminance.toFixed(4)}, phase ${early.phase}`);
+  await page.waitForFunction((target) => window.__murmuration.frame >= target, firing + frames, { timeout: PLAY_TIMEOUT_MILLISECONDS });
+  const stats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  await setSticks(page, [0, 0, 0, 0]);
   console.log(`smoke: play ${frames} frames: score ${stats.score}, multiplier ${stats.multiplier}, lives ${stats.lives}, bombs ${stats.bombs}, armed ${stats.armed} ${stats.tier}, phase ${stats.phase}, aliveTotal ${stats.aliveTotal}`);
   if (page.consoleErrors.length > 0) return `smoke: console errors during play: ${page.consoleErrors.join(' | ')}`;
   if (!(stats.score > 0)) return `smoke: expected a positive score after ${frames} frames of fire, got ${stats.score}`;
+  if (early.phase !== 'playing') return `smoke: expected the run to be playing at the ship capture, got ${early.phase}`;
   if (!(shipLuminance > capture.meanLuminance)) {
     return `smoke: expected the ${SHIP_BOX_DEVICE_PIXELS}px box around the ship (${shipLuminance.toFixed(4)}) to be brighter than the arena mean (${capture.meanLuminance.toFixed(4)})`;
   }

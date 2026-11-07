@@ -40,7 +40,7 @@ One `Game.update(deltaSeconds)` is one fixed step (full comments at the top of `
 6. Every ready stats frame (`readAllStats`, oldest first): kills (`killsSinceLastRead`, the difference of the cumulative counter) score once per stats frame and only while Playing, awards add lives and bombs, ring detonations queue a shockwave, and each new `playerHitSequence` is acknowledged and offered to `RunState.playerHit` (which drops the weapon and resets the multiplier).
 7. `RunState.update` drains actions: clear the arena and projectiles, queue bomb and death shockwaves, respawn.
 
-While a capacity change is pending (`Game.setCapacity` through `CapacitySwap`), `Game.update` does nothing, so no step is lost to the simulation being replaced. After each update `main.js` hands `Game.freshStats` (the newest frame read this update, kills summed) to the audio hook.
+While a capacity change is pending (`Game.setCapacity` through `CapacitySwap`), `Game.update` does nothing, so no step is lost to the simulation being replaced. After each update `main.js` hands `Game.freshStats` (the newest frame read this update, kills summed) to the audio hook; the game plays the bomb and death effects itself through the hook's `EffectsSynth` (`Game.create({ effects })`).
 
 Event order inside the GPU step follows the pass order above: bomb kill-all, projectile kills, player contact. A pickup collected in the frame of charge expiry wins. Every projectile kind pierces. GPU events carry `frameSequence`; the CPU ignores hits that predate the current respawn.
 
