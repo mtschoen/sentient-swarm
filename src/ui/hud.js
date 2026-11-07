@@ -1,12 +1,36 @@
 // HUD: plain DOM in the letterbox bands (or along the arena top edge when the bands are narrow,
 // as on a phone in landscape). Everything is pointer-events none except the game-over overlay,
 // so it never steals touches from the touch sticks.
-const MINIMUM_BAND_CSS_PIXELS = 80;
+// Band text shrinks with the band so the widest content fits. Widths are each element's widest
+// text at its full band font size, in CSS pixels, measured in Chromium (system-ui, weight 800)
+// plus about 10 percent margin: a 7-digit grouped score at 28 px (142 measured), x10 at 54 px
+// (97) and SIDEWINDERS, the longest weapon word (140; the tier numeral wraps below it), at 20 px.
+export const BAND_TEXT = Object.freeze({
+  score: Object.freeze({ fullSize: 28, width: 156 }),
+  multiplier: Object.freeze({ fullSize: 54, width: 107 }),
+  weapon: Object.freeze({ fullSize: 20, width: 154 }),
+});
+// hud.css .hud-panel horizontal padding, both sides.
+export const BAND_PADDING_CSS_PIXELS = 16;
+// Bands are used only when no band text would shrink below this; narrower bands (phones in
+// landscape) use the top row. A maximized 1080p browser (98 px bands) keeps the bands with the
+// weapon name at about 10.6 px and the multiplier at about 41 px.
+export const MINIMUM_BAND_FONT_CSS_PIXELS = 10;
 const TOP_OPACITY = '0.6';
 const RESTART_GUARD_MILLISECONDS = 700;
 const ROMAN = ['', 'I', 'II', 'III'];
 const LIFE_ICON = '▲';
 const BOMB_ICON = '●';
+
+// Font sizes (CSS px) that fit each band element's widest text into a band of this width.
+export function bandFontSizes(bandWidth) {
+  const contentWidth = Math.max(0, bandWidth - BAND_PADDING_CSS_PIXELS);
+  const sizes = {};
+  for (const [name, { fullSize, width }] of Object.entries(BAND_TEXT)) {
+    sizes[name] = Math.min(fullSize, (fullSize * contentWidth) / width);
+  }
+  return sizes;
+}
 
 const groupDigits = (value) => Math.round(value).toLocaleString('en-US');
 
@@ -58,7 +82,13 @@ export function createHud(rootElement, {
 
   let restartHandler = null;
   let shownAt = 0;
-  const restart = () => restartHandler?.();
+  // Idempotent per game over: a touch tap sends pointerdown and then click, and only the first
+  // may restart.
+  const restart = () => {
+    const handler = restartHandler;
+    restartHandler = null;
+    handler?.();
+  };
   playAgain.addEventListener('click', restart);
   // A touch tap anywhere restarts, but not from the touch that ended the run.
   gameOver.addEventListener('pointerdown', (event) => {
@@ -96,7 +126,8 @@ export function createHud(rootElement, {
     layout(arenaRect, viewportSize) {
       const leftWidth = arenaRect.x;
       const rightWidth = viewportSize.width - arenaRect.x - arenaRect.width;
-      const bands = Math.min(leftWidth, rightWidth) >= MINIMUM_BAND_CSS_PIXELS;
+      const fontSizes = bandFontSizes(Math.min(leftWidth, rightWidth));
+      const bands = Object.values(fontSizes).every((size) => size >= MINIMUM_BAND_FONT_CSS_PIXELS);
       const mode = bands ? 'bands' : 'top';
       for (const panel of [leftPanel, rightPanel]) {
         panel.classList.remove('hud-bands');
@@ -104,6 +135,8 @@ export function createHud(rootElement, {
         panel.classList.add(bands ? 'hud-bands' : 'hud-top');
         panel.style.opacity = bands ? '1' : TOP_OPACITY;
         panel.style.top = `${arenaRect.y}px`;
+        // Read by hud.css in band mode; both panels share the narrower band's sizes.
+        for (const [name, size] of Object.entries(fontSizes)) panel.style.setProperty(`--hud-${name}-size`, `${size.toFixed(1)}px`);
       }
       if (bands) {
         leftPanel.style.left = '0px';

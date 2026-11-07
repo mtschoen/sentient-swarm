@@ -1,13 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHud } from '../../src/ui/hud.js';
+import * as hudModule from '../../src/ui/hud.js';
+
+const { createHud } = hudModule;
 
 function createFakeDocument() {
   const make = (tagName) => {
     const classes = new Set();
     const listeners = {};
+    const style = { setProperty(name, value) { this[name] = value; } };
     return {
-      tagName, textContent: '', children: [], style: {}, hidden: false,
+      tagName, textContent: '', children: [], style, hidden: false,
       classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name), contains: (name) => classes.has(name) },
       append(...nodes) { this.children.push(...nodes); },
       addEventListener(type, listener) { (listeners[type] ??= []).push(listener); },
@@ -53,12 +56,45 @@ test('base gun reads BASE', () => {
   assert.equal(find(root, 'hud-weapon').textContent, 'BASE');
 });
 
-test('layout uses the bands when both are at least 80 px, else the top edge', () => {
+test('layout uses the bands when both fit the band text, else the top edge', () => {
   const { hud } = setup();
   const arena = (x, width) => ({ x, y: 0, width, height: 400 });
   assert.equal(hud.layout(arena(100, 800), { width: 1000, height: 400 }), 'bands');
   assert.equal(hud.layout(arena(20, 960), { width: 1000, height: 540 }), 'top');
   assert.equal(hud.layout(arena(100, 840), { width: 1000, height: 400 }), 'top');
+});
+
+// Letterboxed 16:9 arena rectangle for a window, as main.js passes it (CSS pixels).
+function windowLayout(width, height) {
+  const arenaWidth = Math.min(width, (height * 16) / 9);
+  const arenaHeight = (arenaWidth * 9) / 16;
+  return [{ x: (width - arenaWidth) / 2, y: (height - arenaHeight) / 2, width: arenaWidth, height: arenaHeight }, { width, height }];
+}
+
+test('band text is sized to fit its band: 1920x970 and 1366x650 keep bands, phone landscape uses the top row', () => {
+  const { hud, root } = setup();
+  const { BAND_TEXT, BAND_PADDING_CSS_PIXELS, MINIMUM_BAND_FONT_CSS_PIXELS } = hudModule;
+  assert.ok(BAND_TEXT, 'hud.js exports the band text widths');
+  for (const [width, height] of [[1920, 970], [1366, 650], [2560, 1300]]) {
+    const [arena, viewport] = windowLayout(width, height);
+    assert.equal(hud.layout(arena, viewport), 'bands', `${width}x${height}`);
+    const contentWidth = arena.x - BAND_PADDING_CSS_PIXELS;
+    for (const panelName of ['hud-left', 'hud-right']) {
+      const panel = find(root, panelName);
+      for (const [name, { fullSize, width: fullWidth }] of Object.entries(BAND_TEXT)) {
+        const size = Number.parseFloat(panel.style[`--hud-${name}-size`]);
+        assert.ok(size >= MINIMUM_BAND_FONT_CSS_PIXELS && size <= fullSize, `${width}x${height} ${name} ${size}`);
+        // Text width scales with font size; the rounding to 0.1 px may add at most 0.05 px.
+        assert.ok((fullWidth * size) / fullSize <= contentWidth + 0.5, `${width}x${height} ${name} fits`);
+      }
+    }
+  }
+  for (const [width, height] of [[932, 430], [844, 390], [1280, 720]]) {
+    assert.equal(hud.layout(...windowLayout(width, height)), 'top', `${width}x${height}`);
+  }
+  // Wide bands get the full sizes.
+  hud.layout(...windowLayout(3440, 1000));
+  assert.equal(find(root, 'hud-left').style['--hud-multiplier-size'], '54.0px');
 });
 
 test('game over shows the score and restarts from the button', () => {
@@ -85,4 +121,19 @@ test('touch tap restarts only after the guard delay and mouse taps never do', ()
   assert.equal(restarts, 0);
   overlay.fire('pointerdown', { pointerType: 'touch' });
   assert.equal(restarts, 1);
+});
+
+test('a touch tap on Play again (pointerdown, then click) restarts once', () => {
+  const { hud, root, clock } = setup();
+  let restarts = 0;
+  hud.showGameOver(1, () => { restarts += 1; });
+  clock.now += 1000;
+  find(root, 'hud-gameover').fire('pointerdown', { pointerType: 'touch' });
+  find(root, 'hud-play-again').fire('click');
+  assert.equal(restarts, 1);
+  // The next game over arms it again.
+  hud.hideGameOver();
+  hud.showGameOver(2, () => { restarts += 1; });
+  find(root, 'hud-play-again').fire('click');
+  assert.equal(restarts, 2);
 });
