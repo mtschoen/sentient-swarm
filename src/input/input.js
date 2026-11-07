@@ -11,6 +11,8 @@ export class InputState {
     this.bomb = false;
     this.pointerWorld = null;
     this.pointerPrimaryDown = false;
+    // Any touch is down on the canvas, even one that has not moved yet (a tap starts the run).
+    this.touching = false;
   }
 }
 
@@ -33,6 +35,7 @@ export function createInput(canvas, viewport, { windowObject = window, navigator
     state.move = sumClamped(sumClamped(gamepad.move, touch.move), keyboard.move);
     state.aim = sumClamped(gamepad.aim, touch.aim);
     state.firing = gamepad.firing || touch.firing;
+    state.touching = touch.touching;
     state.bomb = gamepad.bomb || keyboard.bomb || pointer.secondaryDown;
     pointer.update();
     state.pointerWorld = pointer.world;

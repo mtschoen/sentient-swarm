@@ -18,12 +18,12 @@ You are a one-hit ship in an arena full of flocking enemies. One touch kills you
 | Input | Move | Aim and fire | Bomb |
 | --- | --- | --- | --- |
 | Keyboard and mouse | WASD or arrow keys | Mouse aims, hold the left button to fire | Space or the right mouse button |
-| Gamepad | Left stick | Right stick aims, and pushing it past half fires | Any of the four face buttons |
+| Gamepad | Left stick | Right stick aims, and pushing it past half fires | Any face button or trigger |
 | Touch | Left half of the screen, a floating stick | Right half, a floating stick that aims and fires | None |
 
 - The right mouse button also still holds the 4x inspect zoom from the demo, so a bomb by mouse zooms the view while the button is down. Use Space to bomb without the zoom.
 - A bomb kills every agent in the arena and scores nothing. You start with 3 bombs and 3 lives, and a press with no bombs left does nothing.
-- After a hit you die, the arena clears (that scores nothing either), and you respawn after a short pause with 2 seconds of invulnerability. With no lives left the run ends; use Play again (or tap) to restart.
+- After a hit you die, the arena clears (that scores nothing either), and you respawn after a short pause with 2 seconds of invulnerability. With no lives left the run ends; use Play again (or tap), or press fire or bomb on a gamepad or Space on the keyboard, to restart.
 - The first click, tap or key press starts the procedural techno (it speeds up, opens its filters and adds a lead as the arena fills and kills land; tempo changes land on bar starts). Press M to mute or resume all sound.
 
 ### Weapons and pickups
@@ -35,11 +35,11 @@ You start on the base gun: a three-bullet spread with unlimited ammo. A pickup a
 | Beam | A continuous beam | Wider each tier |
 | Scatter | A short-range fan of pellets | 9, 13, 17 pellets |
 | Rail | Fast shots in parallel lines | 1, 2, 3 shots |
-| Pulse | A slow orb that detonates into an expanding ring in dense crowds | 1, 2, 3 orbs |
+| Pulse | A slow orb that detonates into an expanding ring in dense crowds, or when it expires or leaves the arena | 1, 2, 3 orbs |
 | Sidewinders | Missiles that turn toward the densest part of the swarm | 2, 4, 6 missiles |
 
 - Every shot pierces: it keeps going through the agents it kills.
-- The arena offers one pickup type at a time, rotating every 20 seconds (the HUD shows the next type). Pickups appear on score milestones and at least every 10 seconds while you are on the base gun. An untouched pickup fades out after 10 seconds.
+- The arena offers one pickup type at a time, rotating every 20 seconds (the HUD shows the next type). Pickups appear when your multiplier steps up and at least every 10 seconds while you are on the base gun. An untouched pickup fades out after 10 seconds.
 - Picking up the same type adds a tier (up to 3) and refills the charge. A different type drops you one tier (never below 1) and refills the charge.
 - The charge ring around the ship is the charge left: the bright arc is the fraction remaining, drawn clockwise from the top. It drains only while you fire, and when it empties you return to the base gun. Dying drops the weapon.
 

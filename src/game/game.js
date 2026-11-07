@@ -1,9 +1,12 @@
 // Game orchestration: joins input, the player ship, weapons, pickups, score, run state and spawn
 // pressure to the GPU simulation and its projectiles. The game waits in Ready (the swarm runs
-// with player contact off) until start(), or until the first gesture: a press of fire, bomb or a
-// movement key or stick (the spec's one tap, click or button press). One update is one step:
-//   1. input.update and read input.state (a gesture starts the run); a rising bomb edge that run.useBomb accepts calls
-//      simulation.requestKillAll before this step, so the bomb kills before projectiles and contact.
+// with player contact off) until start(), or until the first gesture: a press of fire, bomb, a
+// movement key or stick, or any touch (the spec's one tap, click or button press). At GameOver a
+// fresh fire or bomb press restarts once RESTART_GUARD_SECONDS of game time have passed (the
+// HUD's Play again button covers mouse and touch). One update is one step:
+//   1. input.update and read input.state (a gesture starts or restarts the run); a rising bomb
+//      edge that run.useBomb accepts calls simulation.requestKillAll before this step, so the
+//      bomb kills before projectiles and contact.
 //   2. player.update (Playing only), with mouse aim derived as pointerWorld minus the player.
 //   3. pickups.update, then collect at the player into weapons.collect (before charge expiry); a
 //      collection queues a PICKUP_IMPULSE_STRENGTH impulse at the ship.
@@ -35,10 +38,12 @@ const NO_AIM = Object.freeze({ x: 0, y: 0 });
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
 const RING_IMPULSE_STRENGTH = 0.3;
 const PICKUP_IMPULSE_STRENGTH = 0.15;
+// Matches the HUD's touch restart guard, so the press that ended the run cannot restart it.
+export const RESTART_GUARD_SECONDS = 0.7;
 
 function isGesture(inputState) {
   const { move, aim } = inputState;
-  return inputState.firing || inputState.pointerPrimaryDown || inputState.bomb
+  return inputState.firing || inputState.pointerPrimaryDown || inputState.bomb || inputState.touching
     || move.x !== 0 || move.y !== 0 || aim.x !== 0 || aim.y !== 0;
 }
 
@@ -76,6 +81,9 @@ export class Game {
     this.lastScoredFrameSequence = 0;
     this.lastHitSequenceRead = 0;
     this.bombHeld = false;
+    this.firingHeld = false;
+    // Game time spent in GameOver, for the restart guard.
+    this.gameOverSeconds = 0;
     this.pendingImpulses = [];
     // Stepping pauses from a capacity request until the new simulation is installed (CapacitySwap).
     // install runs synchronously in the recreate's continuation, so no frame sees a destroyed
@@ -132,7 +140,11 @@ export class Game {
     this.projectiles.clear();
     this.simulation.requestKillAll();
     this.run.setRespawnSequence(this.simulation.frameSequence + 1);
+    // Stats frames up to the last submitted step belong to the previous run (or to Ready): their
+    // kills must not score in this one, even when they are read only after the restart.
+    this.lastScoredFrameSequence = Math.max(this.lastScoredFrameSequence, this.simulation.frameSequence);
     this.pendingImpulses = [];
+    this.gameOverSeconds = 0;
     // A bomb button held through the restart needs a fresh press.
     this.bombHeld = true;
   }
@@ -143,7 +155,10 @@ export class Game {
     if (this.capacitySwap.simulationPaused) return;
     this.input.update();
     const inputState = this.input.state;
+    const firingPressed = inputState.firing && !this.firingHeld;
+    this.firingHeld = inputState.firing;
     if (this.run.phase === RunPhase.Ready && isGesture(inputState)) this.start();
+    else if (this.run.phase === RunPhase.GameOver) this.updateGameOver(deltaSeconds, firingPressed || (inputState.bomb && !this.bombHeld));
 
     const bombPressed = inputState.bomb && !this.bombHeld;
     this.bombHeld = inputState.bomb;
@@ -191,6 +206,12 @@ export class Game {
       this.freshStats = { ...frames[frames.length - 1], killsSinceLastRead };
     }
     this.run.update(deltaSeconds).forEach((action) => this.handleAction(action));
+  }
+
+  // Gamepad and keyboard restart: a fresh fire or bomb press once the guard window has passed.
+  updateGameOver(deltaSeconds, pressed) {
+    this.gameOverSeconds += deltaSeconds;
+    if (pressed && this.gameOverSeconds > RESTART_GUARD_SECONDS) this.restart();
   }
 
   // Stick or touch aim wins while it is pushed; otherwise the mouse aims from the ship to the
@@ -262,9 +283,12 @@ export class Game {
         this.run.setRespawnSequence(this.simulation.frameSequence + 1);
         this.spawnPressure.reset();
         break;
+      case 'gameOver':
+        // The phase itself freezes play until restart; the restart guard counts from here.
+        this.gameOverSeconds = 0;
+        break;
       default:
-        // bomb: the kill-all was requested when the press was accepted. gameOver: the phase
-        // itself freezes play until restart.
+        // bomb: the kill-all was requested when the press was accepted.
         break;
     }
   }
@@ -281,7 +305,8 @@ export class Game {
     return impulses;
   }
 
-  // What the renderer draws besides the swarm. The ship hides from death until respawn.
+  // What the renderer draws besides the swarm. The ship hides from death until respawn, and at
+  // game over.
   scene() {
     const hidden = [RunPhase.Dying, RunPhase.Respawning, RunPhase.GameOver].includes(this.run.phase);
     return {

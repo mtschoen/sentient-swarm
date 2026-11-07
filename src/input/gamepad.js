@@ -1,7 +1,8 @@
-// Gamepad polling: left stick moves, right stick aims and fires, any face button bombs.
+// Gamepad polling: left stick moves, right stick aims and fires, any face button or trigger bombs.
 export const DEAD_ZONE = 0.2;
 export const FIRE_THRESHOLD = 0.5;
-const FACE_BUTTON_COUNT = 4;
+// Standard mapping: 0 to 3 are the face buttons, 6 and 7 the left and right triggers.
+const BOMB_BUTTON_INDICES = [0, 1, 2, 3, 6, 7];
 
 function readStick(gamepad, horizontalIndex) {
   const x = gamepad.axes[horizontalIndex] ?? 0;
@@ -22,9 +23,7 @@ export function readGamepad(navigatorObject) {
     result.move = { x: left.x, y: left.y };
     result.aim = { x: right.x, y: right.y };
     result.firing = right.magnitude > FIRE_THRESHOLD;
-    for (let index = 0; index < FACE_BUTTON_COUNT; index += 1) {
-      if (gamepad.buttons[index]?.pressed) result.bomb = true;
-    }
+    if (BOMB_BUTTON_INDICES.some((index) => gamepad.buttons[index]?.pressed)) result.bomb = true;
     break;
   }
   return result;

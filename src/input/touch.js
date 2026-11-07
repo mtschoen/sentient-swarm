@@ -2,7 +2,8 @@
 export const STICK_RADIUS = 60;
 
 export function createTouchSource(canvas) {
-  const source = { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, firing: false, dispose };
+  // touching: some touch is active, including a stationary one that has not moved a stick yet.
+  const source = { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, firing: false, touching: false, dispose };
   // Active touches keyed by identifier: { role, originX, originY }.
   const active = new Map();
 
@@ -33,6 +34,7 @@ export function createTouchSource(canvas) {
       active.set(touch.identifier, { role, originX: position.x, originY: position.y });
       if (role === 'aim') source.firing = true;
     }
+    source.touching = active.size > 0;
   }
 
   function onMove(event) {
@@ -52,6 +54,7 @@ export function createTouchSource(canvas) {
       source[entry.role] = { x: 0, y: 0 };
       if (entry.role === 'aim') source.firing = false;
     }
+    source.touching = active.size > 0;
   }
 
   canvas.addEventListener('touchstart', onStart);

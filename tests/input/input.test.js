@@ -237,3 +237,30 @@ test('Space and the right mouse button hold the bomb button', () => {
   input.update();
   assert.equal(input.state.bomb, false);
 });
+
+test('a stationary touch on either half reports touching until it ends', () => {
+  const { canvas, input } = createFixture();
+  input.update();
+  assert.equal(input.state.touching, false);
+  canvas.dispatchEvent(touchEvent('touchstart', [{ identifier: 1, clientX: 200, clientY: 250 }]));
+  input.update();
+  assert.equal(input.state.touching, true);
+  assert.deepEqual(input.state.move, { x: 0, y: 0 });
+  canvas.dispatchEvent(touchEvent('touchend', [{ identifier: 1, clientX: 200, clientY: 250 }]));
+  input.update();
+  assert.equal(input.state.touching, false);
+});
+
+test('gamepad triggers (buttons 6 and 7) bomb like the face buttons', () => {
+  const { gamepads, input } = createFixture();
+  for (const triggerIndex of [6, 7]) {
+    const buttons = Array.from({ length: 8 }, () => ({ pressed: false }));
+    buttons[triggerIndex] = { pressed: true };
+    gamepads[0] = { axes: [0, 0, 0, 0], buttons };
+    input.update();
+    assert.equal(input.state.bomb, true, `button ${triggerIndex}`);
+  }
+  gamepads[0] = { axes: [0, 0, 0, 0], buttons: Array.from({ length: 8 }, (unused, index) => ({ pressed: index === 4 || index === 5 })) };
+  input.update();
+  assert.equal(input.state.bomb, false);
+});

@@ -373,7 +373,7 @@ test('a pickup collected on the frame the charge would reach zero keeps the weap
 });
 
 test('restart after game over resets every module and clears the arena once', async () => {
-  const { game, simulation, input } = await createGame();
+  const { game, simulation, input, projectiles } = await createGame();
   game.start();
   simulation.scriptedStats.push(stats({ frameSequence: 1, killsSinceLastRead: 200 }));
   game.update(STEP);
@@ -391,8 +391,11 @@ test('restart after game over resets every module and clears the arena once', as
   game.pickups.spawn(8, 4.5);
   game.weapons.collect('rail');
   const killAllBefore = simulation.killAllRequests;
+  const clearsBefore = projectiles.clears;
+  const lastStepBeforeRestart = simulation.frameSequence;
   game.restart();
   assert.equal(simulation.killAllRequests, killAllBefore + 1);
+  assert.equal(projectiles.clears, clearsBefore + 1);
   const state = game.state;
   assert.equal(state.score, 0);
   assert.equal(state.multiplier, 1);
@@ -403,6 +406,10 @@ test('restart after game over resets every module and clears the arena once', as
   assert.equal(state.phase, RunPhase.Playing);
   assert.equal(game.pickups.pickups.length, 0);
   assert.equal(game.spawnPressure.elapsed, 0);
+  // A stats frame from the last step before the restart, read only now, scores nothing.
+  simulation.scriptedStats.push(stats({ frameSequence: lastStepBeforeRestart, killsSinceLastRead: 50 }));
+  game.update(STEP);
+  assert.equal(game.state.score, 0);
   // The previous run's last hit, still in the persistent stats tail, takes no life.
   simulation.scriptedStats.push(stats({ frameSequence: simulation.frameSequence, playerHitSequence: lastHitSequence, hitLatch: 1 }));
   game.update(STEP);
@@ -415,6 +422,71 @@ test('restart after game over resets every module and clears the arena once', as
   assert.equal(game.state.lives, 3);
   assert.ok(simulation.acknowledged.includes(beforeRestart));
   assert.equal(simulation.killAllRequests, killAllBefore + 1);
+});
+
+// Plays the run with three current hits, each after the invulnerability window, and stops on the
+// update that enters GameOver.
+function reachGameOver(game, simulation) {
+  game.start();
+  for (let life = 0; life < 3; life += 1) {
+    runFor(game, 2.1);
+    hitNow(game, simulation);
+    if (life < 2) runFor(game, 1.4);
+  }
+  const MAXIMUM_STEPS = 120;
+  for (let step = 0; step < MAXIMUM_STEPS && game.state.phase !== RunPhase.GameOver; step += 1) game.update(STEP);
+  assert.equal(game.state.phase, RunPhase.GameOver);
+}
+
+test('after game over a fresh bomb press past the guard window restarts without spending a bomb', async () => {
+  const { game, simulation, input } = await createGame();
+  reachGameOver(game, simulation);
+  // A press inside the guard window (the press that may have ended the run) is ignored.
+  input.state.bomb = true;
+  game.update(STEP);
+  assert.equal(game.state.phase, RunPhase.GameOver);
+  // Held past the window it is not a fresh press.
+  runFor(game, 1);
+  assert.equal(game.state.phase, RunPhase.GameOver);
+  input.state.bomb = false;
+  game.update(STEP);
+  input.state.bomb = true;
+  game.update(STEP);
+  assert.equal(game.state.phase, RunPhase.Playing);
+  assert.equal(game.state.lives, 3);
+  assert.equal(game.state.bombs, 3);
+});
+
+test('after game over a fresh fire (right stick) press past the guard window restarts', async () => {
+  const { game, simulation, input } = await createGame();
+  input.state.aim = { x: 1, y: 0 };
+  input.state.firing = true;
+  reachGameOver(game, simulation);
+  runFor(game, 1);
+  assert.equal(game.state.phase, RunPhase.GameOver, 'fire held through the death is not a fresh press');
+  input.state.firing = false;
+  game.update(STEP);
+  input.state.firing = true;
+  game.update(STEP);
+  assert.equal(game.state.phase, RunPhase.Playing);
+});
+
+test('the guard window is game time: a fresh press just inside it does not restart', async () => {
+  const { game, simulation, input } = await createGame();
+  reachGameOver(game, simulation);
+  runFor(game, 0.6);
+  input.state.bomb = true;
+  game.update(STEP);
+  assert.equal(game.state.phase, RunPhase.GameOver);
+});
+
+test('a stationary touch (no stick displacement yet) starts the run from Ready', async () => {
+  const { game, input } = await createGame();
+  game.update(STEP);
+  assert.equal(game.state.phase, RunPhase.Ready);
+  input.state.touching = true;
+  game.update(STEP);
+  assert.equal(game.state.phase, RunPhase.Playing);
 });
 
 test('awards add a life and a bomb at their thresholds', async () => {
