@@ -63,6 +63,25 @@ Press start (or just load the page the first time) and you are in the arena. Ene
 - Spawn pressure ramps with time and score. Pressure means how many agents are alive at once and how fast dead slots refill, up to the capacity.
 - Dying drops all weapon upgrades (see Weapons). This is the Beat Hazard rule and it is the main sting of a death besides the multiplier reset.
 
+### Arena and camera
+
+Designer's calls, made in response to the builder check:
+
+- The arena is a bounded 16:9 rectangle, Geometry Wars style, shown in full at all times. The camera does not follow the player. The arena is letterboxed into whatever viewport it gets; on a phone in landscape that is nearly the whole screen.
+- Walls are soft for agents (a steering force back inside within a margin, so masses pile against walls rather than clip) and hard for the player and bullets. No wrapping, no toroidal grid.
+- Glyph size target: a 4 device-pixel core with a glow about twice that, on both targets. The renderer works in device pixels, not CSS pixels. If a device cannot hold that at its capacity, capacity goes down before glyph size does; the anti-goal is blobs, not low counts.
+- "Every enemy on screen" therefore means every alive agent. The smart bomb kills everything alive.
+- Spatial grid extent is the arena. Cell size is tied to neighbor radius so a neighbor query reads the 3x3 neighborhood; resolution is a preset value.
+
+### Spawning, death, and survival
+
+Designer's calls, Geometry Wars precedent:
+
+- Agents spawn at random positions at least a quarter of the arena width from the player, never inside the player's current view-relative safe radius. Each spawn has a short spawn-in (about half a second) during which the agent is harmless, cannot be killed, and visibly pulses, which is also the tell that lets the player read where pressure is coming from.
+- Contact between any live agent and the player kills the player. The touching agent dies too.
+- Player death clears the whole arena (every alive agent dies, with a full particle flood and grid shockwave) and the player respawns at the arena center after a short pause with about two seconds of invulnerability. Spawn pressure resumes from a low value and ramps back.
+- Agents die only to player fire, smart bombs, player contact, and the death clear. Species never kill or consume each other; Predators distort other swarms through attraction and repulsion only. The one-hit rule and the no-coordination rule both stand.
+
 ### Enemies: species as parameter rows
 
 There is one enemy implementation. Every enemy is a boid with the classic rules (seek the player, cohesion, alignment, separation), plus flee-from-fire, plus an optional preferred orbit radius around the player, plus a row in a species-by-species interaction matrix giving signed attraction or repulsion to neighbors of each other species. A species is a row of those weights plus a glyph, a hue, and a glow profile. Nothing else distinguishes species.
@@ -126,7 +145,7 @@ The "layers" the owner asked for come from the type by tier matrix plus the char
 
 ### Settings and presets
 
-On first load the game runs a short GPU probe: a few frames of the real sim and render at a trial capacity, timed with GPU timestamps where available and frame timing otherwise. From that it picks a quality preset: agent capacity, particle budget, grid resolution, bloom quality, and sim rate (full, or half with interpolated rendering). The preset is shown and editable in Settings.
+Instant start wins over the probe. On first load the game starts immediately at a conservative preset keyed only to coarse adapter facts (device type, adapter limits). During the first seconds of real play it measures frame time with GPU timestamps where available and frame timing otherwise, then steps the preset up (or down) to the highest level that holds the frame budget. Stepping reallocates the agent buffers at a frame boundary and copies live agents across in a compute pass, so capacity can change without a restart. The result is persisted and later loads start at it; the probe re-runs only when the adapter changes or the player asks. A preset is: agent capacity, particle budget, grid resolution, bloom quality, and sim rate (full, or half with interpolated rendering). The preset is shown and editable in Settings.
 
 Following PolyPhase's calibrated-slider pattern: effect sliders read 100 percent at the tuned default and can be pushed past it. Reduced motion is opt-in and defaults off (Windows reports `prefers-reduced-motion` spuriously when animation effects are disabled; see the owner's gotcha note). Music and effects volume are separate.
 
@@ -157,6 +176,7 @@ Procedural audio avoids licensing and keeps the deploy static. If the owner late
 - Stats readback (kills by species, pickups collected, player hit, agents alive) through a small buffer mapped asynchronously with a one-frame delay. Score, lives, multiplier, and weapon state live on the CPU and are derived from those events.
 - Tests: CPU-side logic (spawner shares, score and multiplier, weapon tiers and charge, preset selection from probe results, settings persistence) under a node test runner with injected time. WGSL compilation and a short smoke run (load page, run N frames, assert no console errors and a frame-time ceiling) under a browser automation harness in CI where a GPU is available, and locally otherwise. Pull request previews are the phone test surface; the owner tests on a physical foldable Android and this time on an iPhone running Safari as well.
 - Hosted previews over local setup for the owner's testing. Each pull request body starts with a problem statement.
+- Reference material the builder may read: the owner's PolyPhase repo at `~/polyphase` (Pages assembly script, preview workflow, mobile smoke tests, calibrated sliders) and the throwaway spike at `~/murmuration-spike` (grid and species shader structure). Read for patterns; do not copy either wholesale.
 
 ## Left to the builder
 
