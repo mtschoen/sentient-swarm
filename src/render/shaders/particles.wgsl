@@ -18,7 +18,16 @@ struct ParticleView {
 }
 
 @group(0) @binding(0) var<uniform> view: ParticleView;
-@group(0) @binding(1) var<storage, read> particles: array<Particle>;
+// ParticlePool in common.wgsl, with the cursor as a plain u32: atomics need read_write storage.
+struct ParticlePoolView {
+  cursor: u32,
+  headerPadding0: u32,
+  headerPadding1: u32,
+  headerPadding2: u32,
+  particles: array<Particle>,
+}
+
+@group(0) @binding(1) var<storage, read> pool: ParticlePoolView;
 
 const PARTICLE_INTENSITY: f32 = 0.4;
 
@@ -31,7 +40,7 @@ struct ParticleVaryings {
 @vertex
 fn particleVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> ParticleVaryings {
   var output: ParticleVaryings;
-  let particle = particles[instanceIndex];
+  let particle = pool.particles[instanceIndex];
   if (!isParticleAlive(particle)) {
     output.position = vec4f(2.0, 2.0, 0.0, 1.0);
     output.local = vec2f(0.0);

@@ -143,6 +143,42 @@ fn isParticleAlive(particle: Particle) -> bool {
   return particle.lifetime > 0.0 && particle.age < particle.lifetime;
 }
 
+// The particles buffer: a 16-byte header whose first word is the spawn cursor (killers claim
+// slots with one atomicAdd, wrapping modulo the particle count), then the particles. Read-only
+// views (the particle renderer) declare the same layout with a plain u32 cursor.
+struct ParticlePool {
+  cursor: atomic<u32>,
+  headerPadding0: u32,
+  headerPadding1: u32,
+  headerPadding2: u32,
+  particles: array<Particle>,
+}
+
+// 48 bytes, 16-byte aligned for storage arrays. flags bit 0 is alive. extra is the ring growth
+// speed for a pulseRing, the detonation density threshold for a pulseOrb and the turn rate in
+// radians per second for a sidewinder. A beam's velocity is its unit direction and its radius its
+// half width.
+struct Projectile {
+  position: vec2f,
+  previousPosition: vec2f,
+  velocity: vec2f,
+  radius: f32,
+  lifetime: f32,
+  kind: u32,
+  flags: u32,
+  seed: f32,
+  extra: f32,
+}
+
+const PROJECTILE_KIND_BULLET: u32 = 0u;
+const PROJECTILE_KIND_SCATTER: u32 = 1u;
+const PROJECTILE_KIND_RAIL: u32 = 2u;
+const PROJECTILE_KIND_PULSE_ORB: u32 = 3u;
+const PROJECTILE_KIND_PULSE_RING: u32 = 4u;
+const PROJECTILE_KIND_SIDEWINDER: u32 = 5u;
+const PROJECTILE_KIND_BEAM: u32 = 6u;
+const PROJECTILE_FLAG_ALIVE: u32 = 1u;
+
 fn pcgHash(value: u32) -> u32 {
   let state = value * 747796405u + 2891336453u;
   let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
@@ -165,4 +201,28 @@ fn hsvToRgb(hue: f32, saturation: f32, value: f32) -> vec3f {
 fn packColor(rgb: vec3f) -> u32 {
   let channels = vec3u(clamp(rgb, vec3f(0.0), vec3f(1.0)) * 255.0 + vec3f(0.5));
   return channels.x | (channels.y << 8u) | (channels.z << 16u) | (255u << 24u);
+}
+
+// Kill splash particles, shared by every pass that kills agents: the agent's species hue shifted
+// by its hueJitter, radiating at a random speed with a random lifetime.
+const KILL_PARTICLE_MINIMUM_SPEED: f32 = 1.5;
+const KILL_PARTICLE_SPEED_RANGE: f32 = 1.5;
+const KILL_PARTICLE_MINIMUM_LIFETIME: f32 = 0.4;
+const KILL_PARTICLE_LIFETIME_RANGE: f32 = 0.3;
+const KILL_PARTICLE_HUE_JITTER_SPREAD: f32 = 0.05;
+const KILL_PARTICLE_SATURATION: f32 = 0.8;
+
+fn killParticleColor(hue: f32, hueJitter: f32) -> u32 {
+  return packColor(hsvToRgb(fract(hue + KILL_PARTICLE_HUE_JITTER_SPREAD * hueJitter), KILL_PARTICLE_SATURATION, 1.0));
+}
+
+fn killParticle(position: vec2f, angle: f32, color: u32, randomState: ptr<function, u32>) -> Particle {
+  var particle: Particle;
+  particle.position = position;
+  particle.velocity = vec2f(cos(angle), sin(angle)) * (KILL_PARTICLE_MINIMUM_SPEED + KILL_PARTICLE_SPEED_RANGE * nextRandom(randomState));
+  particle.color = color;
+  particle.age = 0.0;
+  particle.lifetime = KILL_PARTICLE_MINIMUM_LIFETIME + KILL_PARTICLE_LIFETIME_RANGE * nextRandom(randomState);
+  particle.padding = 0.0;
+  return particle;
 }

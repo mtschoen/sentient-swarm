@@ -13,10 +13,16 @@
 // ring and returns the newest ready frame, a few frames behind, so poll it every step.
 //
 // step order: frameSequence and time advance; params and spawn budget are written; the stats
-// alive counters are cleared (kills stay cumulative); spawn on agentsIn; grid and coarse field on agentsIn; steer agentsIn to
-// agentsOut plus integrate; debug kill on agentsOut (skipped when no kill is armed; the arm lasts
-// one step, so callers re-arm every frame while the button is held); particle step; stats on agentsOut; copy stats
-// into the staging ring; swap, so agentsBuffer is the newest output.
+// alive counters are cleared (kills stay cumulative); spawn on agentsIn; grid and coarse field on
+// agentsIn; steer agentsIn to agentsOut plus integrate; registered passes in registration order
+// (registerPass); debug kill on agentsOut (skipped when no kill is armed; the arm lasts one step,
+// so callers re-arm every frame while the button is held); particle step; stats on agentsOut;
+// copy stats into the staging ring; swap, so agentsBuffer is the newest output.
+//
+// A registered pass is encodeFunction(encoder, context) with context { agentsBuffer (agentsOut,
+// freshly integrated), gridBuffers (built from agentsIn, so cell membership is one step stale),
+// fieldBuffers, particlePool, statsBuffer (alive counters cleared this step; kill passes add to its
+// cumulative kills index), paramsBuffer, speciesTableBuffer }.
 import { StagingRing, createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { AgentCompaction } from './compact.js';
@@ -95,6 +101,7 @@ export class Simulation {
     this.timeValue = 0;
     this.lastKillsTotal = 0;
     this.sameSpeciesCohesion = true;
+    this.registeredPasses = [];
     this.setSpecies(species, matrix);
     this.setShares(shares);
   }
@@ -125,6 +132,18 @@ export class Simulation {
     this.species = rows;
     this.matrix = matrix;
     this.device.queue.writeBuffer(this.speciesTableBufferValue, 0, packSpeciesTable(rows, matrix));
+  }
+
+  // Adds encodeFunction(encoder, context) to every step after integrate and before the debug
+  // kill (see the header for context). Returns a function that removes it; the list is shared
+  // with instances built by recreateWithCapacity, so the remover keeps working after a rebuild.
+  registerPass(encodeFunction) {
+    const passes = this.registeredPasses;
+    passes.push(encodeFunction);
+    return () => {
+      const index = passes.indexOf(encodeFunction);
+      if (index !== -1) passes.splice(index, 1);
+    };
   }
 
   setSameSpeciesCohesion(enabled) {
@@ -165,6 +184,18 @@ export class Simulation {
     this.grid.encode(encoder, agentsIn, params);
     this.field.encode(encoder, agentsIn, this.grid.buffers, params);
     this.steering.encode(encoder, agentsIn, agentsOut, this.grid.buffers, this.field.buffers.blurred, this.speciesTableBufferValue, params);
+    if (this.registeredPasses.length > 0) {
+      const context = {
+        agentsBuffer: agentsOut,
+        gridBuffers: this.grid.buffers,
+        fieldBuffers: this.field.buffers,
+        particlePool: this.particlePoolValue,
+        statsBuffer: this.statsBufferValue,
+        paramsBuffer: params,
+        speciesTableBuffer: this.speciesTableBufferValue,
+      };
+      this.registeredPasses.forEach((encodeFunction) => encodeFunction(encoder, context));
+    }
     if (killRadius > 0) {
       this.killPass.encode(encoder, {
         agentsBuffer: agentsOut,
@@ -212,7 +243,7 @@ export class Simulation {
   // (main.js pauses stepping through CapacitySwap), so the carried state is the final one.
   // The alive agents are compacted into the first slots of the new buffer: the grid is rebuilt on
   // the newest agents and compact.wgsl copies its listed agents in grid order, so a shrink keeps
-  // every alive agent that fits. Species, matrix, shares and the cohesion mode are read again
+  // every alive agent that fits. The registered passes carry over. Species, matrix, shares and the cohesion mode are read again
   // after the awaits, so edits made meanwhile are not lost. On a rejection (allocation or
   // pipeline failure) this instance is untouched and still usable. Stats resume after the new
   // instance's next step.
@@ -247,6 +278,7 @@ export class Simulation {
     next.setSpecies(this.species, this.matrix);
     next.setShares(this.sharesValue);
     next.setSameSpeciesCohesion(this.sameSpeciesCohesion);
+    next.registeredPasses = this.registeredPasses;
     next.frameSequenceValue = this.frameSequenceValue;
     next.timeValue = this.timeValue;
     next.setPlayer(...this.playerPosition);
