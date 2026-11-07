@@ -1,0 +1,82 @@
+// Weapon tables: one source for projectile kind numbers (shared with the GPU projectile code) and tier values.
+
+export const PROJECTILE_KINDS = Object.freeze({
+  bullet: 0,
+  scatter: 1,
+  rail: 2,
+  pulseOrb: 3,
+  pulseRing: 4,
+  sidewinder: 5,
+  beam: 6,
+});
+
+export const WEAPON_TYPE_NAMES = Object.freeze(['beam', 'scatter', 'rail', 'pulse', 'sidewinders']);
+
+function tier(values) {
+  return Object.freeze({
+    fireInterval: 0,
+    projectilesPerShot: 1,
+    spreadRadians: 0,
+    speed: 0,
+    radius: 0.04,
+    lifetime: 1,
+    chargeSeconds: 0,
+    extra: 0,
+    parallelOffset: 0,
+    ...values,
+  });
+}
+
+function tiers(shared, perTier) {
+  return Object.freeze(perTier.map((values) => tier({ ...shared, ...values })));
+}
+
+export const WEAPON_TYPES = Object.freeze({
+  base: Object.freeze({
+    kind: PROJECTILE_KINDS.bullet,
+    tiers: tiers(
+      { fireInterval: 0.12, projectilesPerShot: 3, spreadRadians: 0.25, speed: 14, radius: 0.04, lifetime: 1.2 },
+      [{}, {}, {}],
+    ),
+  }),
+  beam: Object.freeze({
+    kind: PROJECTILE_KINDS.beam,
+    tiers: tiers({ fireInterval: 0, chargeSeconds: 8 }, [{ radius: 0.12 }, { radius: 0.2 }, { radius: 0.3 }]),
+  }),
+  scatter: Object.freeze({
+    kind: PROJECTILE_KINDS.scatter,
+    tiers: tiers(
+      { fireInterval: 0.2, spreadRadians: 1.2, speed: 12, radius: 0.035, lifetime: 0.35, chargeSeconds: 8 },
+      [{ projectilesPerShot: 9 }, { projectilesPerShot: 13 }, { projectilesPerShot: 17 }],
+    ),
+  }),
+  rail: Object.freeze({
+    kind: PROJECTILE_KINDS.rail,
+    tiers: tiers(
+      { fireInterval: 0.3, speed: 40, radius: 0.05, lifetime: 0.6, chargeSeconds: 8, parallelOffset: 0.15 },
+      [{ projectilesPerShot: 1 }, { projectilesPerShot: 2 }, { projectilesPerShot: 3 }],
+    ),
+  }),
+  pulse: Object.freeze({
+    kind: PROJECTILE_KINDS.pulseOrb,
+    tiers: tiers(
+      { fireInterval: 0.5, speed: 6, radius: 0.12, lifetime: 1, chargeSeconds: 8, extra: 40 },
+      [
+        { projectilesPerShot: 1 },
+        { projectilesPerShot: 2, spreadRadians: 0.3 },
+        { projectilesPerShot: 3, spreadRadians: 0.5 },
+      ],
+    ),
+  }),
+  sidewinders: Object.freeze({
+    kind: PROJECTILE_KINDS.sidewinder,
+    tiers: tiers(
+      { fireInterval: 0.25, speed: 9, radius: 0.05, lifetime: 2.5, chargeSeconds: 8, extra: 5 },
+      [
+        { projectilesPerShot: 2, spreadRadians: 0.4 },
+        { projectilesPerShot: 4, spreadRadians: 0.8 },
+        { projectilesPerShot: 6, spreadRadians: 1.2 },
+      ],
+    ),
+  }),
+});
