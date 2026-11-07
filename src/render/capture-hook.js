@@ -43,6 +43,8 @@ function waitAnimationFrames(count) {
 // call order, so overlapping calls cannot save and restore each other's overrides. The arena rect
 // is the one the captured frame was drawn with.
 export function installCaptureHook({ viewport, renderer }) {
+  // The arena rect in device pixels plus the arena size in world units, to place capture regions.
+  window.__murmuration.arenaRect = () => ({ ...viewport.arenaRectDevicePixels, arenaWidth: viewport.arenaWidth, arenaHeight: viewport.arenaHeight });
   let queue = Promise.resolve();
   window.__murmuration.capture = (options) => {
     const result = queue.then(() => captureOnce(options));

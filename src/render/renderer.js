@@ -1,4 +1,4 @@
-// Renderer: the warp grid into its own grid layer, then trails decay, glyphs and particles into the
+// Renderer: the warp grid into its own grid layer, then trails decay, glyphs, projectiles, pickups, particles and the ship into the
 // current scene target, bloom, then composite (scene plus grid plus bloom) into the swapchain. Two
 // rgba16float scene targets at canvas device-pixel size ping-pong for trails. The grid has its own
 // rgba16float layer, cleared every frame, so trail decay never copies it forward and it never smears.
@@ -16,6 +16,9 @@ import { FrameCapture } from './capture.js';
 import { CompositePass } from './composite.js';
 import { GlyphPass } from './glyphs.js';
 import { ParticleRenderer } from './particles.js';
+import { PickupRenderer } from './pickups.js';
+import { ProjectileRenderer } from './projectiles.js';
+import { ShipRenderer } from './ship.js';
 import { SCENE_FORMAT, loadFullscreenHeader } from './render-shaders.js';
 import { TrailDecayPass, trailFrameFactors } from './trails.js';
 import { WarpGrid } from './warpgrid.js';
@@ -43,6 +46,9 @@ export class Renderer {
       renderer.trails.initialize(),
       renderer.glyphs.initialize(),
       renderer.particles.initialize(),
+      renderer.projectileRenderer.initialize(),
+      renderer.pickupRenderer.initialize(),
+      renderer.ship.initialize(),
       renderer.bloom.initialize(),
       renderer.composite.initialize(),
     ]);
@@ -61,6 +67,9 @@ export class Renderer {
     this.warpGrid = new WarpGrid(gpu, { viewport, common });
     this.glyphs = new GlyphPass(gpu, { common });
     this.particles = new ParticleRenderer(gpu, { viewport, common });
+    this.projectileRenderer = new ProjectileRenderer(gpu, { viewport, common });
+    this.pickupRenderer = new PickupRenderer(gpu, { viewport, common });
+    this.ship = new ShipRenderer(gpu, { viewport, common });
     this.bloom = new BloomPass(gpu, { fullscreenHeader });
     this.composite = new CompositePass(gpu, { fullscreenHeader });
     this.frameCapture = new FrameCapture(this.device, gpu.format);
@@ -96,7 +105,9 @@ export class Renderer {
   }
 
   // Returns false, encoding nothing, while a just-installed simulation has not stepped yet.
-  render(encoder, { alpha, time, deltaSeconds = 1 / 60 }) {
+  // scene (optional, from the game): { projectiles: Projectiles, pickups: [{ x, y, type, fade }],
+  // ship: the ShipRenderer.encode state, or null to hide the ship }.
+  render(encoder, { alpha, time, deltaSeconds = 1 / 60, scene = null }) {
     if (this.simulation.frameSequence < this.firstDrawableSequence) return false;
     const previousIndex = this.currentIndex;
     const currentIndex = 1 - previousIndex;
@@ -117,7 +128,10 @@ export class Renderer {
     const { decay, emissionScale } = trailFrameFactors(settings.trailDecay, deltaSeconds);
     this.trails.draw(scenePass, previousIndex, decay);
     this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time, emissionScale });
+    if (scene?.projectiles) this.projectileRenderer.encode(scenePass, time, scene.projectiles);
+    if (scene?.pickups) this.pickupRenderer.encode(scenePass, scene.pickups, time);
     this.particles.encode(scenePass, simulation.particlePool, emissionScale);
+    if (scene?.ship) this.ship.encode(scenePass, { ...scene.ship, time });
     scenePass.end();
     this.bloom.encode(encoder, currentIndex);
     const swapchainTexture = this.gpu.context.getCurrentTexture();
@@ -162,8 +176,8 @@ export class Renderer {
 
   destroy() {
     this.destroySceneTextures();
-    [this.glyphs, this.particles, this.warpGrid].forEach((pass) => pass.bindGroupCache.clear());
-    [this.warpGrid, this.trails, this.glyphs, this.particles, this.bloom, this.composite].forEach((pass) => pass.destroy());
+    [this.glyphs, this.particles, this.warpGrid, this.projectileRenderer].forEach((pass) => pass.bindGroupCache.clear());
+    [this.warpGrid, this.trails, this.glyphs, this.particles, this.projectileRenderer, this.pickupRenderer, this.ship, this.bloom, this.composite].forEach((pass) => pass.destroy());
     this.frameCapture.destroy();
   }
 }

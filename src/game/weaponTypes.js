@@ -10,6 +10,17 @@ export const PROJECTILE_KINDS = Object.freeze({
   beam: 6,
 });
 
+// Fixed neon palette, as hue (0 to 1) per weapon: the projectiles, the ship's charge ring and the
+// pickups all read it. Keys are the WEAPON_TYPES names plus base.
+export const WEAPON_HUES = Object.freeze({
+  base: 0.5,
+  beam: 0.92,
+  scatter: 0.07,
+  rail: 0.6,
+  pulse: 0.35,
+  sidewinders: 0.78,
+});
+
 export const WEAPON_TYPE_NAMES = Object.freeze(['beam', 'scatter', 'rail', 'pulse', 'sidewinders']);
 
 function tier(values) {

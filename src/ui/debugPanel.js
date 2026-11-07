@@ -4,6 +4,7 @@
 // species rows, matrix or shares: it edits what getSimulation() holds and writes the change back
 // through setSpecies / setShares, so a capacity change (which carries them over) needs no re-sync.
 // This panel is the seed of the lab mode and is kept.
+import { WEAPON_TYPE_NAMES } from '../game/weaponTypes.js';
 import { SPECIES_COUNT } from '../sim/layout.js';
 import { SPECIES_NAMES } from '../sim/species.js';
 import { CAPACITY_OPTIONS, FramesPerSecond, RENDER_SLIDERS, SHARE_SLIDER, SPECIES_SLIDERS, describeStats } from './panelModel.js';
@@ -11,6 +12,7 @@ import { CAPACITY_OPTIONS, FramesPerSecond, RENDER_SLIDERS, SHARE_SLIDER, SPECIE
 const READOUT_INTERVAL_FRAMES = 15;
 const MATRIX_STEP = 0.1;
 const TOGGLE_KEY = '`';
+const ARM_TIERS = [1, 2, 3];
 
 const STYLE = `
 .murmuration-panel-button { position: fixed; top: 8px; right: 8px; z-index: 11; font: 12px system-ui, sans-serif;
@@ -50,6 +52,7 @@ export function createDebugPanel({
   getSimulation,
   renderer,
   onCapacityChange,
+  onArmWeapon = null,
   windowObject = window,
   documentObject = document,
   requestFrame = (callback) => requestAnimationFrame(callback),
@@ -148,6 +151,21 @@ export function createDebugPanel({
     }
   });
   controls.append(matrixGrid);
+
+  // Arms a weapon (full charge) at a tier, for looking at each weapon without hunting pickups.
+  if (onArmWeapon !== null) {
+    section('Weapons');
+    const armSelect = element(documentObject, 'select', {}, ['base', ...WEAPON_TYPE_NAMES].map((name) => element(documentObject, 'option', { value: name, textContent: name })));
+    const tierSelect = element(documentObject, 'select', {}, ARM_TIERS.map((tier) => element(documentObject, 'option', { value: tier, textContent: 'tier ' + tier })));
+    const arm = () => {
+      onArmWeapon(armSelect.value, Number(tierSelect.value));
+      armSelect.blur();
+      tierSelect.blur();
+    };
+    armSelect.addEventListener('change', arm);
+    tierSelect.addEventListener('change', arm);
+    root.append(element(documentObject, 'label', {}, [element(documentObject, 'span', { textContent: 'arm weapon' }), armSelect, tierSelect]));
+  }
 
   section('Renderer');
   RENDER_SLIDERS.forEach((spec) => {

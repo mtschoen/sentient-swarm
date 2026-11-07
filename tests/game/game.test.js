@@ -346,3 +346,24 @@ test('awards add a life and a bomb at their thresholds', async () => {
   assert.equal(game.state.lives, 4);
   assert.equal(game.state.bombs, 4);
 });
+
+test('debugArm arms a weapon at a tier with a full charge, and base drops it', async () => {
+  const { game } = await createGame();
+  game.debugArm('rail', 3);
+  assert.deepEqual([game.state.armed, game.state.tier, game.state.charge], ['rail', 3, 1]);
+  game.debugArm('scatter', 1);
+  assert.deepEqual([game.state.armed, game.state.tier], ['scatter', 1]);
+  game.debugArm('base', 1);
+  assert.equal(game.state.armed, 'base');
+});
+
+test('scene hides the ship from death until respawn and carries the armed weapon', async () => {
+  const { game } = await createGame();
+  game.debugArm('pulse', 2);
+  const scene = game.scene();
+  assert.equal(scene.ship.armed, 'pulse');
+  assert.equal(scene.projectiles, game.projectiles);
+  game.run.start();
+  game.run.playerHit(game.simulation.frameSequence + 1, game.player.position);
+  assert.equal(game.scene().ship, null);
+});

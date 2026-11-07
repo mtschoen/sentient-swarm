@@ -67,7 +67,7 @@ async function boot() {
   // The capacity swap goes through the game, one at a time (the panel also disables its controls
   // meanwhile); stepping pauses until the new simulation is in place.
   const onCapacityChange = (capacity) => game.setCapacity(capacity);
-  createDebugPanel({ getSimulation: () => game.simulation, renderer, onCapacityChange });
+  createDebugPanel({ getSimulation: () => game.simulation, renderer, onCapacityChange, onArmWeapon: (type, tier) => game.debugArm(type, tier) });
 
   const loop = new FrameLoop({ update, render });
   loop.start();

@@ -98,6 +98,8 @@ export class Game {
       offeredType: this.pickups.offeredType,
       phase: this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
+      playerX: this.player.position.x,
+      playerY: this.player.position.y,
     };
   }
 
@@ -258,11 +260,37 @@ export class Game {
     return impulses;
   }
 
+  // What the renderer draws besides the swarm. The ship hides from death until respawn.
+  scene() {
+    const hidden = [RunPhase.Dying, RunPhase.Respawning, RunPhase.GameOver].includes(this.run.phase);
+    return {
+      projectiles: this.projectiles,
+      pickups: this.pickups.pickups,
+      ship: hidden ? null : {
+        x: this.player.position.x,
+        y: this.player.position.y,
+        facing: this.player.facing,
+        charge: this.weapons.charge,
+        armed: this.weapons.armed,
+        invulnerable: this.run.invulnerable,
+      },
+    };
+  }
+
+  // Debug hook: arms the weapon type at the tier with a full charge, reaching the tier the way
+  // pickups do (the same type again adds a tier).
+  debugArm(type, tier = 1) {
+    this.weapons.dropAll();
+    if (type === 'base') return;
+    this.weapons.collect(type);
+    for (let upgrade = 1; upgrade < tier; upgrade += 1) this.weapons.collect(type);
+  }
+
   // deltaSeconds is the frame's elapsed time (FrameLoop), for the time-based trail decay.
   render(alpha, deltaSeconds) {
     const { device } = this.gpu;
     const encoder = device.createCommandEncoder();
-    this.renderer.render(encoder, { alpha, time: this.simulation.time, deltaSeconds, impulses: this.takeImpulses() });
+    this.renderer.render(encoder, { alpha, time: this.simulation.time, deltaSeconds, impulses: this.takeImpulses(), scene: this.scene() });
     device.queue.submit([encoder.finish()]);
     this.renderer.afterSubmit();
   }
