@@ -9,13 +9,15 @@ function recordingSequencer(options) {
   return { sequencer, scheduled, scheduleStep };
 }
 
-test('schedules steps 0 to 3 at 128 bpm with a 0.1 s lookahead, each exactly once', () => {
+test('schedules steps 0 to 3 at 128 bpm with a 0.1 s lookahead, each exactly once, one lookahead after the first update', () => {
   const { sequencer, scheduled, scheduleStep } = recordingSequencer({ lookaheadSeconds: 0.1 });
   sequencer.setTempo(128);
-  for (const time of [0, 0.1, 0.1, 0.2, 0.3, 0.3]) sequencer.update(time, scheduleStep);
+  sequencer.update(0, scheduleStep);
+  assert.equal(scheduled.length, 0, 'the first step is one lookahead out, not already late');
+  for (const time of [0.1, 0.1, 0.2, 0.3, 0.4, 0.4]) sequencer.update(time, scheduleStep);
   assert.deepEqual(scheduled.map((entry) => entry.stepIndex), [0, 1, 2, 3]);
   const stepDuration = 60 / 128 / 4;
-  scheduled.forEach((entry, index) => assert.ok(Math.abs(entry.stepTime - index * stepDuration) < 1e-9));
+  scheduled.forEach((entry, index) => assert.ok(Math.abs(entry.stepTime - (0.1 + index * stepDuration)) < 1e-9));
 });
 
 test('a 10 second jump skips missed steps instead of scheduling hundreds', () => {
@@ -23,24 +25,24 @@ test('a 10 second jump skips missed steps instead of scheduling hundreds', () =>
   sequencer.setTempo(128);
   sequencer.update(0, scheduleStep);
   sequencer.update(10, scheduleStep);
-  assert.ok(scheduled.length <= 3, `scheduled ${scheduled.length} steps`);
-  const late = scheduled.filter((entry) => entry.stepIndex > 0);
-  assert.ok(late.length >= 1);
-  for (const entry of late) assert.ok(entry.stepTime >= 10 - 1e-9 && entry.stepTime < 10.1);
+  assert.ok(scheduled.length >= 1 && scheduled.length <= 2, `scheduled ${scheduled.length} steps`);
+  for (const entry of scheduled) assert.ok(entry.stepTime >= 10 - 1e-9 && entry.stepTime < 10.1);
   // The step index keeps counting musical time, so the bar position survives the jump.
   const stepDuration = 60 / 128 / 4;
-  assert.ok(Math.abs(late[0].stepTime - late[0].stepIndex * stepDuration) < 1e-9);
+  assert.ok(Math.abs(scheduled[0].stepTime - (0.1 + scheduled[0].stepIndex * stepDuration)) < 1e-9);
 });
 
-test('a tempo change applies to the steps after it', () => {
-  const { sequencer, scheduled, scheduleStep } = recordingSequencer({ lookaheadSeconds: 0.05 });
-  sequencer.setTempo(120);
+test('a tempo change waits for the next bar start', () => {
+  const { sequencer, scheduled, scheduleStep } = recordingSequencer({ stepsPerBar: 4, lookaheadSeconds: 0.05 });
+  sequencer.setTempo(120); // at 4 steps per bar a step is one beat: 0.5 s
   sequencer.update(0, scheduleStep);
+  sequencer.update(0.02, scheduleStep);
   sequencer.setTempo(60);
-  sequencer.update(0.1, scheduleStep);
-  assert.deepEqual(scheduled.map((entry) => entry.stepIndex), [0, 1]);
-  assert.ok(Math.abs(scheduled[1].stepTime - 0.125) < 1e-9);
-  sequencer.update(0.34, scheduleStep);
-  assert.deepEqual(scheduled.map((entry) => entry.stepIndex), [0, 1, 2]);
-  assert.ok(Math.abs(scheduled[2].stepTime - 0.375) < 1e-9);
+  assert.equal(sequencer.targetBeatsPerMinute, 60);
+  for (let time = 0.2; time < 3.5; time += 0.025) sequencer.update(time, scheduleStep);
+  const times = scheduled.map((entry) => entry.stepTime);
+  const expected = [0.05, 0.55, 1.05, 1.55, 2.05, 3.05];
+  assert.equal(times.length, expected.length);
+  times.forEach((time, index) => assert.ok(Math.abs(time - expected[index]) < 1e-9, `${time} vs ${expected[index]}`));
+  assert.equal(sequencer.beatsPerMinute, 60);
 });

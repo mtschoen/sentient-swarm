@@ -41,20 +41,27 @@ export function levelsForIntensity(intensity) {
 }
 
 export class ProceduralMusic {
-  constructor(engine, { onNote = null } = {}) {
+  // timers: an object with setInterval and clearInterval (the window in the page). When given,
+  // start() drives update(context.currentTime) every scheduleIntervalSeconds and stop() ends it;
+  // without it the owner calls update itself (the node tests do).
+  constructor(engine, { onNote = null, timers = null } = {}) {
     this.engine = engine;
     this.onNote = onNote;
+    this.timers = timers;
+    this.timer = null;
     this.sequencer = new StepSequencer({ stepsPerBar: STEPS_PER_BAR });
     this.started = false;
     this.nodes = null;
     this.muteUntilStep = -1;
     this.dropUntilStep = -1;
+    this.delayTempo = null;
     this.setIntensity(0.2);
     this.scheduleStep = this.scheduleStep.bind(this);
   }
 
+  // The tempo intensity asks for; the sequencer reaches it at the next bar start.
   get tempo() {
-    return this.sequencer.beatsPerMinute;
+    return this.sequencer.targetBeatsPerMinute;
   }
 
   start() {
@@ -64,10 +71,17 @@ export class ProceduralMusic {
     this.sequencer.reset();
     this.started = true;
     this.applyParameters();
+    if (this.timers !== null && this.timer === null) {
+      const tick = () => this.update(context.currentTime);
+      tick();
+      this.timer = this.timers.setInterval(tick, this.sequencer.scheduleIntervalSeconds * 1000);
+    }
   }
 
   stop() {
     this.started = false;
+    if (this.timer !== null) this.timers.clearInterval(this.timer);
+    this.timer = null;
   }
 
   setIntensity(value) {
@@ -134,7 +148,14 @@ export class ProceduralMusic {
     if (this.nodes === null || context === null) return;
     const now = context.currentTime;
     this.nodes.leadFilter.frequency.setTargetAtTime(this.levels.leadCutoff, now, PARAMETER_SMOOTHING_SECONDS);
-    this.nodes.delay.delayTime.setTargetAtTime(this.sequencer.stepDuration * 3, now, PARAMETER_SMOOTHING_SECONDS);
+  }
+
+  // The dotted-eighth delay follows the tempo the sequencer actually plays, so it only moves at a
+  // bar start, together with the tempo, and never glides with the per-frame kill pulse.
+  followTempoWithDelay(time) {
+    if (this.delayTempo === this.sequencer.beatsPerMinute) return;
+    this.delayTempo = this.sequencer.beatsPerMinute;
+    this.nodes.delay.delayTime.setValueAtTime(this.sequencer.stepDuration * 3, time);
   }
 
   note(voice, step, time, extra = {}) {
@@ -142,6 +163,7 @@ export class ProceduralMusic {
   }
 
   scheduleStep(step, time) {
+    this.followTempoWithDelay(time);
     if (step < this.muteUntilStep) return;
     const context = this.engine.context;
     const noise = this.engine.noiseBuffer;

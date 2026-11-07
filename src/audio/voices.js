@@ -20,9 +20,26 @@ function noiseOffset(seed) {
   return ((seed * 0.137) % 0.8 + 0.8) % 0.8;
 }
 
-export function playNoise(context, noiseBuffer, destination, time, { level, decaySeconds, seed = 0, attackSeconds = 0.001, playbackRate = 1 }) {
+// Stopped sources are collected by the browser once unreferenced; disconnecting the source and its
+// per-note nodes on 'ended' also frees the graph edges promptly instead of waiting for collection.
+function releaseOnEnded(source, ...nodes) {
+  source.onended = () => {
+    source.disconnect();
+    for (const node of nodes) node.disconnect();
+  };
+}
+
+// Noise sources loop the shared one-second buffer, so a start offset never truncates a long decay
+// (crash, open hat, bomb); the stop time and envelope bound the sound instead.
+function createNoiseSource(context, noiseBuffer) {
   const source = context.createBufferSource();
   source.buffer = noiseBuffer;
+  source.loop = true;
+  return source;
+}
+
+export function playNoise(context, noiseBuffer, destination, time, { level, decaySeconds, seed = 0, attackSeconds = 0.001, playbackRate = 1, releaseWith = [] }) {
+  const source = createNoiseSource(context, noiseBuffer);
   source.playbackRate.setValueAtTime(playbackRate, time);
   const gain = context.createGain();
   pluckEnvelope(gain.gain, time, level, attackSeconds, decaySeconds);
@@ -30,11 +47,12 @@ export function playNoise(context, noiseBuffer, destination, time, { level, deca
   gain.connect(destination);
   source.start(time, noiseOffset(seed));
   source.stop(time + attackSeconds + decaySeconds + 0.02);
+  releaseOnEnded(source, gain, ...releaseWith);
   return gain;
 }
 
 // One oscillator with a pitch glide and a pluck envelope.
-export function playTone(context, destination, time, { type = 'sine', fromFrequency, toFrequency = fromFrequency, glideSeconds = 0.05, level, attackSeconds = 0.002, decaySeconds, detuneCents = 0 }) {
+export function playTone(context, destination, time, { type = 'sine', fromFrequency, toFrequency = fromFrequency, glideSeconds = 0.05, level, attackSeconds = 0.002, decaySeconds, detuneCents = 0, releaseWith = [] }) {
   const oscillator = context.createOscillator();
   oscillator.type = type;
   oscillator.frequency.setValueAtTime(fromFrequency, time);
@@ -46,6 +64,7 @@ export function playTone(context, destination, time, { type = 'sine', fromFreque
   gain.connect(destination);
   oscillator.start(time);
   oscillator.stop(time + attackSeconds + decaySeconds + 0.02);
+  releaseOnEnded(oscillator, gain, ...releaseWith);
   return oscillator;
 }
 
@@ -73,7 +92,7 @@ export function playCrash(context, noiseBuffer, destination, time, { level, seed
   filter.type = 'highpass';
   filter.frequency.setValueAtTime(4500, time);
   filter.connect(destination);
-  playNoise(context, noiseBuffer, filter, time, { level, decaySeconds: 1.6, seed, playbackRate: 0.9 });
+  playNoise(context, noiseBuffer, filter, time, { level, decaySeconds: 1.6, seed, playbackRate: 0.9, releaseWith: [filter] });
 }
 
 // Bass: a resonant sawtooth through its own lowpass with a filter pluck, plus a sine sub.
@@ -85,7 +104,7 @@ export function playBass(context, destination, time, { note, level, cutoff, leng
   filter.frequency.setValueAtTime(cutoff * 3, time);
   filter.frequency.exponentialRampToValueAtTime(cutoff, time + 0.12);
   filter.connect(destination);
-  playTone(context, filter, time, { type: 'sawtooth', fromFrequency: frequency, level: level * 0.6, attackSeconds: 0.004, decaySeconds: lengthSeconds });
+  playTone(context, filter, time, { type: 'sawtooth', fromFrequency: frequency, level: level * 0.6, attackSeconds: 0.004, decaySeconds: lengthSeconds, releaseWith: [filter] });
   playTone(context, destination, time, { fromFrequency: frequency, level: level * 0.7, attackSeconds: 0.004, decaySeconds: lengthSeconds });
 }
 
@@ -116,4 +135,5 @@ export function playRiser(context, noiseBuffer, destination, time, { level, dura
   gain.connect(filter);
   source.start(time);
   source.stop(time + durationSeconds + 0.02);
+  releaseOnEnded(source, gain, filter);
 }

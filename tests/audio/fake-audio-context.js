@@ -43,16 +43,22 @@ class FakeSourceNode extends FakeNode {
   constructor(context, kind) {
     super(context, kind);
     this.startTime = null;
+    this.startOffset = 0;
     this.stopTime = null;
+    this.onended = null;
   }
 
-  start(time = 0) {
+  start(time = 0, offset = 0) {
     if (this.startTime !== null) throw new Error('start called twice');
     this.startTime = time;
+    this.startOffset = offset;
     this.context.started.push(this);
   }
 
   stop(time = 0) { this.stopTime = time; }
+
+  // What the browser does once the source has stopped.
+  fireEnded() { this.onended?.(); }
 }
 
 export class FakeAudioContext {
@@ -108,10 +114,25 @@ export class FakeAudioContext {
   createBufferSource() {
     const node = new FakeSourceNode(this, 'buffer-source');
     node.buffer = null;
+    node.loop = false;
     node.playbackRate = new FakeParam(1);
     return node;
   }
 
   resume() { this.state = 'running'; return Promise.resolve(); }
+
+  // A context that starts suspended and only runs on the resumeCallsToRun-th resume() call, like a
+  // context created from a touch pointerdown that a later gesture finally unlocks.
+  static suspendedUntilResumedTimes(resumeCallsToRun) {
+    const context = new FakeAudioContext();
+    context.state = 'suspended';
+    context.resumeCalls = 0;
+    context.resume = () => {
+      context.resumeCalls += 1;
+      if (context.resumeCalls >= resumeCallsToRun) context.state = 'running';
+      return Promise.resolve();
+    };
+    return context;
+  }
   suspend() { this.state = 'suspended'; return Promise.resolve(); }
 }

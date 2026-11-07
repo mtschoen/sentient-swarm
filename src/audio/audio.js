@@ -15,6 +15,9 @@ export class AudioEngine {
     this.effectsVolume = 1;
     this.musicOutput = null;
     this.effectsOutput = null;
+    this.muteOutput = null;
+    this.muted = false;
+    this.pendingResume = Promise.resolve();
     this.noiseBuffer = null;
   }
 
@@ -22,9 +25,15 @@ export class AudioEngine {
     return this.audioContext;
   }
 
-  // Returns the context, or null if audio is unavailable.
+  // Returns the context, or null if audio is unavailable. Safe to call on every gesture: the
+  // context is created once, and each call asks it to resume (a context created outside a real
+  // user activation, such as a touch pointerdown, stays suspended until a later gesture).
   unlock() {
-    if (this.audioContext !== null || this.failed) return this.audioContext;
+    if (this.audioContext !== null) {
+      this.resume();
+      return this.audioContext;
+    }
+    if (this.failed) return null;
     try {
       const context = this.contextFactory();
       const compressor = context.createDynamicsCompressor();
@@ -34,9 +43,13 @@ export class AudioEngine {
       compressor.attack.setValueAtTime(0.003, 0);
       compressor.release.setValueAtTime(0.15, 0);
       compressor.connect(context.destination);
+      // The mute gain sits after the master so M silences music and effects together.
+      this.muteOutput = context.createGain();
+      this.muteOutput.gain.setValueAtTime(this.muted ? 0 : 1, 0);
+      this.muteOutput.connect(compressor);
       const master = context.createGain();
       master.gain.setValueAtTime(MASTER_LEVEL, 0);
-      master.connect(compressor);
+      master.connect(this.muteOutput);
       this.musicOutput = context.createGain();
       this.musicOutput.gain.setValueAtTime(this.musicVolume, 0);
       this.musicOutput.connect(master);
@@ -63,12 +76,21 @@ export class AudioEngine {
     rampGain(this.audioContext, this.effectsOutput, this.effectsVolume);
   }
 
+  // Mutes or restores everything (music and effects); volumes are kept.
+  setMuted(muted) {
+    this.muted = Boolean(muted);
+    rampGain(this.audioContext, this.muteOutput, this.muted ? 0 : 1);
+  }
+
+  // Returns a promise that settles (never rejects) once the context has tried to resume; the latest
+  // one is also kept as pendingResume (unlock() resumes without returning it).
   resume() {
-    this.audioContext?.resume?.()?.catch?.(() => {});
+    this.pendingResume = Promise.resolve(this.audioContext?.resume?.()).catch(() => {});
+    return this.pendingResume;
   }
 
   suspend() {
-    this.audioContext?.suspend?.()?.catch?.(() => {});
+    return Promise.resolve(this.audioContext?.suspend?.()).catch(() => {});
   }
 }
 
