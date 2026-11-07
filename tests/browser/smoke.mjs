@@ -190,6 +190,20 @@ async function checkPlay(page, frames) {
   await waitForFrame(page, begin + PLAY_MOVE_FRAMES);
   await setSticks(page, [0, 0, 1, 0]);
   const firing = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
+  // Survival-difficulty input for tuning (printed, not asserted): the first frame that leaves
+  // Playing (a death) while the ship sits still and fires.
+  await evaluateWithin(page, 'watching for the first death', () => {
+    window.__smokeFirstDeathFrame = null;
+    const watch = () => {
+      const phase = window.__murmuration.stats?.phase;
+      if (phase !== undefined && phase !== 'playing' && phase !== 'ready') {
+        window.__smokeFirstDeathFrame = window.__murmuration.frame;
+        return;
+      }
+      requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+  });
   // Captured early in the fire, while the ship is surely alive (it hides from a death until its
   // respawn, and a run can end before frames frames): the ship and its fire must stand out.
   await waitForFrame(page, firing + Math.min(PLAY_SHIP_CAPTURE_FRAMES, frames));
@@ -209,7 +223,11 @@ async function checkPlay(page, frames) {
   console.log(`smoke: play ship box luminance ${shipLuminance.toFixed(4)}, arena mean ${capture.meanLuminance.toFixed(4)}, phase ${early.phase}`);
   await page.waitForFunction((target) => window.__murmuration.frame >= target, firing + frames, { timeout: PLAY_TIMEOUT_MILLISECONDS });
   const stats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  const firstDeathFrame = await evaluateWithin(page, 'reading the first death', () => window.__smokeFirstDeathFrame);
   await setSticks(page, [0, 0, 0, 0]);
+  console.log(firstDeathFrame === null
+    ? `smoke: play first death: none in ${frames} frames of fire`
+    : `smoke: play first death at fire frame ${firstDeathFrame - firing} (${((firstDeathFrame - firing) / 60).toFixed(1)} s at 60 Hz)`);
   console.log(`smoke: play ${frames} frames: score ${stats.score}, multiplier ${stats.multiplier}, lives ${stats.lives}, bombs ${stats.bombs}, armed ${stats.armed} ${stats.tier}, phase ${stats.phase}, aliveTotal ${stats.aliveTotal}`);
   if (page.consoleErrors.length > 0) return `smoke: console errors during play: ${page.consoleErrors.join(' | ')}`;
   if (!(stats.score > 0)) return `smoke: expected a positive score after ${frames} frames of fire, got ${stats.score}`;

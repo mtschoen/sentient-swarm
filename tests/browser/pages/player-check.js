@@ -1,8 +1,9 @@
 // Player contact check. A 16384-slot Simulation gets 5000 alive Chasers (species 0, no spawn-in
 // frames, at rest) seeded on a circle of radius 3 around the player at the arena center; nothing
 // spawns. The page calls setPlayerState every step like the game will, then checks:
-// (a) a contact hit is reported (playerHitSequence > 0) within 10 s of sim time and the alive total
-//     dropped by at least 1;
+// (a) a contact hit is reported (playerHitSequence > 0) within 10 s of sim time; the hit frame
+//     has exactly one contact kill (killsUnscored 1: one toucher per latch) and scores none
+//     (killsSinceLastRead 0), and the alive total dropped by at least 1;
 // (b) the latch: for LATCH_FRAMES unacknowledged frames, with alive agents overlapping the player,
 //     playerHitSequence stays at the first hit and hitLatch reads 1; after acknowledgeHit and 3
 //     more frames a second hit arrives whose sequence is past the acknowledging frame;
@@ -126,6 +127,8 @@ async function runCheck() {
   }
   const firstHit = stats.playerHitSequence;
   verdicts.push([firstHit > 0, `(a) first hit at frame ${firstHit} after ${frames} frames (need within ${HIT_FRAME_LIMIT})`]);
+  verdicts.push([stats.frameSequence === firstHit && stats.killsUnscored === 1, `(a) hit frame ${stats.frameSequence} contact kills (killsUnscored) ${stats.killsUnscored} (need exactly 1)`]);
+  verdicts.push([stats.killsSinceLastRead === 0, `(a) hit frame scored kills ${stats.killsSinceLastRead} (need 0: contact never scores)`]);
   verdicts.push([stats.aliveTotal <= aliveBefore - 1, `(a) alive ${aliveBefore} -> ${stats.aliveTotal} (need a drop of at least 1)`]);
   if (!(firstHit > 0)) return { pass: false, detail: verdictLine(verdicts) };
 
