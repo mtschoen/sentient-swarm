@@ -4,7 +4,7 @@ export class FrameLoop {
     update,
     render,
     now = performance.now.bind(performance),
-    requestFrame = requestAnimationFrame,
+    requestFrame = (callback) => requestAnimationFrame(callback),
     fixedStep = 1 / 60,
     maximumSubsteps = 4,
   }) {
@@ -26,7 +26,13 @@ export class FrameLoop {
     this.running = true;
     this.previousTime = this.now();
     this.accumulator = 0;
-    this.requestFrame(this.tick);
+    this.schedule();
+  }
+
+  // Call through a local so the scheduler never receives the loop as its receiver (browsers throw on that).
+  schedule() {
+    const requestFrame = this.requestFrame;
+    requestFrame(this.tick);
   }
 
   stop() {
@@ -48,6 +54,6 @@ export class FrameLoop {
     this.accumulator = Math.max(0, this.accumulator);
     this.render(this.accumulator / this.fixedStep);
     this.frameCount += 1;
-    if (this.running) this.requestFrame(this.tick);
+    if (this.running) this.schedule();
   }
 }

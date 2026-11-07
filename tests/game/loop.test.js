@@ -50,6 +50,34 @@ test('a 1 s gap clamps to maximumSubsteps updates', () => {
   assert.ok(harness.calls.render[0] >= 0 && harness.calls.render[0] < 1);
 });
 
+test('the default scheduler calls requestAnimationFrame without a receiver', () => {
+  const receivers = [];
+  const original = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = function recordReceiver() {
+    receivers.push(this);
+  };
+  try {
+    new FrameLoop({ update() {}, render() {}, now: () => 0 }).start();
+  } finally {
+    globalThis.requestAnimationFrame = original;
+  }
+  assert.equal(receivers.length, 1);
+  assert.ok(receivers[0] === undefined || receivers[0] === globalThis);
+});
+
+test('an injected scheduler is not called with the loop as receiver', () => {
+  const receivers = [];
+  new FrameLoop({
+    update() {},
+    render() {},
+    now: () => 0,
+    requestFrame: function recordReceiver() {
+      receivers.push(this);
+    },
+  }).start();
+  assert.ok(receivers[0] === undefined || receivers[0] === globalThis);
+});
+
 test('stop prevents further scheduling', () => {
   const harness = createHarness();
   harness.loop.start();
