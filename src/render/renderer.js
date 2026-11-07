@@ -22,6 +22,8 @@ import { WarpGrid } from './warpgrid.js';
 
 export const DEFAULT_RENDER_SETTINGS = {
   shipArenaFraction: 0.018,
+  // Quad half-size over ship half-length. The Predator plume reaches local x -1.84 (nozzle -0.94
+  // plus PLUME_LENGTH 0.9 in glyphs.wgsl), so glowScale must stay at least 2 or the plume clips.
   glowScale: 2,
   trailDecay: 0.90,
   bloomStrength: 0.8,

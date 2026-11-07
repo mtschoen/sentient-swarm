@@ -13,7 +13,7 @@ const VERTICES_PER_PARTICLE = 4;
 const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 
 // Matches the ParticleView table in particles.wgsl. Same affine world-to-clip sampling as
-// packGlyphView, so the inspect zoom applies; the quad size also grows with the zoom.
+// packShipView, so the inspect zoom applies; the quad size also grows with the zoom.
 export function packParticleView({ viewport, particleDevicePixels = PARTICLE_DEVICE_PIXELS, emissionScale = 1 }) {
   const origin = viewport.worldToClip(0, 0);
   const unit = viewport.worldToClip(1, 1);

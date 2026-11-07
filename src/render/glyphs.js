@@ -20,9 +20,13 @@ export const SHIP_ZOOM_EXPONENT = 0.5;
 
 // On-screen ship length (the glyph body, local [-1, 1]) in device pixels: shipArenaFraction of the
 // arena height, at least MINIMUM_SHIP_DEVICE_PIXELS, times effectiveZoom ** SHIP_ZOOM_EXPONENT.
-// A fraction of 0 or less hides the ships (the smoke's kill-flash check does this).
+// A fraction of 0 or less hides the ships (the smoke's kill-flash check does this); a missing or
+// non-numeric fraction throws instead of silently hiding them.
 export function shipDevicePixels(viewport, shipArenaFraction) {
-  if (!(shipArenaFraction > 0)) return 0;
+  if (typeof shipArenaFraction !== 'number' || Number.isNaN(shipArenaFraction)) {
+    throw new TypeError(`shipArenaFraction must be a number, got ${shipArenaFraction}`);
+  }
+  if (shipArenaFraction <= 0) return 0;
   const unzoomed = Math.max(MINIMUM_SHIP_DEVICE_PIXELS, shipArenaFraction * viewport.arenaRectDevicePixels.height);
   return unzoomed * viewport.effectiveZoom ** SHIP_ZOOM_EXPONENT;
 }
@@ -31,7 +35,7 @@ export function shipDevicePixels(viewport, shipArenaFraction) {
 // coarse cell (which grows with the square of the zoom). Times the coarse density (agents per
 // cell) it gives the fraction of a cell the ship bodies cover, so density attenuation follows what
 // is on screen: zooming in spreads the ships apart and attenuates less.
-export function glyphCoverageScale(viewport, shipPixels) {
+export function shipCoverageScale(viewport, shipPixels) {
   const rect = viewport.arenaRectDevicePixels;
   const zoom = viewport.effectiveZoom;
   const cellArea = (rect.width / COARSE_COLUMNS) * (rect.height / COARSE_ROWS) * zoom * zoom;
@@ -41,7 +45,7 @@ export function glyphCoverageScale(viewport, shipPixels) {
 // Matches the GlyphView table in glyphs.wgsl. World to clip is affine, so two worldToClip samples
 // give its scale and offset (inspectZoom included); the ship size comes from shipDevicePixels.
 // emissionScale comes from trailFrameFactors.
-export function packGlyphView({ viewport, settings, alpha, time, emissionScale = 1 }) {
+export function packShipView({ viewport, settings, alpha, time, emissionScale = 1 }) {
   const origin = viewport.worldToClip(0, 0);
   const unit = viewport.worldToClip(1, 1);
   const shipPixels = shipDevicePixels(viewport, settings.shipArenaFraction);
@@ -51,7 +55,7 @@ export function packGlyphView({ viewport, settings, alpha, time, emissionScale =
     2 / viewport.canvasWidth, 2 / viewport.canvasHeight,
     shipPixels, settings.glowScale,
     alpha, time,
-    glyphCoverageScale(viewport, shipPixels), emissionScale,
+    shipCoverageScale(viewport, shipPixels), emissionScale,
   ]);
 }
 
@@ -86,7 +90,7 @@ export class GlyphPass {
 
   // Draws into an open render pass whose color target is a scene texture.
   draw(pass, { simulation, viewport, settings, alpha, time, emissionScale }) {
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packGlyphView({ viewport, settings, alpha, time, emissionScale }));
+    this.device.queue.writeBuffer(this.viewBuffer, 0, packShipView({ viewport, settings, alpha, time, emissionScale }));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([
       this.viewBuffer, simulation.paramsBuffer, simulation.agentsBuffer, simulation.fieldBuffer, simulation.speciesTableBuffer,

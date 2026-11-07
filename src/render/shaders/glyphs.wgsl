@@ -9,21 +9,21 @@
 // rim only and fill in over SPAWN_IN_FRAMES.
 // Position is extrapolated by velocity * alpha * dt so rendering between fixed steps stays smooth.
 // Density attenuation works in screen coverage: the coarse density (agents per cell) times
-// coverageScale (glyph body area over coarse cell area, in device pixels) is the fraction of the
-// cell that glyph bodies cover, and each glyph is divided by 1 + COVERAGE_ATTENUATION * coverage,
+// coverageScale (ship body area over coarse cell area, in device pixels) is the fraction of the
+// cell that ship bodies cover, and each ship is divided by 1 + COVERAGE_ATTENUATION * coverage,
 // but never below ATTENUATION_FLOOR (capped so the floor's summed radiance stays under
 // MAXIMUM_CROWD_RADIANCE), so dense cores stay bright and colored rather than murky.
 // emissionScale (trailFrameFactors) keeps steady-state brightness refresh-independent.
 
-// Uniform layout (byte offsets), total 48 bytes; packGlyphView in glyphs.js writes it.
+// Uniform layout (byte offsets), total 48 bytes; packShipView in glyphs.js writes it.
 //   0 worldToClipScale    vec2f
 //   8 worldToClipOffset   vec2f
 //  16 devicePixelToClip   vec2f
-//  24 shipDevicePixels   f32 (ship length, shipDevicePixels in glyphs.js, zoom included)
+//  24 shipDevicePixels    f32 (ship length, shipDevicePixels in glyphs.js, zoom included)
 //  28 glowScale           f32
 //  32 alpha               f32
 //  36 time                f32
-//  40 coverageScale       f32 (glyph body area / coarse cell area, device pixels)
+//  40 coverageScale       f32 (ship body area / coarse cell area, on-screen device pixels)
 //  44 emissionScale       f32
 struct GlyphView {
   worldToClipScale: vec2f,
@@ -56,7 +56,7 @@ const GLOW_FALLOFF: f32 = 3.0;
 const SPAWN_PULSE_RATE: f32 = 18.0;
 // Fill brightness relative to the rim.
 const FILL_BRIGHTNESS: f32 = 0.25;
-// Below this speed (world units per second) the heading leans toward the player.
+// Below this speed (world units per second) the heading turns toward the player.
 const HEADING_IDLE_SPEED: f32 = 0.4;
 // Plume length in local units at full speed, its minimum share at rest, its half-width and peak.
 const PLUME_LENGTH: f32 = 0.9;
@@ -74,16 +74,20 @@ struct GlyphVaryings {
   @location(3) @interpolate(flat) engine: vec3f,
 }
 
-// Velocity direction, plus a pull toward the player that fades out as speed reaches
-// HEADING_IDLE_SPEED, so slow ships keep a steady nose and stopped ones face the player.
+// Turns from the player direction toward the travel direction by smoothstep(0, HEADING_IDLE_SPEED,
+// speed) of the shorter arc between them. Rotating an angle never passes through a zero vector
+// (summed directions cancel for a slow retreat and snapped to +x), so stopped ships face the
+// player and ships at HEADING_IDLE_SPEED or faster face where they travel, retreating ones too.
 fn shipHeading(position: vec2f, velocity: vec2f) -> vec2f {
+  let speed = length(velocity);
   let toPlayer = params.playerPosition - position;
-  let playerDistance = length(toPlayer);
-  let towardPlayer = select(vec2f(0.0), toPlayer / max(playerDistance, 1e-6), playerDistance > 1e-4);
-  let idleWeight = max(HEADING_IDLE_SPEED - length(velocity), 0.0);
-  let blended = velocity + towardPlayer * idleWeight;
-  let blendedLength = length(blended);
-  return select(vec2f(1.0, 0.0), blended / max(blendedLength, 1e-6), blendedLength > 1e-5);
+  let travelAngle = select(0.0, atan2(velocity.y, velocity.x), speed > 1e-6);
+  let playerAngle = select(travelAngle, atan2(toPlayer.y, toPlayer.x), length(toPlayer) > 1e-4);
+  let travelWeight = smoothstep(0.0, HEADING_IDLE_SPEED, speed);
+  let arc = travelAngle - playerAngle;
+  let shorterArc = arc - TAU * floor(arc / TAU + 0.5);
+  let angle = playerAngle + shorterArc * travelWeight;
+  return vec2f(cos(angle), sin(angle));
 }
 
 @vertex
