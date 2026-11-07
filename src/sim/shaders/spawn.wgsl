@@ -12,7 +12,8 @@
 // with atomicAdd), zero velocity, SPAWN_IN_FRAMES spawn-in frames, the alive bit, the species, a
 // random phase in [0, tau) and a random hueJitter in [-1, 1].
 // Randomness: a PCG hash (Jarzynski and Olano, "Hash Functions for GPU Rendering", 2020) seeded
-// by the slot index and params.frameSequence, then re-hashed for every draw.
+// by the slot index and params.frameSequence, then re-hashed for every draw
+// (pcgHash and nextRandom live in common.wgsl, shared with the kill pass).
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read_write> agents: array<Agent>;
@@ -21,19 +22,6 @@
 const SPAWN_IN_FRAMES: u32 = 30u;
 const POSITION_ATTEMPTS: u32 = 4u;
 const NO_SPECIES: u32 = 0xffffffffu;
-const TAU: f32 = 6.283185307;
-
-fn pcgHash(value: u32) -> u32 {
-  let state = value * 747796405u + 2891336453u;
-  let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-  return (word >> 22u) ^ word;
-}
-
-// Advances the state and returns a float in [0, 1) built from its top 24 bits.
-fn nextRandom(state: ptr<function, u32>) -> f32 {
-  *state = pcgHash(*state);
-  return f32(*state >> 8u) / 16777216.0;
-}
 
 fn claimUnit(species: u32) -> bool {
   if (atomicLoad(&spawnBudget[species]) <= 0) {

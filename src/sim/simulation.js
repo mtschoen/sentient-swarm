@@ -13,12 +13,15 @@
 //
 // step order: frameSequence and time advance; params and spawn budget are written; the stats
 // buffer is cleared; spawn on agentsIn; grid and coarse field on agentsIn; steer agentsIn to
-// agentsOut plus integrate; (debug kill on agentsOut, Task 10); stats on agentsOut; copy stats
+// agentsOut plus integrate; debug kill on agentsOut (skipped when no kill is armed; the arm lasts
+// one step, so callers re-arm every frame while the button is held); particle step; stats on agentsOut; copy stats
 // into the staging ring; swap, so agentsBuffer is the newest output.
 import { StagingRing, createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { CoarseField } from './field.js';
 import { SpatialGrid } from './grid.js';
+import { DebugKillPass } from './kill.js';
+import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
 import { AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
 import { SIM_PARAMS_BYTES, packSimParams } from './params.js';
 import { Spawner } from './spawn.js';
@@ -33,25 +36,28 @@ export class Simulation {
     species = defaultSpecies(),
     matrix = defaultMatrix(),
     shares = normalizeShares(new Array(SPECIES_COUNT).fill(1)),
+    particleCapacity = DEFAULT_PARTICLE_CAPACITY,
   }) {
     const agentBytes = agentBufferBytes(capacity);
     if (agentBytes > gpu.limits.maxStorageBufferBindingSize) {
       throw new Error(`Simulation capacity ${capacity} needs ${agentBytes} bytes per agent buffer; this device binds at most ${gpu.limits.maxStorageBufferBindingSize}`);
     }
     const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
-    const simulation = new Simulation(gpu, { capacity, neighborRadius, species, matrix, shares }, common);
+    const simulation = new Simulation(gpu, { capacity, neighborRadius, species, matrix, shares, particleCapacity }, common);
     await Promise.all([
       simulation.grid.initialize(),
       simulation.field.initialize(),
       simulation.steering.initialize(),
       simulation.spawner.initialize(),
       simulation.statsPass.initialize(),
+      simulation.killPass.initialize(),
+      simulation.particlePoolValue.initialize(),
     ]);
     return simulation;
   }
 
   // Use Simulation.create; the constructor only allocates.
-  constructor(gpu, { capacity, neighborRadius, species, matrix, shares }, common) {
+  constructor(gpu, { capacity, neighborRadius, species, matrix, shares, particleCapacity }, common) {
     this.gpu = gpu;
     this.device = gpu.device;
     this.capacityValue = capacity;
@@ -62,6 +68,8 @@ export class Simulation {
     this.steering = new Steering(gpu, { common });
     this.spawner = new Spawner(gpu, { common });
     this.statsPass = new StatsPass(gpu, { common });
+    this.killPass = new DebugKillPass(gpu, { common });
+    this.particlePoolValue = new ParticlePool(gpu, { capacity: particleCapacity, common });
     // New buffers are zero-filled, so every slot starts dead.
     this.agentBuffers = [0, 1].map((index) => createStorageBuffer(this.device, agentBufferBytes(capacity), 'agents-' + index));
     this.inputIndex = 0;
@@ -83,6 +91,7 @@ export class Simulation {
   get fieldBuffer() { return this.field.buffers.blurred; }
   get statsBuffer() { return this.statsBufferValue; }
   get gridBuffers() { return this.grid.buffers; }
+  get particlePool() { return this.particlePoolValue; }
   get speciesTableBuffer() { return this.speciesTableBufferValue; }
   get paramsBuffer() { return this.paramsBufferValue; }
   get frameSequence() { return this.frameSequenceValue; }
@@ -93,6 +102,7 @@ export class Simulation {
     this.playerPosition = [x, y];
   }
 
+  // Arms a kill for the next step only (step consumes it); radius 0 disarms.
   setDebugKill(x, y, radius) {
     this.debugKillPosition = [x, y];
     this.debugKillRadius = radius;
@@ -126,6 +136,8 @@ export class Simulation {
       spawnPerSpecies: Array.from(spawnPerSpecies),
       frameSequence: this.frameSequenceValue,
     }));
+    const killRadius = this.debugKillRadius;
+    this.debugKillRadius = 0;
     this.spawner.writeBudget(spawnPerSpecies);
     encoder.clearBuffer(this.statsBufferValue);
     const agentsIn = this.agentBuffers[this.inputIndex];
@@ -135,6 +147,17 @@ export class Simulation {
     this.grid.encode(encoder, agentsIn, params);
     this.field.encode(encoder, agentsIn, this.grid.buffers, params);
     this.steering.encode(encoder, agentsIn, agentsOut, this.grid.buffers, this.field.buffers.blurred, this.speciesTableBufferValue, params);
+    if (killRadius > 0) {
+      this.killPass.encode(encoder, {
+        agentsBuffer: agentsOut,
+        statsBuffer: this.statsBufferValue,
+        particleBuffers: this.particlePoolValue.buffers,
+        threatAccumulator: this.field.buffers.threatAccumulator,
+        speciesTableBuffer: this.speciesTableBufferValue,
+        paramsBuffer: params,
+      });
+    }
+    this.particlePoolValue.encodeStep(encoder, params);
     this.statsPass.encode(encoder, agentsOut, this.statsBufferValue, params);
     this.stagingRing.copyFrom(encoder, this.statsBufferValue);
     this.inputIndex = 1 - this.inputIndex;
@@ -161,6 +184,7 @@ export class Simulation {
       species: this.species,
       matrix: this.matrix,
       shares: this.sharesValue,
+      particleCapacity: this.particlePoolValue.capacity,
     });
     const encoder = this.device.createCommandEncoder({ label: 'simulation-recreate' });
     const copiedBytes = Math.min(this.capacityValue, newCapacity) * AGENT_STRIDE_BYTES;
@@ -181,6 +205,7 @@ export class Simulation {
     [this.speciesTableBufferValue, this.paramsBufferValue, this.statsBufferValue].forEach((buffer) => buffer.destroy());
     this.stagingRing.destroy();
     this.spawner.destroy();
+    this.particlePoolValue.destroy();
     this.grid.destroy();
     this.field.destroy();
   }

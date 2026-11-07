@@ -10,7 +10,6 @@
 const WALL_MARGIN: f32 = 0.5;
 // Velocity change per second per world unit of penetration into the margin.
 const WALL_STIFFNESS: f32 = 40.0;
-const TAU: f32 = 6.283185307;
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) globalId: vec3u) {

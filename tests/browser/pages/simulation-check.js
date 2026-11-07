@@ -5,9 +5,12 @@
 // most 3; (d) after frame 1 every agent was spawned that frame: it sits at least ARENA_WIDTH / 4
 // from the player with 29 spawn-in frames left, in-range species, phase and hueJitter, and zero
 // velocity unless integrate's wall spring already pushed it (inside WALL_MARGIN of an edge);
-// (e) recreateWithCapacity(131072) keeps at least 95 percent of the alive agents after one more step.
+// (e) recreateWithCapacity(131072) keeps at least 95 percent of the alive agents after one more step;
+// (f) a one-frame debug kill of radius 2 at the arena center, with zero spawning, reports kills, drops
+// aliveTotal by exactly that many, reports zero kills a frame later, fills at least 6 particle slots
+// per kill (capped at the pool capacity) all within 2.5 of the center, and adds threat near the center.
 import { createGpuContext } from '/src/gpu/device.js';
-import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '/src/sim/layout.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT } from '/src/sim/layout.js';
 import { normalizeShares } from '/src/sim/species.js';
 import { SpawnPressure } from '/src/sim/spawner.js';
 import { Simulation } from '/src/sim/simulation.js';
@@ -23,6 +26,13 @@ const READBACK_ATTEMPTS = 20;
 const PHASE_TOLERANCE = 1e-5;
 // integrate.wgsl's wall margin; integrate runs in the spawn frame and pushes agents inside it.
 const WALL_MARGIN = 0.5;
+const KILL_RADIUS = 2;
+const KILL_FRAMES_TO_WAIT = 3;
+const PARTICLES_PER_KILL = 6;
+const PARTICLE_STRIDE_BYTES = 32;
+const PARTICLE_LIFETIME_OFFSET = 24;
+const PARTICLE_SPREAD_LIMIT = 2.5;
+const THREAT_FIXED_POINT_SCALE = 256;
 
 // Steps once, submits, and waits for the GPU so the stats ring can map; returns the frame's step.
 async function submitStep(device, simulation, spawnPerSpecies) {
@@ -87,6 +97,85 @@ function spawnPlacement(agentBytes) {
   return { summary: `${spawning} agents spawned in frame 1, closest ${closest.toFixed(3)} from the player (need >= ${ARENA_WIDTH / 4})` };
 }
 
+// Drains every ready ring slot into collected, keyed by frameSequence.
+function collectStats(simulation, collected) {
+  for (let stats = simulation.readStats(); stats !== null; stats = simulation.readStats()) collected.set(stats.frameSequence, stats);
+}
+
+async function waitForStats(device, simulation, collected, sequence) {
+  for (let attempt = 0; attempt < READBACK_ATTEMPTS && !collected.has(sequence); attempt += 1) {
+    collectStats(simulation, collected);
+    if (!collected.has(sequence)) await device.queue.onSubmittedWorkDone();
+  }
+  return collected.get(sequence) ?? null;
+}
+
+// Counts live particles (lifetime above 0 and age below it) and the farthest one from center.
+function liveParticles(particleBytes, center) {
+  const view = new DataView(particleBytes);
+  let count = 0;
+  let farthest = 0;
+  for (let base = 0; base < particleBytes.byteLength; base += PARTICLE_STRIDE_BYTES) {
+    const age = view.getFloat32(base + PARTICLE_LIFETIME_OFFSET - 4, true);
+    const lifetime = view.getFloat32(base + PARTICLE_LIFETIME_OFFSET, true);
+    if (!(lifetime > 0 && age < lifetime)) continue;
+    count += 1;
+    farthest = Math.max(farthest, Math.hypot(view.getFloat32(base, true) - center[0], view.getFloat32(base + 4, true) - center[1]));
+  }
+  return { count, farthest };
+}
+
+// Sum of the threat accumulator over coarse cells within 3 world units of center, in threat units.
+function threatNearCenter(accumulatorBytes, center) {
+  const cells = new Uint32Array(accumulatorBytes);
+  let total = 0;
+  for (let index = 0; index < cells.length; index += 1) {
+    const x = ((index % COARSE_COLUMNS) + 0.5) / COARSE_COLUMNS * ARENA_WIDTH;
+    const y = (Math.floor(index / COARSE_COLUMNS) + 0.5) / COARSE_ROWS * ARENA_HEIGHT;
+    if (Math.hypot(x - center[0], y - center[1]) <= KILL_RADIUS + 1) total += cells[index];
+  }
+  return total / THREAT_FIXED_POINT_SCALE;
+}
+
+// Arms the debug kill for one zero-spawn frame and returns what the check asserts on.
+async function runKillCheck(device, simulation) {
+  const zeroSpawns = () => new Uint32Array(SPECIES_COUNT);
+  const collected = new Map();
+  await submitStep(device, simulation, zeroSpawns());
+  const baseline = await waitForStats(device, simulation, collected, simulation.frameSequence);
+  if (baseline === null) return { pass: false, detail: 'no baseline stats before the kill' };
+
+  simulation.setDebugKill(PLAYER[0], PLAYER[1], KILL_RADIUS);
+  await submitStep(device, simulation, zeroSpawns());
+  const killSequence = simulation.frameSequence;
+  const threatBytes = await readBuffer(device, simulation.field.buffers.threatAccumulator);
+  const particleBytes = await readBuffer(device, simulation.particlePool.buffers.particles);
+  for (let frame = 0; frame < KILL_FRAMES_TO_WAIT; frame += 1) {
+    await submitStep(device, simulation, zeroSpawns());
+    collectStats(simulation, collected);
+  }
+  const kill = await waitForStats(device, simulation, collected, killSequence);
+  const later = await waitForStats(device, simulation, collected, killSequence + 1);
+  if (kill === null || later === null) return { pass: false, detail: 'no stats for the kill frame or the frame after it' };
+
+  const particles = liveParticles(particleBytes, PLAYER);
+  const threat = threatNearCenter(threatBytes, PLAYER);
+  const expectedParticles = Math.min(PARTICLES_PER_KILL * kill.killsThisFrame, simulation.particlePool.capacity);
+  const removed = baseline.aliveTotal - kill.aliveTotal;
+  const verdicts = [
+    [kill.killsThisFrame > 0, `kills ${kill.killsThisFrame} (need > 0)`],
+    [removed === kill.killsThisFrame, `alive ${baseline.aliveTotal} before and ${kill.aliveTotal} after, removed ${removed} (need exactly the kills)`],
+    [later.killsThisFrame === 0, `kills the next frame ${later.killsThisFrame} (need 0, the arm lasts one frame)`],
+    [particles.count >= expectedParticles, `live particles ${particles.count} (need >= ${expectedParticles})`],
+    [particles.farthest <= PARTICLE_SPREAD_LIMIT, `farthest particle ${particles.farthest.toFixed(3)} from center (need <= ${PARTICLE_SPREAD_LIMIT})`],
+    [threat > 0, `threat near center ${threat.toFixed(1)} units (need > 0)`],
+  ];
+  return {
+    pass: verdicts.every(([ok]) => ok),
+    detail: verdicts.map(([ok, text]) => `${ok ? 'PASS' : 'FAIL'} ${text}`).join('; '),
+  };
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   const { device } = gpu;
@@ -143,8 +232,11 @@ async function runCheck() {
     `${verdict(placement.failure === undefined)} spawn placement ${placement.failure ?? placement.summary}`,
     `${verdict(grownOk)} after recreateWithCapacity(${GROWN_CAPACITY}) alive ${grown?.aliveTotal ?? 'none'} of ${previousAlive} (need >= 95%), frameSequence ${grown?.frameSequence ?? 'none'} (need ${FRAME_COUNT + 1})`,
   ];
+  const killResult = await runKillCheck(device, simulation);
+  if (lostReason !== null) return { pass: false, detail: `device lost during the kill check: ${lostReason}` };
+  details.push(killResult.detail);
   simulation.destroy();
-  return { pass: aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk, detail: details.join('; ') };
+  return { pass: aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass, detail: details.join('; ') };
 }
 
 runCheck().then(

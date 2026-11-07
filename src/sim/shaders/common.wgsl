@@ -12,6 +12,8 @@ const THREAT_FIXED_POINT_SCALE: f32 = 256.0;
 const ARENA_WIDTH: f32 = 16.0;
 const ARENA_HEIGHT: f32 = 9.0;
 
+const TAU: f32 = 6.283185307;
+
 const FLAG_ALIVE: u32 = 1u;
 const SPAWN_FRAMES_SHIFT: u32 = 8u;
 const SPAWN_FRAMES_MASK: u32 = 255u;
@@ -122,4 +124,43 @@ fn speciesFieldIndex(species: u32, fieldIndex: u32) -> u32 {
 
 fn matrixWeightIndex(species: u32, other: u32) -> u32 {
   return SPECIES_MATRIX_OFFSET + species * SPECIES_COUNT + other;
+}
+
+// 32 bytes. color is packed rgba8 with r in the low byte. A slot with lifetime <= 0 or
+// age >= lifetime is dead.
+struct Particle {
+  position: vec2f,
+  velocity: vec2f,
+  color: u32,
+  age: f32,
+  lifetime: f32,
+  padding: f32,
+}
+
+fn isParticleAlive(particle: Particle) -> bool {
+  return particle.lifetime > 0.0 && particle.age < particle.lifetime;
+}
+
+fn pcgHash(value: u32) -> u32 {
+  let state = value * 747796405u + 2891336453u;
+  let word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+  return (word >> 22u) ^ word;
+}
+
+// Advances the state and returns a float in [0, 1) built from its top 24 bits.
+fn nextRandom(state: ptr<function, u32>) -> f32 {
+  *state = pcgHash(*state);
+  return f32(*state >> 8u) / 16777216.0;
+}
+
+fn hsvToRgb(hue: f32, saturation: f32, value: f32) -> vec3f {
+  let offsets = fract(vec3f(hue) + vec3f(1.0, 2.0 / 3.0, 1.0 / 3.0));
+  let ramps = clamp(abs(offsets * 6.0 - vec3f(3.0)) - vec3f(1.0), vec3f(0.0), vec3f(1.0));
+  return value * mix(vec3f(1.0), ramps, saturation);
+}
+
+// Opaque rgba8 with r in the low byte.
+fn packColor(rgb: vec3f) -> u32 {
+  let channels = vec3u(clamp(rgb, vec3f(0.0), vec3f(1.0)) * 255.0 + vec3f(0.5));
+  return channels.x | (channels.y << 8u) | (channels.z << 16u) | (255u << 24u);
 }
