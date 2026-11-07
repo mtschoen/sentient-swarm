@@ -21,7 +21,7 @@ import { TrailDecayPass, trailFrameFactors } from './trails.js';
 import { WarpGrid } from './warpgrid.js';
 
 export const DEFAULT_RENDER_SETTINGS = {
-  glyphDevicePixels: 4,
+  glyphDevicePixels: 10,
   glowScale: 2,
   trailDecay: 0.90,
   bloomStrength: 0.8,

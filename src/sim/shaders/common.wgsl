@@ -17,6 +17,8 @@ const TAU: f32 = 6.283185307;
 const FLAG_ALIVE: u32 = 1u;
 const SPAWN_FRAMES_SHIFT: u32 = 8u;
 const SPAWN_FRAMES_MASK: u32 = 255u;
+// Spawn-in frames a new agent starts with (spawn.wgsl); the glyph pass fades ships in over them.
+const SPAWN_IN_FRAMES: u32 = 30u;
 
 // 32 bytes, 16-byte aligned for storage arrays.
 struct Agent {

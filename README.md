@@ -1,6 +1,6 @@
 # Murmuration
 
-A browser WebGPU page that simulates hundreds of thousands of flocking enemies of five species entirely on the GPU, rendered as neon glyphs over a reactive warp grid with trails and bloom. Run it with `npm install` then `npm run dev` (serves on http://127.0.0.1:5174).
+A browser WebGPU page that simulates hundreds of thousands of flocking enemies of five species entirely on the GPU, rendered as neon spaceship silhouettes (one shape per species, nose along the heading) over a reactive warp grid with trails and bloom. Run it with `npm install` then `npm run dev` (serves on http://127.0.0.1:5174).
 
 ## Commands
 
@@ -53,10 +53,10 @@ Arena mean luminance (Rec. 709 over the arena rect of a captured frame, 0 black 
 
 | When | Arena mean luminance |
 | --- | --- |
-| `npm run smoke -- --frames 300` capture | 0.2844 |
-| Full ramp, about 95 seconds in (235,929 alive) | 0.5049 |
+| `npm run smoke -- --frames 300` capture | 0.2734 |
+| Full ramp, about 95 seconds in (235,929 alive) | 0.3355 |
 
-The smoke fails above 0.6. Reproduce the full-ramp number with a script that opens the page with `?capacity=262144`, waits about 95 seconds and reads `meanLuminance` from `window.__murmuration.capture()`.
+Both were measured with 10-pixel ships (`glyphDevicePixels` 10); the larger ships raise each glyph's coverage, so the density attenuation dims crowds more and the full ramp came out darker than with the earlier 4-pixel glyphs (0.5049). The smoke fails above 0.6. Reproduce the full-ramp number with a script that opens the page with `?capacity=262144`, waits about 95 seconds and reads `meanLuminance` from `window.__murmuration.capture()`.
 
 ## Tuning notes
 

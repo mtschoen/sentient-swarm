@@ -19,7 +19,6 @@
 @group(0) @binding(1) var<storage, read_write> agents: array<Agent>;
 @group(0) @binding(2) var<storage, read_write> spawnBudget: array<atomic<i32>, SPECIES_COUNT>;
 
-const SPAWN_IN_FRAMES: u32 = 30u;
 const POSITION_ATTEMPTS: u32 = 4u;
 const NO_SPECIES: u32 = 0xffffffffu;
 

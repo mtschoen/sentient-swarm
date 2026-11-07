@@ -3,8 +3,9 @@
 // Usage: node tests/browser/smoke.mjs [--frames N]
 // Reads the composited frame back through window.__murmuration.capture (headless Chromium may never
 // composite a WebGPU canvas, so page.screenshot() is not trusted) and writes artifacts/smoke.png and
-// artifacts/smoke-zoom.png (4x inspect zoom, trails off), then holds a debug kill at the arena
-// center and writes artifacts/smoke-kill.png (trails off, glyphs hidden: particles and grid only).
+// artifacts/smoke-zoom.png (4x inspect zoom, trails off) and artifacts/smoke-ships.png (1x, trails
+// off), then holds a debug kill at the arena center and writes artifacts/smoke-kill.png (trails off,
+// glyphs hidden: particles and grid only).
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 // Liveness: every page.evaluate is bounded by EVALUATE_TIMEOUT_MILLISECONDS (a capture resolves only
 // on a later rendered frame, so a renderer that throws or stops would leave it pending forever),
@@ -240,6 +241,9 @@ async function run(resources) {
     // Trails off so the 4x frame shows glyph shapes rather than motion smears.
     const zoomCapture = await evaluateWithin(page, 'the zoom capture', () => window.__murmuration.capture({ inspectZoom: 4, settings: { trailDecay: 0 } }));
     await writeDataUrl('smoke-zoom.png', zoomCapture.pngDataUrl);
+    // The same at 1x, the visual gate that ships read as ships rather than dots at native size.
+    const shipsCapture = await evaluateWithin(page, 'the 1x ships capture', () => window.__murmuration.capture({ settings: { trailDecay: 0 } }));
+    await writeDataUrl('smoke-ships.png', shipsCapture.pngDataUrl);
     const luminance = capture.meanLuminance;
     if (!(luminance > MINIMUM_LUMINANCE && luminance < MAXIMUM_LUMINANCE)) {
       console.error(`smoke: expected ${MINIMUM_LUMINANCE} < arena mean luminance < ${MAXIMUM_LUMINANCE}, got ${luminance.toFixed(4)} (${capture.width}x${capture.height})`);

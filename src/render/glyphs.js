@@ -1,8 +1,10 @@
-// Glyph pass (glyphs.wgsl): one instanced triangle strip per agent slot, additively blended into the
-// scene target. Bindings: view uniform, SimParams uniform, agents, coarse field, species table (3
-// storage buffers). Bind groups are cached per agent buffer, which ping-pongs every step.
+// Glyph pass (glyphs.wgsl, with the ship shapes of ships.wgsl prepended after common.wgsl): one
+// instanced triangle strip per agent slot, additively blended into the scene target. Bindings:
+// view uniform, SimParams uniform, agents, coarse field, species table (3 storage buffers). Bind
+// groups are cached per agent buffer, which ping-pongs every step.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createUniformBuffer } from '../gpu/buffers.js';
+import { prependCommon } from '../gpu/shaders.js';
 import { COARSE_COLUMNS, COARSE_ROWS } from '../sim/layout.js';
 import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
 
@@ -50,7 +52,8 @@ export class GlyphPass {
   }
 
   async initialize() {
-    const module = this.device.createShaderModule({ label: 'glyphs', code: await loadRenderShader('glyphs', this.common) });
+    const header = prependCommon(await loadRenderShader('ships'), this.common);
+    const module = this.device.createShaderModule({ label: 'glyphs', code: await loadRenderShader('glyphs', header) });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'glyphs',
       layout: 'auto',
