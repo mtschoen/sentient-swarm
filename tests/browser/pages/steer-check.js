@@ -3,7 +3,8 @@
 // (b) a single overfull cell stays valid and its field is exact, (c) a Lattice square holds the
 // spacing its target density implies, (d) pressure keeps a large Chaser swarm from collapsing
 // into a ball while pressure 0 lets it collapse, (e) the neighbor cap bounds the fine pass: one
-// dense-cell step matches a CPU port of the capped sampling and differs from the uncapped one, (f) the default five-species mix at full capacity does not pack into a clump around the player.
+// dense-cell step matches a CPU port of the capped sampling and differs from the uncapped one, (f) the default five-species mix does not pack into a clump around the player at full capacity, at a sparse
+// population and at the initial ramp.
 import { createGpuContext } from '/src/gpu/device.js';
 import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
@@ -446,17 +447,22 @@ async function checkNeighborCap(gpu, common) {
 // (f) The default species mix (equal shares, all five species) at the 262144 capacity, seeded
 // uniformly with the player fixed at the center, for 900 steps: fewer than 15 percent of the
 // agents sit within 1.0 world unit of the player, and no coarse cell holds more than 4 times the
-// capacity-average density per cell (the average of the population under test).
+// capacity-average density per cell (the average of the population under test, stricter than the capacity average at the sparse sizes).
+// Seeding is uniform over the arena; it does not mirror the spawner's geography (at least a quarter
+// arena width from the player).
 // The same check also runs at SPARSE_CLUMP_COUNT agents, the population while the demo ramps up
 // (about 18 per coarse cell), where density sits below every targetDensity and pressure is idle.
 const CLUMP_CAPACITY = 262144;
 const SPARSE_CLUMP_COUNT = 40960;
+// The spawner starts at 5 percent of capacity: about 5.7 agents per coarse cell.
+const INITIAL_RAMP_CLUMP_COUNT = 13107;
+const GROUP_DENSITY_FACTOR = 2;
 const CLUMP_STEPS = 900;
 const CLUMP_RADIUS = 1.0;
 const CLUMP_MAXIMUM_FRACTION = 0.15;
 const CLUMP_MAXIMUM_DENSITY_FACTOR = 4;
 
-async function checkNoClump(gpu, common, count, label) {
+async function checkNoClump(gpu, common, count, label, peakReference = count / (COARSE_COLUMNS * COARSE_ROWS)) {
   const harness = new Harness(gpu, common, count);
   await harness.initialize();
   const random = randomSource(5);
@@ -482,11 +488,20 @@ async function checkNoClump(gpu, common, count, label) {
   }).join(' ');
   const average = count / cells.length;
   const peak = Math.max(...cells);
+  const cellOf = (agent) => Math.min(COARSE_COLUMNS - 1, Math.floor(agent.x / (ARENA_WIDTH / COARSE_COLUMNS))) + Math.min(COARSE_ROWS - 1, Math.floor(agent.y / (ARENA_HEIGHT / COARSE_ROWS))) * COARSE_COLUMNS;
+  // Informational, never asserted: share of agents in a cell denser than GROUP_DENSITY_FACTOR times the average.
+  const grouped = agents.filter((agent) => cells[cellOf(agent)] > GROUP_DENSITY_FACTOR * average).length / count;
   return {
-    pass: near < CLUMP_MAXIMUM_FRACTION && peak < CLUMP_MAXIMUM_DENSITY_FACTOR * average,
-    detail: `clump ${label} (${count} agents): ${(near * 100).toFixed(1)}% within ${CLUMP_RADIUS} of the player (need < ${CLUMP_MAXIMUM_FRACTION * 100}%; by species ${nearBySpecies}), peak cell ${peak} = ${(peak / average).toFixed(2)}x the average ${average.toFixed(0)} (need < ${CLUMP_MAXIMUM_DENSITY_FACTOR}x)`,
+    pass: near < CLUMP_MAXIMUM_FRACTION && peak < CLUMP_MAXIMUM_DENSITY_FACTOR * peakReference,
+    detail: `clump ${label} (${count} agents): ${(near * 100).toFixed(1)}% within ${CLUMP_RADIUS} of the player (need < ${CLUMP_MAXIMUM_FRACTION * 100}%; by species ${nearBySpecies}), grouped ${(grouped * 100).toFixed(0)}% (info), peak cell ${peak} = ${(peak / average).toFixed(2)}x the average ${average.toFixed(0)} (need < ${CLUMP_MAXIMUM_DENSITY_FACTOR} x ${peakReference.toFixed(0)} = ${(CLUMP_MAXIMUM_DENSITY_FACTOR * peakReference).toFixed(0)})`,
   };
 }
+
+const checkNoClumpFull = (gpu, common) => checkNoClump(gpu, common, CLUMP_CAPACITY, 'full');
+const checkNoClumpSparse = (gpu, common) => checkNoClump(gpu, common, SPARSE_CLUMP_COUNT, 'sparse');
+// At 5 percent population the average (about 5.7 per cell) is below every targetDensity, so a spread
+// swarm settles near the targets, not the average; the peak reference is the highest target.
+const checkNoClumpInitialRamp = (gpu, common) => checkNoClump(gpu, common, INITIAL_RAMP_CLUMP_COUNT, 'initial-ramp', Math.max(...defaultSpecies().map((row) => row.targetDensity)));
 
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
@@ -495,7 +510,7 @@ async function runCheck() {
   gpu.device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
   const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
   const results = [];
-  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, (gpuContext, shader) => checkNoClump(gpuContext, shader, CLUMP_CAPACITY, 'full'), (gpuContext, shader) => checkNoClump(gpuContext, shader, SPARSE_CLUMP_COUNT, 'sparse')]) {
+  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp]) {
     results.push(await check(gpu, common));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${results.map((result) => result.detail).join('; ')}` };
   }

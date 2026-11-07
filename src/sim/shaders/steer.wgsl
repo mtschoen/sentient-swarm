@@ -12,7 +12,7 @@
 //   sameSpeciesCohesion is 0), faded by clamp(1 - density / targetDensity)
 //   where density is the total at the agent's cell; the matrix row along the signed sum of the
 //   other species' gradients; flee down the threat gradient; pressure down the total-density
-//   gradient with weight pressure * (density - targetDensity) once density exceeds targetDensity;
+//   gradient with weight min(pressure * (density - targetDensity), PRESSURE_MAXIMUM_MULTIPLE) once density exceeds targetDensity;
 //   like the other field terms its direction saturates (saturatedDirection), so float noise in a
 //   flat over-dense interior pushes weakly instead of at full strength in a random direction.
 //
@@ -41,6 +41,12 @@ const ORBIT_TANGENT_BAND: f32 = 0.2;
 // Fraction of the time-optimal stopping speed that straight seek allows, leaving acceleration
 // headroom for the other terms that share the maximumTurn budget. The lab may expose it.
 const ARRIVAL_BRAKING: f32 = 0.7;
+// Straight seek fades to zero inside this distance from the player (smoothstep), so seekers hover
+// at a standoff instead of piling onto the player.
+const COMFORT_RADIUS: f32 = 1.0;
+// The pressure term is at most this multiple of maximumSpeed, so a dense cell cannot demand a
+// desired velocity the turn clamp has to absorb.
+const PRESSURE_MAXIMUM_MULTIPLE: f32 = 2.0;
 const MINIMUM_LENGTH: f32 = 0.000001;
 
 // raw and blurred hold COARSE_CHANNELS floats per cell as vec4 pairs: channels 0..3, then 4..7.
@@ -97,7 +103,7 @@ fn seekVelocity(position: vec2f, orbitRadius: f32, maximumSpeed: f32, maximumAcc
   let radial = toPlayer / distance;
   if (orbitRadius <= 0.0) {
     let brakingSpeed = ARRIVAL_BRAKING * sqrt(2.0 * maximumAcceleration * distance);
-    return radial * min(maximumSpeed, brakingSpeed);
+    return radial * min(maximumSpeed, brakingSpeed) * smoothstep(0.0, COMFORT_RADIUS, distance);
   }
   if (abs(distance - orbitRadius) <= ORBIT_TANGENT_BAND * orbitRadius) {
     return vec2f(-radial.y, radial.x) * maximumSpeed;
@@ -231,7 +237,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   if (density > targetDensity) {
     let totalGradient = vec2f(totalDensity(gradientX), totalDensity(gradientY));
-    desired = desired - saturatedDirection(totalGradient) * speciesField(species, FIELD_PRESSURE) * (density - targetDensity) * maximumSpeed;
+    desired = desired - saturatedDirection(totalGradient) * min(speciesField(species, FIELD_PRESSURE) * (density - targetDensity), PRESSURE_MAXIMUM_MULTIPLE) * maximumSpeed;
   }
 
   var steering = (desired - agent.velocity) * STEERING_RESPONSE;
