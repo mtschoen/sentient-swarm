@@ -4,7 +4,7 @@
 // Reads the composited frame back through window.__murmuration.capture (headless Chromium may never
 // composite a WebGPU canvas, so page.screenshot() is not trusted) and writes artifacts/smoke.png and
 // artifacts/smoke-zoom.png (4x inspect zoom, trails off), then holds a debug kill at the arena
-// center and writes artifacts/smoke-kill.png.
+// center and writes artifacts/smoke-kill.png (trails off, glyphs hidden: particles and grid only).
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
@@ -23,7 +23,11 @@ const RESIZE_TOLERANCE = 0.05;
 const PORTRAIT_VIEWPORT = { width: 800, height: 1200 };
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
 const MAXIMUM_BAND_LUMINANCE = 0.01;
+// Equals CAPTURE_SETTLE_FRAMES in main.js: the hold spans the flash capture's settle frames.
 const KILL_HOLD_FRAMES = 30;
+// Measured rise with glyphs hidden is about 0.27 at the center against about 0.001 in the control box.
+const KILL_FLASH_MARGIN = 0.1;
+const KILL_FLASH_SETTINGS = { trailDecay: 0, glyphDevicePixels: 0 };
 const KILL_BOX_DEVICE_PIXELS = 60;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
@@ -81,34 +85,48 @@ async function checkResize(page) {
   return page.consoleErrors.length > 0 ? `smoke: console errors after resize: ${page.consoleErrors.join(' | ')}` : null;
 }
 
-// Holds the primary button at the canvas center for KILL_HOLD_FRAMES frames: the debug kill spawns
-// particles and threat there, so the 60 by 60 device-pixel box around the arena center must get
-// brighter (particles plus the warp grid flash) than it was just before the press. Returns a
-// failure message, or null.
+// Kill flash check. Two captures with KILL_FLASH_SETTINGS (overrides settle 30 frames before each
+// capture): one calm, one taken while the primary button is held at the canvas center, so the hold
+// spans the second capture's settle frames (KILL_HOLD_FRAMES, the CAPTURE_SETTLE_FRAMES of main.js).
+// Trails are off so history cannot saturate the boxes. Glyphs are hidden (glyphDevicePixels 0)
+// because the kill also removes the dense glyph mass from the center box, which cancels most of the
+// particle and grid flash in a full render (measured: net change -0.03 to +0.04), so the check
+// measures what the kill adds, particles plus the threat-lit warp grid.
+// Both captures sample a 60 by 60 device-pixel box at the arena center and a control box of the
+// same size at 25 percent of the arena width and height, far outside the 0.6 world-unit kill
+// radius. The center rise must beat the control change by KILL_FLASH_MARGIN. Returns a failure
+// message, or null.
 async function checkKillFlash(page) {
   const arenaRect = (await page.evaluate(() => window.__murmuration.capture())).arenaRect;
-  const region = {
-    x: Math.round(arenaRect.x + arenaRect.width / 2 - KILL_BOX_DEVICE_PIXELS / 2),
-    y: Math.round(arenaRect.y + arenaRect.height / 2 - KILL_BOX_DEVICE_PIXELS / 2),
+  const boxAt = (fractionX, fractionY) => ({
+    x: Math.round(arenaRect.x + arenaRect.width * fractionX - KILL_BOX_DEVICE_PIXELS / 2),
+    y: Math.round(arenaRect.y + arenaRect.height * fractionY - KILL_BOX_DEVICE_PIXELS / 2),
     width: KILL_BOX_DEVICE_PIXELS,
     height: KILL_BOX_DEVICE_PIXELS,
-  };
+  });
+  const regions = [boxAt(0.5, 0.5), boxAt(0.25, 0.25)];
+  const captureFlashLayers = () => page.evaluate(
+    ([boxes, settings]) => window.__murmuration.capture({ settings, regions: boxes }),
+    [regions, KILL_FLASH_SETTINGS],
+  );
   const bounds = await page.locator('#arena').boundingBox();
-  const calm = await page.evaluate((box) => window.__murmuration.capture({ region: box }), region);
   await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  const calm = await captureFlashLayers();
   await page.mouse.down();
   let flash;
   try {
-    const pressed = await page.evaluate(() => window.__murmuration.frame);
-    await waitForFrame(page, pressed + KILL_HOLD_FRAMES);
-    flash = await page.evaluate((box) => window.__murmuration.capture({ region: box }), region);
+    flash = await captureFlashLayers();
   } finally {
     await page.mouse.up();
   }
   await writeDataUrl('smoke-kill.png', flash.pngDataUrl);
-  console.log(`smoke: kill box ${JSON.stringify(region)} luminance ${calm.regionLuminance.toFixed(4)} before, ${flash.regionLuminance.toFixed(4)} after ${KILL_HOLD_FRAMES} held frames`);
-  if (!(flash.regionLuminance > calm.regionLuminance)) {
-    return `smoke: expected the kill box to brighten while the kill is held, got ${calm.regionLuminance.toFixed(4)} before and ${flash.regionLuminance.toFixed(4)} after`;
+  const [centerBefore, controlBefore] = calm.regionLuminances;
+  const [centerAfter, controlAfter] = flash.regionLuminances;
+  const centerRise = centerAfter - centerBefore;
+  const controlChange = controlAfter - controlBefore;
+  console.log(`smoke: kill flash (trails off, glyphs hidden, ${KILL_HOLD_FRAMES} held frames) center box ${centerBefore.toFixed(4)} -> ${centerAfter.toFixed(4)}, control box ${controlBefore.toFixed(4)} -> ${controlAfter.toFixed(4)}`);
+  if (!(centerRise - Math.abs(controlChange) > KILL_FLASH_MARGIN)) {
+    return `smoke: expected the center box rise (${centerRise.toFixed(4)}) to exceed the control box change (${controlChange.toFixed(4)}) by more than ${KILL_FLASH_MARGIN}`;
   }
   return page.consoleErrors.length > 0 ? `smoke: console errors after the kill: ${page.consoleErrors.join(' | ')}` : null;
 }
