@@ -46,6 +46,9 @@ Feel targets, in the owner's words: jump into the game as fast as possible, a to
 - Platform: browser WebGPU. Plain JavaScript ES modules plus WGSL. No TypeScript, no framework, no game engine. A dev server and a test runner are allowed as dev dependencies; the shipped page is static files.
 - The whole simulation stays on the GPU every frame: agents, spatial grid, neighbor queries, bullets, collisions, particles, the warp field. No per-frame readback except a tiny stats or event buffer (kill counts, pickups touched, player hit) read asynchronously with at least a one-frame delay.
 - A fixed agent capacity chosen at startup by a GPU probe, with species sharing that capacity by percentage. The game never allocates per enemy on the CPU.
+- Per-agent steering work is bounded: the neighbor pass samples at most a fixed number of neighbors per agent (builder picks the cap and the selection strategy, for example the first K in each of the 3x3 cells or a strided sample) so a dense mass costs linear, not quadratic, time. Collision tests against bullets, beams, pickups, and the player stay exact.
+- Runtime quality can step down within the allocated capacity (particle budget, bloom, sim rate, alive cap) when sustained frame time exceeds budget, because phones throttle thermally after minutes, and a startup probe cannot see that.
+- GPU memory is budgeted up front per preset against the adapter's reported limits (storage buffer binding size, total buffer memory). iOS terminates WebGPU pages under memory pressure, so phone presets stay well below the limits rather than at them.
 - Landscape only on phones, using `screen.orientation.lock` where the browser permits and a rotate overlay otherwise.
 - Deploy to GitHub Pages from a public GitHub repo, with per-pull-request preview deployments under the same site, following the pattern from the owner's PolyPhase repo (assembly script, `/<repo>/pr-preview/pr-N/`).
 - Owner's house rules apply: full-word identifiers, no em-dashes in anything generated, source files under about 500 lines or carrying a one-line note why, no hard-coded machine paths, no wall-clock assertions in tests, no committed logs or raw tool output.
@@ -85,6 +88,8 @@ Designer's calls, Geometry Wars precedent:
 ### Enemies: species as parameter rows
 
 There is one enemy implementation. Every enemy is a boid with the classic rules (seek the player, cohesion, alignment, separation), plus flee-from-fire, plus an optional preferred orbit radius around the player, plus a row in a species-by-species interaction matrix giving signed attraction or repulsion to neighbors of each other species. A species is a row of those weights plus a glyph, a hue, and a glow profile. Nothing else distinguishes species.
+
+Cohesion and alignment apply only to same-species neighbors. Separation applies to all neighbors. Cross-species influence comes only through the matrix. This keeps populations recognizable (a Lattice sheet stays a sheet when Chasers pour through it) while still letting swarms collide and deform. The neighborhood is part of the behavioral model, not just a performance structure. The lab exposes this as a toggle so the alternative can be compared.
 
 Initial species, as the owner and designer imagined them. Treat the names and the intent as given; treat the numbers as a starting point for the lab.
 
@@ -136,6 +141,23 @@ Acquisition and decay, as the designer's call unless the owner objects:
 
 The "layers" the owner asked for come from the type by tier matrix plus the charge ring: there is always a better state to reach and a worse state looming.
 
+Recovery guard (designer's call, from review): upgrades generate the streaks and dense kills that generate more upgrades, so a player who loses one can be least able to earn the next exactly when pressure is highest. Two rules prevent the trap. First, pickup income is not purely kill-driven: while the player is on the base gun, a pickup is guaranteed to spawn within a bounded time (builder tunes, on the order of ten seconds) regardless of kills, placed away from the densest mass. Second, the base gun is tuned so that it can always open an escape lane through a Chaser river at default pressure; "humble" means slow to clear, never unable to move.
+
+### Event ordering and authority
+
+Observable outcomes when things coincide, so that implementation details never decide them:
+
+- Within a frame, in order: player input (including a bomb press) is applied first; a bomb kills everything alive before any contact test runs. Then pickups touched this frame are collected and applied. Then bullet and beam kills. Then player contact: if any live agent touches the player, the player dies this frame and the whole arena clears. Charge expiry is evaluated last; a pickup collected in the same frame as expiry wins.
+- Every GPU event (kills by species, pickups collected, player hit) carries the frame sequence number it happened in. The CPU ignores events whose sequence number predates the current respawn, so a death reported late cannot kill a freshly respawned player.
+- A GPU-side latch prevents a second player-death event until the CPU acknowledges the first. Readback never blocks the frame loop; several staging buffers rotate and results may arrive more than one frame late.
+
+### First-run entry
+
+- Landscape check first: in portrait the rotate overlay shows and nothing else happens.
+- One tap or click or button press starts the game. This gesture is required anyway to unlock audio on phones, so "instant start" means exactly one input, not zero.
+- Danger and scoring begin with the first spawn wave, half a second after start, while the music comes up. The probe runs underneath real play as described in Settings.
+- Controls are live from the first frame; touch sticks appear where the thumbs land.
+
 ### Controls
 
 - Gamepad: left stick move, right stick aim and fire (fire whenever aiming), face button or trigger for bomb.
@@ -149,7 +171,7 @@ Instant start wins over the probe. On first load the game starts immediately at 
 
 Following PolyPhase's calibrated-slider pattern: effect sliders read 100 percent at the tuned default and can be pushed past it. Reduced motion is opt-in and defaults off (Windows reports `prefers-reduced-motion` spuriously when animation effects are disabled; see the owner's gotcha note). Music and effects volume are separate.
 
-Gameplay does not depend on capacity. The swarm must feel the same on a phone at a few hundred thousand agents and on the desktop in the millions; only density differs. Score thresholds, spawn pressure as a fraction of capacity, and weapon clearing rates as a fraction of the screen are all expressed relative to capacity so the two targets stay comparable.
+Gameplay does not depend on capacity. The swarm must feel the same on a phone at a few hundred thousand agents and on the desktop in the millions; only density differs. The invariants across presets are: the fraction of the arena a Chaser river occupies at a given pressure, the width of the escape lane the base gun opens (as a fraction of screen), pickup income per minute, and survival difficulty (time to first death for a given skill). Score thresholds, spawn pressure as a fraction of capacity, and weapon clearing rates as a fraction of the screen are all expressed relative to capacity so these stay comparable. Score itself is normalized so that a kill at low capacity is worth proportionally more.
 
 ### Visuals
 
