@@ -23,7 +23,7 @@ const RESIZE_TOLERANCE = 0.05;
 const PORTRAIT_VIEWPORT = { width: 800, height: 1200 };
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
 const MAXIMUM_BAND_LUMINANCE = 0.01;
-// Equals CAPTURE_SETTLE_FRAMES in main.js: the hold spans the flash capture's settle frames.
+// Equals CAPTURE_SETTLE_FRAMES in capture-hook.js: the hold spans the flash capture's settle frames.
 const KILL_HOLD_FRAMES = 30;
 // Measured rise with glyphs hidden is about 0.27 at the center against about 0.001 in the control box.
 const KILL_FLASH_MARGIN = 0.1;
@@ -87,7 +87,7 @@ async function checkResize(page) {
 
 // Kill flash check. Two captures with KILL_FLASH_SETTINGS (overrides settle 30 frames before each
 // capture): one calm, one taken while the primary button is held at the canvas center, so the hold
-// spans the second capture's settle frames (KILL_HOLD_FRAMES, the CAPTURE_SETTLE_FRAMES of main.js).
+// spans the second capture's settle frames (KILL_HOLD_FRAMES, the CAPTURE_SETTLE_FRAMES of capture-hook.js).
 // Trails are off so history cannot saturate the boxes. Glyphs are hidden (glyphDevicePixels 0)
 // because the kill also removes the dense glyph mass from the center box, which cancels most of the
 // particle and grid flash in a full render (measured: net change -0.03 to +0.04), so the check

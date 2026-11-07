@@ -1,6 +1,7 @@
 import { createPointerSource } from './pointer.js';
 import { createTouchSource } from './touch.js';
 import { readGamepad } from './gamepad.js';
+import { createKeyboardSource } from './keyboard.js';
 
 export class InputState {
   constructor() {
@@ -25,10 +26,11 @@ export function createInput(canvas, viewport, { windowObject = window, navigator
   const state = new InputState();
   const pointer = createPointerSource(canvas, viewport, windowObject);
   const touch = createTouchSource(canvas);
+  const keyboard = createKeyboardSource(windowObject);
 
   function update() {
     const gamepad = readGamepad(navigatorObject);
-    state.move = sumClamped(gamepad.move, touch.move);
+    state.move = sumClamped(sumClamped(gamepad.move, touch.move), keyboard.move);
     state.aim = sumClamped(gamepad.aim, touch.aim);
     state.firing = gamepad.firing || touch.firing;
     state.bomb = gamepad.bomb;
@@ -39,6 +41,7 @@ export function createInput(canvas, viewport, { windowObject = window, navigator
   function dispose() {
     pointer.dispose();
     touch.dispose();
+    keyboard.dispose();
   }
 
   return { state, update, dispose };

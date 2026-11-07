@@ -82,6 +82,7 @@ export class Simulation {
     this.debugKillRadius = 0;
     this.frameSequenceValue = 0;
     this.timeValue = 0;
+    this.sameSpeciesCohesion = true;
     this.setSpecies(species, matrix);
     this.setShares(shares);
   }
@@ -114,6 +115,10 @@ export class Simulation {
     this.device.queue.writeBuffer(this.speciesTableBufferValue, 0, packSpeciesTable(rows, matrix));
   }
 
+  setSameSpeciesCohesion(enabled) {
+    this.sameSpeciesCohesion = Boolean(enabled);
+  }
+
   setShares(shares) {
     this.sharesValue = normalizeShares(shares);
   }
@@ -135,6 +140,7 @@ export class Simulation {
       debugKillRadius: this.debugKillRadius,
       spawnPerSpecies: Array.from(spawnPerSpecies),
       frameSequence: this.frameSequenceValue,
+      sameSpeciesCohesion: this.sameSpeciesCohesion ? 1 : 0,
     }));
     const killRadius = this.debugKillRadius;
     this.debugKillRadius = 0;
@@ -191,6 +197,7 @@ export class Simulation {
     encoder.copyBufferToBuffer(this.agentsBuffer, 0, next.agentBuffers[next.inputIndex], 0, copiedBytes);
     this.device.queue.submit([encoder.finish()]);
     await this.device.queue.onSubmittedWorkDone();
+    next.setSameSpeciesCohesion(this.sameSpeciesCohesion);
     next.frameSequenceValue = this.frameSequenceValue;
     next.timeValue = this.timeValue;
     next.setPlayer(...this.playerPosition);

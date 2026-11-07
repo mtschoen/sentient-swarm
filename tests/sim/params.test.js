@@ -28,8 +28,15 @@ test('packSimParams produces the 96-byte uniform layout', () => {
 test('packSimParams defaults missing fields to zero', () => {
   const view = new DataView(packSimParams({}));
   for (let offset = 0; offset < SIM_PARAMS_BYTES; offset += 4) {
-    assert.equal(view.getUint32(offset, true), 0);
+    // Same-species cohesion defaults to on.
+    assert.equal(view.getUint32(offset, true), offset === 88 ? 1 : 0);
   }
+});
+
+test('packSimParams writes sameSpeciesCohesion at byte offset 88', () => {
+  assert.equal(new DataView(packSimParams({ sameSpeciesCohesion: 0 })).getUint32(88, true), 0);
+  assert.equal(new DataView(packSimParams({ sameSpeciesCohesion: 1 })).getUint32(88, true), 1);
+  assert.equal(new DataView(packSimParams({})).getUint32(88, true), 1);
 });
 
 test('packSimParams rejects more spawn counts than species', () => {

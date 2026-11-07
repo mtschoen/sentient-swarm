@@ -8,7 +8,8 @@
 //   whole neighborhood. Separation averages over every sampled neighbor inside neighborRadius;
 //   alignment averages over the same-species ones. Averages, never sums.
 // - Coarse field (blurred, agents per coarse cell) read at the agent's cell and its four axis
-//   neighbors: cohesion up the own-species gradient, faded by clamp(1 - density / targetDensity)
+//   neighbors: cohesion up the own-species gradient (the total-density gradient when
+//   sameSpeciesCohesion is 0), faded by clamp(1 - density / targetDensity)
 //   where density is the total at the agent's cell; the matrix row along the signed sum of the
 //   other species' gradients; flee down the threat gradient; pressure down the total-density
 //   gradient with weight pressure * (density - targetDensity) once density exceeds targetDensity.
@@ -214,9 +215,12 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   let gradientY = CoarseSample(gradientLowY, gradientHighY);
   let density = totalDensity(center);
 
-  let ownGradient = vec2f(channelOf(gradientX, species), channelOf(gradientY, species));
+  var cohesionGradient = vec2f(channelOf(gradientX, species), channelOf(gradientY, species));
+  if (params.sameSpeciesCohesion == 0u) {
+    cohesionGradient = vec2f(totalDensity(gradientX), totalDensity(gradientY));
+  }
   let cohesionFade = clamp(1.0 - density / targetDensity, 0.0, 1.0);
-  desired = desired + saturatedDirection(ownGradient) * speciesField(species, FIELD_COHESION) * cohesionFade * maximumSpeed;
+  desired = desired + saturatedDirection(cohesionGradient) * speciesField(species, FIELD_COHESION) * cohesionFade * maximumSpeed;
 
   var matrixGradient = vec2f(0.0, 0.0);
   for (var other = 0u; other < SPECIES_COUNT; other = other + 1u) {

@@ -6,52 +6,18 @@ import { createInput } from './input/input.js';
 import { Viewport } from './render/viewport.js';
 import { Renderer } from './render/renderer.js';
 import { observeCanvasSize } from './render/canvas-size.js';
-import { meanLuminance } from './render/capture.js';
+import { installCaptureHook } from './render/capture-hook.js';
+import { createDebugPanel } from './ui/debugPanel.js';
+import { capacityFromSearch } from './ui/panelModel.js';
 import { ARENA_WIDTH, ARENA_HEIGHT } from './sim/layout.js';
 
-const DESKTOP_CAPACITY = 262144;
 const PLAYER_SPEED = 6;
 const DEBUG_KILL_RADIUS = 0.6;
-// Frames rendered with a capture's overrides before the capture, so earlier trails fade (0.9^30 is 4 percent).
-const CAPTURE_SETTLE_FRAMES = 30;
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
 
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
-}
-
-function describeCapture(frame, arenaRect, regions) {
-  const { width, height, pixels } = frame;
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength), width, height), 0, 0);
-  // The letterbox band (top strip, or left strip when the canvas is wider than the arena) should stay black.
-  const band = arenaRect.y > 0
-    ? { x: 0, y: 0, width, height: arenaRect.y }
-    : { x: 0, y: 0, width: arenaRect.x, height };
-  return {
-    width,
-    height,
-    arenaRect,
-    meanLuminance: meanLuminance(pixels, width, arenaRect),
-    bandLuminance: meanLuminance(pixels, width, band),
-    regionLuminances: (regions ?? []).map((region) => meanLuminance(pixels, width, region)),
-    pngDataUrl: canvas.toDataURL('image/png'),
-  };
-}
-
-function waitAnimationFrames(count) {
-  return new Promise((resolve) => {
-    let remaining = count;
-    const tick = () => {
-      remaining -= 1;
-      if (remaining <= 0) resolve();
-      else requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
 }
 
 async function boot() {
@@ -81,9 +47,10 @@ async function boot() {
   const sizeCanvasNow = observeCanvasSize(canvas, resizeCanvas);
   sizeCanvasNow();
 
-  const simulation = await Simulation.create(gpu, { capacity: DESKTOP_CAPACITY });
+  const initialCapacity = capacityFromSearch(location.search);
+  let simulation = await Simulation.create(gpu, { capacity: initialCapacity });
   renderer = await Renderer.create(gpu, { simulation, viewport });
-  const spawnPressure = new SpawnPressure({ capacity: DESKTOP_CAPACITY });
+  let spawnPressure = new SpawnPressure({ capacity: initialCapacity });
   const input = createInput(canvas, viewport);
 
   const player = { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 };
@@ -119,27 +86,26 @@ async function boot() {
     window.__murmuration.ready = true;
   };
 
-  // Smoke-test readback of a composited frame. With inspectZoom or renderer setting overrides
-  // (for example { trailDecay: 0 }), they hold for CAPTURE_SETTLE_FRAMES frames plus the captured
-  // one, then the previous values return. regions (device-pixel rects) add their means as
-  // regionLuminances, in order.
-  window.__murmuration.capture = async ({ inspectZoom, settings, regions } = {}) => {
-    const previousZoom = viewport.inspectZoom;
-    const previousSettings = { ...renderer.settings };
-    let frame;
+  installCaptureHook({ viewport, renderer });
+
+  // One recreate at a time: a change that arrives while one is pending is ignored (the panel also
+  // disables its select meanwhile). The frame loop keeps stepping the old simulation until the new
+  // one is ready; recreateWithCapacity destroys the old instance as its last step, and the swap
+  // below runs in the same microtask continuation, so no frame sees a destroyed simulation.
+  // SpawnPressure fixes capacity at construction, so it is rebuilt with the simulation.
+  let capacityChangePending = false;
+  const onCapacityChange = async (capacity) => {
+    if (capacityChangePending || capacity === simulation.capacity) return;
+    capacityChangePending = true;
     try {
-      if (inspectZoom !== undefined || settings !== undefined) {
-        viewport.inspectZoom = inspectZoom ?? previousZoom;
-        Object.assign(renderer.settings, settings);
-        await waitAnimationFrames(CAPTURE_SETTLE_FRAMES);
-      }
-      frame = await renderer.captureNextFrame();
+      simulation = await simulation.recreateWithCapacity(capacity);
+      renderer.setSimulation(simulation);
+      spawnPressure = new SpawnPressure({ capacity });
     } finally {
-      viewport.inspectZoom = previousZoom;
-      Object.assign(renderer.settings, previousSettings);
+      capacityChangePending = false;
     }
-    return describeCapture(frame, viewport.arenaRectDevicePixels, regions);
   };
+  createDebugPanel({ getSimulation: () => simulation, renderer, onCapacityChange });
 
   const loop = new FrameLoop({ update, render });
   loop.start();

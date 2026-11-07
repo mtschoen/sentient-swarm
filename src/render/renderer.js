@@ -122,6 +122,12 @@ export class Renderer {
     this.currentIndex = currentIndex;
   }
 
+  // Points the renderer at a new Simulation (after recreateWithCapacity); every pass reads the
+  // simulation's buffers at draw time, so nothing else is rebuilt.
+  setSimulation(simulation) {
+    this.simulation = simulation;
+  }
+
   afterSubmit() {
     this.frameCapture.afterSubmit();
   }

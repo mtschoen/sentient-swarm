@@ -43,7 +43,7 @@ struct Agent {
 //  64 spawnPerSpecies1   vec4u (species 4 in .x, rest 0)
 //  80 debugKillRadius    f32
 //  84 frameSequence      u32
-//  88 padding0           u32
+//  88 sameSpeciesCohesion u32 (1: own-species gradient, 0: total-density gradient)
 //  92 padding1           u32
 struct SimParams {
   dt: f32,
@@ -60,7 +60,7 @@ struct SimParams {
   spawnPerSpecies1: vec4u,
   debugKillRadius: f32,
   frameSequence: u32,
-  padding0: u32,
+  sameSpeciesCohesion: u32,
   padding1: u32,
 }
 

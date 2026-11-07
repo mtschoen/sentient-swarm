@@ -1,7 +1,51 @@
 # Murmuration
 
-A browser WebGPU page that simulates hundreds of thousands of flocking enemies of five species entirely on the GPU, rendered as neon glyphs over a reactive warp grid. Run it with `npm install` then `npm run dev` (serves on http://127.0.0.1:5174). Test CPU logic with `npm test`, run the Playwright browser smoke test with `npm run smoke`, and produce a static build with `npm run build` (set `PAGES_BASE` for a sub-path deploy).
+A browser WebGPU page that simulates hundreds of thousands of flocking enemies of five species entirely on the GPU, rendered as neon glyphs over a reactive warp grid with trails and bloom. Run it with `npm install` then `npm run dev` (serves on http://127.0.0.1:5174).
+
+## Commands
+
+- `npm run dev`: dev server on 127.0.0.1:5174 (strict port).
+- `npm run build`: static build into `dist/`; set `PAGES_BASE` for a sub-path deploy.
+- `npm test`: CPU logic tests via node:test.
+- `npm run smoke`: Playwright browser smoke test (see below).
+
+## Demo controls
+
+- Move the player point with WASD or the arrow keys, the left stick of a gamepad, or by dragging in the left half of the screen on touch.
+- Hold the left mouse button, or touch the right half of the screen, to kill agents at the pointer. Kills splash particles.
+- Hold the right mouse button for a 4x inspect zoom around the arena.
+- Press the backquote key, or use the `debug` button in the top right corner, to open the demo controls panel. It is hidden by default and holds:
+  - a capacity select (65536, 262144, 1048576, 4194304 agent slots; a change rebuilds the simulation and carries live agents over),
+  - the same-species cohesion toggle (off steers cohesion up the total-density gradient instead of the own-species one),
+  - spawn share sliders, ten sliders per species, and the 5 by 5 species matrix,
+  - renderer sliders (trail decay, bloom strength, warp density and threat weights),
+  - a live readout of frames per second and alive counts.
+- `?capacity=N` in the URL sets the starting capacity to one of the select's values; anything else starts at 262144.
 
 ## Smoke test
 
-`npm run smoke` starts the Vite dev server on port 5174, opens the page in headless Chromium with WebGPU flags, waits for `window.__murmuration.ready` and for `frame` to reach `--frames N` (default 120), and fails on any console error. Set `SMOKE_URL` to test an already running server. Exit codes: 0 ok, 1 failure, 2 no WebGPU adapter. On this machine headless Chromium gets an adapter, so exit 2 has not been observed; its message is `smoke: WebGPU adapter unavailable in headless Chromium (navigator.gpu missing or requestAdapter() returned null)`.
+`npm run smoke` starts the Vite dev server on port 5174 (nothing else may use it), opens the page in headless Chromium with WebGPU flags, waits for `window.__murmuration.ready` and for `frame` to reach `--frames N` (default 120), and fails on any console error. Set `SMOKE_URL` to test an already running server. Exit codes: 0 ok, 1 failure, 2 no WebGPU adapter. On this machine headless Chromium gets an adapter, so exit 2 has not been observed; its message is `smoke: WebGPU adapter unavailable in headless Chromium (navigator.gpu missing or requestAdapter() returned null)`.
+
+Caveats:
+
+- Headless Chromium here needs `--disable-dawn-features=use_dxc`: without it `requestDevice` fails because `dxcompiler.dll` cannot load (Windows Error 87), so shaders compile through the FXC fallback.
+- Headless Chromium may never composite a WebGPU canvas, so `page.screenshot()` is not trusted. The page publishes `window.__murmuration.capture`, which copies the swapchain texture back through the GPU; the smoke reads it for its luminance checks.
+- The smoke writes `artifacts/smoke.png`, `artifacts/smoke-zoom.png` and `artifacts/smoke-kill.png`. `artifacts/` is not committed.
+- The smoke never opens the debug panel.
+
+## Measured
+
+1,048,576 slots (`?capacity=1048576`), headless Chromium with uncapped frame flags, NVIDIA RTX 4090 (adapter info reports vendor nvidia, architecture lovelace), 1280 by 720 viewport:
+
+| Quantity | Value |
+| --- | --- |
+| Alive agents when the run stopped (about 90 seconds in) | 979,039 |
+| Render frames per second over the last 10 seconds | 1,393 |
+
+The spawn ramp takes 90 seconds, so the alive count passes 900,000 only near the end of it. Render frames per second counts animation frames with vsync and the frame rate limit disabled. The simulation still advances in fixed 1/60 second steps, so about 60 steps per second ran under those frames. Reproduce with a script that launches `launchWebGpuBrowser({ measuring: true })` from `tests/browser/launch.mjs`, opens the page with `?capacity=1048576`, and samples `window.__murmuration.frame` and `stats.aliveTotal` every 10 seconds.
+
+## Tuning notes
+
+- Averaged separation cancels inside a uniform crowd, so the coarse pressure term sets spacing. Lattice with `targetDensity` 150 per coarse cell settles at about 0.02 world units, one fifth of the neighbor radius.
+- Lattice sheets breathe: an undamped pressure spring against low acceleration. Damping is a lab item for Plan C.
+- Straight seek brakes near the player (`ARRIVAL_BRAKING` 0.7 in `steer.wgsl`), so swarms with pressure off collapse onto the player instead of oscillating through it.

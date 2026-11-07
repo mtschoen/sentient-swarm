@@ -110,3 +110,43 @@ test('dispose removes every listener', () => {
   assert.equal(menu.defaultPrevented, false);
   windowObject.dispatchEvent(pointerEvent('pointerup', { button: 0 }));
 });
+
+function keyEvent(type, key, target = null) {
+  const event = Object.assign(new Event(type), { key });
+  Object.defineProperty(event, 'target', { value: target });
+  return event;
+}
+
+test('WASD and arrow keys move, diagonals stay unit length, release stops', () => {
+  const { windowObject, input } = createFixture();
+  windowObject.dispatchEvent(keyEvent('keydown', 'd'));
+  input.update();
+  assert.deepEqual(input.state.move, { x: 1, y: 0 });
+  windowObject.dispatchEvent(keyEvent('keydown', 'ArrowUp'));
+  input.update();
+  assert.ok(Math.abs(Math.hypot(input.state.move.x, input.state.move.y) - 1) < 1e-9);
+  assert.ok(input.state.move.y < 0);
+  windowObject.dispatchEvent(keyEvent('keyup', 'd'));
+  windowObject.dispatchEvent(keyEvent('keyup', 'ArrowUp'));
+  input.update();
+  assert.deepEqual(input.state.move, { x: 0, y: 0 });
+});
+
+test('keys typed into a form field do not move, blur releases held keys', () => {
+  const { windowObject, input } = createFixture();
+  windowObject.dispatchEvent(keyEvent('keydown', 'a', { tagName: 'INPUT' }));
+  input.update();
+  assert.deepEqual(input.state.move, { x: 0, y: 0 });
+  windowObject.dispatchEvent(keyEvent('keydown', 'a'));
+  windowObject.dispatchEvent(new Event('blur'));
+  input.update();
+  assert.deepEqual(input.state.move, { x: 0, y: 0 });
+});
+
+test('dispose removes the keyboard listeners', () => {
+  const { windowObject, input } = createFixture();
+  input.dispose();
+  windowObject.dispatchEvent(keyEvent('keydown', 'w'));
+  input.update();
+  assert.deepEqual(input.state.move, { x: 0, y: 0 });
+});
