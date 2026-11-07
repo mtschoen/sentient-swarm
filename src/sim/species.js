@@ -1,6 +1,6 @@
 import { SPECIES_COUNT } from './layout.js';
 
-export const SPECIES_FIELDS = ['seek', 'cohesion', 'alignment', 'separation', 'maximumSpeed', 'maximumTurn', 'orbitRadius', 'flee', 'pressure', 'targetDensity', 'reserved0', 'reserved1'];
+export const SPECIES_FIELDS = ['seek', 'cohesion', 'alignment', 'separation', 'maximumSpeed', 'maximumTurn', 'orbitRadius', 'flee', 'pressure', 'targetDensity', 'hue', 'reserved1'];
 export const SPECIES_NAMES = ['Chaser', 'Orbiter', 'Skittish', 'Lattice', 'Predator'];
 
 const FIELD_COUNT = SPECIES_FIELDS.length;
@@ -21,7 +21,7 @@ const DEFAULT_ROWS = [
 ];
 
 export function defaultSpecies() {
-  return DEFAULT_ROWS.map((row) => ({ reserved0: 0, reserved1: 0, ...row }));
+  return DEFAULT_ROWS.map((row) => ({ reserved1: 0, ...row }));
 }
 
 export function defaultMatrix() {

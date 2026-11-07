@@ -112,6 +112,7 @@ const FIELD_ORBIT_RADIUS: u32 = 6u;
 const FIELD_FLEE: u32 = 7u;
 const FIELD_PRESSURE: u32 = 8u;
 const FIELD_TARGET_DENSITY: u32 = 9u;
+const SPECIES_FIELD_HUE: u32 = 10u;
 
 // Index helpers only: common.wgsl declares no bindings, so the shader that binds the table
 // wraps these in speciesField and matrixWeight.

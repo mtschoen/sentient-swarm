@@ -13,7 +13,7 @@ test('default species follow the field and name tables', () => {
   assert.equal(SPECIES_FIELDS.length, 12);
   assert.deepEqual(rows.map((row) => row.name), SPECIES_NAMES);
   assert.deepEqual(rows.map((row) => row.glyph), [0, 1, 2, 3, 4]);
-  for (const row of rows) { assert.equal(row.reserved0, 0); assert.equal(row.reserved1, 0); }
+  for (const row of rows) { assert.equal(row.reserved1, 0); }
 });
 
 test('normalizeShares sums to one and handles all zeros', () => {
@@ -26,4 +26,9 @@ test('normalizeShares clamps negative entries to zero', () => {
   const shares = normalizeShares([-3, 1, 1, 0, 0]);
   assert.equal(shares[0], 0);
   assert.equal(shares[1], 0.5);
+});
+
+test('packSpeciesTable packs each row hue at field index 10', () => {
+  const table = packSpeciesTable(defaultSpecies(), defaultMatrix());
+  defaultSpecies().forEach((row, index) => assert.equal(table[index * 12 + 10], Math.fround(row.hue)));
 });
