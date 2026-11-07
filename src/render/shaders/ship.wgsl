@@ -7,14 +7,14 @@
 
 // Uniform layout, total 64 bytes; ShipRenderer in ship.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
-//  28 pixelScale f32, 32 position vec2f, 40 facing f32 (radians), 44 charge f32 (0..1),
+//  28 header padding f32, 32 position vec2f, 40 facing f32 (radians), 44 charge f32 (0..1),
 //  48 hue f32, 52 ringShown f32 (0 or 1), 56 brightness f32 (blink), 60 padding
 struct ShipView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
   devicePixelToClip: vec2f,
   time: f32,
-  pixelScale: f32,
+  headerPadding: f32,
   position: vec2f,
   facing: f32,
   charge: f32,

@@ -3,7 +3,7 @@
 //   8 worldToClipOffset   vec2f
 //  16 devicePixelToClip   vec2f
 //  24 time                f32
-//  28 pixelScale          f32 (the inspect zoom, for widths that are fixed in device pixels)
+//  28 padding             f32 (written 0; keeps the per-renderer fields after it 16-byte aligned)
 // World to clip is affine, so two worldToClip samples give its scale and offset (inspect zoom included).
 export const WORLD_VIEW_FLOATS = 8;
 
@@ -14,7 +14,7 @@ export function packWorldView(viewport, time, target = new Float32Array(WORLD_VI
     unit.x - origin.x, unit.y - origin.y,
     origin.x, origin.y,
     2 / viewport.canvasWidth, 2 / viewport.canvasHeight,
-    time, viewport.inspectZoom,
+    time, 0,
   ], offset);
   return target;
 }

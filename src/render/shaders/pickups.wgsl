@@ -4,13 +4,13 @@
 
 // Uniform layout, total 544 bytes; PickupRenderer in pickups.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
-//  28 pixelScale f32, then 32 pickups of vec4f (x, y, hue, fade).
+//  28 header padding f32, then 32 pickups of vec4f (x, y, hue, fade).
 struct PickupView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
   devicePixelToClip: vec2f,
   time: f32,
-  pixelScale: f32,
+  headerPadding: f32,
   pickups: array<vec4f, 32>,
 }
 

@@ -11,13 +11,13 @@
 
 // Uniform layout, total 64 bytes; ProjectileRenderer in projectiles.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
-//  28 pixelScale f32, 32 hues vec4f (bullet, scatter, rail, orb), 48 hues vec4f (ring, sidewinder, beam, pad)
+//  28 header padding f32, 32 hues vec4f (bullet, scatter, rail, orb), 48 hues vec4f (ring, sidewinder, beam, pad)
 struct ProjectileView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
   devicePixelToClip: vec2f,
   time: f32,
-  pixelScale: f32,
+  headerPadding: f32,
   huesFirst: vec4f,
   huesSecond: vec4f,
 }
@@ -94,8 +94,10 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
   var fade = 1.0;
   switch kind {
     case PROJECTILE_KIND_BULLET: {
-      halfExtent = vec2f(BULLET_TAIL * 0.5 + 0.08, 0.12);
-      center = projectile.position - direction * (BULLET_TAIL * 0.5 - 0.04);
+      // Centred on the streak (-BULLET_TAIL to 0.04) with a 0.14 margin all round, where the
+      // falloff-30 glow is down to about 4 percent, so the quad edge never shows.
+      halfExtent = vec2f(BULLET_TAIL * 0.5 + 0.16, 0.14);
+      center = projectile.position - direction * (BULLET_TAIL * 0.5 - 0.02);
     }
     case PROJECTILE_KIND_SCATTER: {
       halfExtent = vec2f(SCATTER_TAIL * 0.5 + 0.08, 0.1);
@@ -169,7 +171,7 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
   switch input.kind {
     case PROJECTILE_KIND_BULLET: {
       let along = smoothstep(-BULLET_TAIL, 0.04, local.x);
-      let shape = bodyAndGlow(segmentDistance(local, vec2f(-BULLET_TAIL, 0.0), vec2f(0.04, 0.0)), 0.035, feather, 16.0);
+      let shape = bodyAndGlow(segmentDistance(local, vec2f(-BULLET_TAIL, 0.0), vec2f(0.04, 0.0)), 0.035, feather, 30.0);
       color = (vec3f(1.4) * shape.x + neon(input.hue, GLOW_SATURATION) * shape.y * 0.7) * along;
     }
     case PROJECTILE_KIND_SCATTER: {

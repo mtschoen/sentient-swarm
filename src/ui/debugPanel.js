@@ -164,7 +164,7 @@ export function createDebugPanel({
     };
     armSelect.addEventListener('change', arm);
     tierSelect.addEventListener('change', arm);
-    root.append(element(documentObject, 'label', {}, [element(documentObject, 'span', { textContent: 'arm weapon' }), armSelect, tierSelect]));
+    controls.append(element(documentObject, 'label', {}, [element(documentObject, 'span', { textContent: 'arm weapon' }), armSelect, tierSelect]));
   }
 
   section('Renderer');
