@@ -88,3 +88,37 @@ fn coarseCellIndexFor(position: vec2f) -> u32 {
   let row = min(u32(clamped.y / ARENA_HEIGHT * f32(COARSE_ROWS)), COARSE_ROWS - 1u);
   return column + row * COARSE_COLUMNS;
 }
+
+// Coarse field channels: species densities 0..4 (agents per coarse cell), threat at 5, 6 and 7 padding.
+const THREAT_CHANNEL: u32 = 5u;
+
+fn coarseCellCoordinate(position: vec2f) -> vec2i {
+  let cell = coarseCellIndexFor(position);
+  return vec2i(i32(cell % COARSE_COLUMNS), i32(cell / COARSE_COLUMNS));
+}
+
+// Species table (packSpeciesTable in species.js): SPECIES_COUNT rows of SPECIES_FIELD_COUNT floats,
+// then the SPECIES_COUNT by SPECIES_COUNT interaction matrix at SPECIES_MATRIX_OFFSET.
+// Field indices follow SPECIES_FIELDS order.
+const SPECIES_FIELD_COUNT: u32 = 12u;
+const SPECIES_MATRIX_OFFSET: u32 = 60u;
+const FIELD_SEEK: u32 = 0u;
+const FIELD_COHESION: u32 = 1u;
+const FIELD_ALIGNMENT: u32 = 2u;
+const FIELD_SEPARATION: u32 = 3u;
+const FIELD_MAXIMUM_SPEED: u32 = 4u;
+const FIELD_MAXIMUM_TURN: u32 = 5u;
+const FIELD_ORBIT_RADIUS: u32 = 6u;
+const FIELD_FLEE: u32 = 7u;
+const FIELD_PRESSURE: u32 = 8u;
+const FIELD_TARGET_DENSITY: u32 = 9u;
+
+// Index helpers only: common.wgsl declares no bindings, so the shader that binds the table
+// wraps these in speciesField and matrixWeight.
+fn speciesFieldIndex(species: u32, fieldIndex: u32) -> u32 {
+  return species * SPECIES_FIELD_COUNT + fieldIndex;
+}
+
+fn matrixWeightIndex(species: u32, other: u32) -> u32 {
+  return SPECIES_MATRIX_OFFSET + species * SPECIES_COUNT + other;
+}
