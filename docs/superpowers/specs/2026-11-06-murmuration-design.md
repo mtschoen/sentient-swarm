@@ -101,6 +101,9 @@ Two ranges of influence (designer's call, from review). At million-agent scale t
 - The fine pass (3x3 cells, capped neighbor sample) computes only separation and same-species alignment. Neighbor contributions are averaged, never summed, so forces do not scale with density and a phone preset and a desktop preset produce the same motion.
 - A coarse field, downsampled from the fine grid every frame and blurred, holds one density channel per species plus one threat channel written by weapons (aim cone, projectile trails, beam segment, bomb shockwave). Medium-range cohesion, the interaction matrix, and flee-from-fire all read this field. It is also what the warp grid, the Sidewinders' target search, and the spawner's "away from the densest mass" rule read.
 - Each species row also carries kinematic bounds (top speed, max turn rate) so slow sheets and fast rivers stay visibly different instead of averaging into one disk.
+- Each species row carries a comfortable density: a pressure term pushes agents down the density gradient when their surroundings exceed it. The spike showed that pure seek plus local separation collapses a swarm into one overpacked ball like gravity, and that damping seek in crowds freezes everything into static puffballs. Pressure is what lets a river stay a river.
+
+Spike findings (2026-11-06, owner's RTX 4090, headless Chrome): one million agents at about 1.1 ms of GPU time per frame, four million at about 5 ms, no shader or validation errors at any capacity. Additive blending saturates the center to pure white at four million, so tone mapping is required, not optional. Strided neighbor sampling of about 24 per cell kept dense clumps linear.
 
 The spike prototypes the coarse field before the main pipeline is frozen.
 
