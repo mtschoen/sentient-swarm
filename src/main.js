@@ -2,6 +2,7 @@ import { createGpuContext, describeUnsupported, WebGpuUnavailableError } from '.
 import { Simulation } from './sim/simulation.js';
 import { SpawnPressure } from './sim/spawner.js';
 import { FrameLoop } from './game/loop.js';
+import { applyControlsToSimulation, movePlayer } from './game/controls.js';
 import { createInput } from './input/input.js';
 import { Viewport } from './render/viewport.js';
 import { Renderer } from './render/renderer.js';
@@ -11,14 +12,7 @@ import { createDebugPanel } from './ui/debugPanel.js';
 import { capacityFromSearch } from './ui/panelModel.js';
 import { ARENA_WIDTH, ARENA_HEIGHT } from './sim/layout.js';
 
-const PLAYER_SPEED = 6;
-const DEBUG_KILL_RADIUS = 0.6;
-
 window.__murmuration = { ready: false, frame: 0, stats: null };
-
-function clamp(value, minimum, maximum) {
-  return Math.min(maximum, Math.max(minimum, value));
-}
 
 async function boot() {
   const canvas = document.getElementById('arena');
@@ -58,13 +52,8 @@ async function boot() {
 
   const update = (fixedStep) => {
     input.update();
-    const { state } = input;
-    player.x = clamp(player.x + state.move.x * PLAYER_SPEED * fixedStep, 0, ARENA_WIDTH);
-    player.y = clamp(player.y + state.move.y * PLAYER_SPEED * fixedStep, 0, ARENA_HEIGHT);
-    simulation.setPlayer(player.x, player.y);
-    if (state.pointerPrimaryDown && state.pointerWorld) {
-      simulation.setDebugKill(state.pointerWorld.x, state.pointerWorld.y, DEBUG_KILL_RADIUS);
-    }
+    movePlayer(player, input.state, fixedStep);
+    applyControlsToSimulation(simulation, input.state, player);
     const spawnPerSpecies = spawnPressure.update(fixedStep, lastStats?.aliveTotal ?? 0, simulation.shares);
     const encoder = gpu.device.createCommandEncoder();
     simulation.step(encoder, fixedStep, spawnPerSpecies);
