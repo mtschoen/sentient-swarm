@@ -21,7 +21,7 @@ function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function describeCapture(frame, arenaRect) {
+function describeCapture(frame, arenaRect, region) {
   const { width, height, pixels } = frame;
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -37,6 +37,7 @@ function describeCapture(frame, arenaRect) {
     arenaRect,
     meanLuminance: meanLuminance(pixels, width, arenaRect),
     bandLuminance: meanLuminance(pixels, width, band),
+    regionLuminance: region ? meanLuminance(pixels, width, region) : null,
     pngDataUrl: canvas.toDataURL('image/png'),
   };
 }
@@ -120,8 +121,8 @@ async function boot() {
 
   // Smoke-test readback of a composited frame. With inspectZoom or renderer setting overrides
   // (for example { trailDecay: 0 }), they hold for CAPTURE_SETTLE_FRAMES frames plus the captured
-  // one, then the previous values return.
-  window.__murmuration.capture = async ({ inspectZoom, settings } = {}) => {
+  // one, then the previous values return. region (a device-pixel rect) adds its mean as regionLuminance.
+  window.__murmuration.capture = async ({ inspectZoom, settings, region } = {}) => {
     const previousZoom = viewport.inspectZoom;
     const previousSettings = { ...renderer.settings };
     let frame;
@@ -136,7 +137,7 @@ async function boot() {
       viewport.inspectZoom = previousZoom;
       Object.assign(renderer.settings, previousSettings);
     }
-    return describeCapture(frame, viewport.arenaRectDevicePixels);
+    return describeCapture(frame, viewport.arenaRectDevicePixels, region);
   };
 
   const loop = new FrameLoop({ update, render });

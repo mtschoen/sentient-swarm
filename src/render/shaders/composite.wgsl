@@ -1,4 +1,4 @@
-// Composite: scene plus bloom times bloomStrength, ACES-fitted tonemap (load-bearing: additive
+// Composite: scene plus the warp grid layer plus bloom times bloomStrength, ACES-fitted tonemap (load-bearing: additive
 // glyphs saturate dense regions), gamma encode for the non-sRGB swapchain, and black letterbox
 // bands outside the arena rect. Prepended with fullscreen.wgsl.
 struct CompositeUniform {
@@ -13,6 +13,7 @@ struct CompositeUniform {
 @group(0) @binding(1) var scene: texture_2d<f32>;
 @group(0) @binding(2) var bloom: texture_2d<f32>;
 @group(0) @binding(3) var linearSampler: sampler;
+@group(0) @binding(4) var grid: texture_2d<f32>;
 
 // Scene radiance scale ahead of the tonemap: trails at decay 0.9 hold about ten frames of glyphs.
 const EXPOSURE: f32 = 0.15;
@@ -29,7 +30,7 @@ fn compositeFragment(input: FullscreenOutput) -> @location(0) vec4f {
   let pixel = input.position.xy;
   let rect = composite.arenaRect;
   let inside = all(pixel >= rect.xy) && all(pixel < rect.xy + rect.zw);
-  let sceneColor = textureLoad(scene, vec2i(pixel), 0).rgb;
+  let sceneColor = textureLoad(scene, vec2i(pixel), 0).rgb + textureLoad(grid, vec2i(pixel), 0).rgb;
   let bloomColor = textureSampleLevel(bloom, linearSampler, input.uv, 0.0).rgb;
   let mapped = acesFitted((sceneColor + bloomColor * composite.bloomStrength) * EXPOSURE);
   let encoded = pow(mapped, vec3f(1.0 / 2.2));

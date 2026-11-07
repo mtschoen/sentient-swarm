@@ -1,5 +1,7 @@
-// Renderer: trails decay plus glyphs into the current scene target, bloom, then composite into
-// the swapchain. Two rgba16float scene targets at canvas device-pixel size ping-pong for trails.
+// Renderer: the warp grid into its own grid layer, then trails decay, glyphs and particles into the
+// current scene target, bloom, then composite (scene plus grid plus bloom) into the swapchain. Two
+// rgba16float scene targets at canvas device-pixel size ping-pong for trails. The grid has its own
+// rgba16float layer, cleared every frame, so trail decay never copies it forward and it never smears.
 //
 // Frame contract, its own submission after the simulation's:
 //   const encoder = device.createCommandEncoder();
@@ -13,10 +15,19 @@ import { BloomPass } from './bloom.js';
 import { FrameCapture } from './capture.js';
 import { CompositePass } from './composite.js';
 import { GlyphPass } from './glyphs.js';
+import { ParticleRenderer } from './particles.js';
 import { SCENE_FORMAT, loadFullscreenHeader } from './render-shaders.js';
 import { TrailDecayPass } from './trails.js';
+import { WarpGrid } from './warpgrid.js';
 
-export const DEFAULT_RENDER_SETTINGS = { glyphDevicePixels: 4, glowScale: 2, trailDecay: 0.90, bloomStrength: 0.8 };
+export const DEFAULT_RENDER_SETTINGS = {
+  glyphDevicePixels: 4,
+  glowScale: 2,
+  trailDecay: 0.90,
+  bloomStrength: 0.8,
+  warpDensityWeight: 0.15,
+  warpThreatWeight: 0.6,
+};
 
 export class Renderer {
   static async create(gpu, { simulation, viewport }) {
@@ -26,8 +37,10 @@ export class Renderer {
     ]);
     const renderer = new Renderer(gpu, { simulation, viewport, common, fullscreenHeader });
     await Promise.all([
+      renderer.warpGrid.initialize(),
       renderer.trails.initialize(),
       renderer.glyphs.initialize(),
+      renderer.particles.initialize(),
       renderer.bloom.initialize(),
       renderer.composite.initialize(),
     ]);
@@ -43,11 +56,14 @@ export class Renderer {
     this.viewport = viewport;
     this.settings = { ...DEFAULT_RENDER_SETTINGS };
     this.trails = new TrailDecayPass(gpu, { fullscreenHeader });
+    this.warpGrid = new WarpGrid(gpu, { viewport, common });
     this.glyphs = new GlyphPass(gpu, { common });
+    this.particles = new ParticleRenderer(gpu, { pool: simulation.particlePool, viewport, common });
     this.bloom = new BloomPass(gpu, { fullscreenHeader });
     this.composite = new CompositePass(gpu, { fullscreenHeader });
     this.frameCapture = new FrameCapture(this.device, gpu.format);
     this.sceneTextures = [];
+    this.gridTexture = null;
     this.currentIndex = 0;
   }
 
@@ -62,22 +78,39 @@ export class Renderer {
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     }));
     this.sceneViews = this.sceneTextures.map((texture) => texture.createView());
+    this.gridTexture = this.device.createTexture({
+      label: 'warp-grid-layer',
+      size,
+      format: SCENE_FORMAT,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    this.gridView = this.gridTexture.createView();
     this.trails.setSceneTextures(this.sceneTextures);
     this.bloom.resize(this.sceneTextures, size[0], size[1]);
-    this.composite.setTextures(this.sceneTextures, this.bloom.outputTexture);
+    this.composite.setTextures(this.sceneTextures, this.bloom.outputTexture, this.gridTexture);
     this.currentIndex = 0;
   }
 
   render(encoder, { alpha, time }) {
     const previousIndex = this.currentIndex;
     const currentIndex = 1 - previousIndex;
-    const { settings, viewport } = this;
+    const { settings, viewport, simulation } = this;
+    const gridPass = encoder.beginRenderPass({
+      label: 'warp-grid',
+      colorAttachments: [{ view: this.gridView, loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 0 } }],
+    });
+    this.warpGrid.encode(gridPass, simulation.fieldBuffer, time, {
+      densityWeight: settings.warpDensityWeight,
+      threatWeight: settings.warpThreatWeight,
+    });
+    gridPass.end();
     const scenePass = encoder.beginRenderPass({
       label: 'scene',
       colorAttachments: [{ view: this.sceneViews[currentIndex], loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 0 } }],
     });
     this.trails.draw(scenePass, previousIndex, settings.trailDecay);
-    this.glyphs.draw(scenePass, { simulation: this.simulation, viewport, settings, alpha, time });
+    this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time });
+    this.particles.encode(scenePass, simulation.particlePool);
     scenePass.end();
     this.bloom.encode(encoder, currentIndex);
     const swapchainTexture = this.gpu.context.getCurrentTexture();
@@ -101,10 +134,12 @@ export class Renderer {
   destroySceneTextures() {
     this.sceneTextures.forEach((texture) => texture.destroy());
     this.sceneTextures = [];
+    this.gridTexture?.destroy();
+    this.gridTexture = null;
   }
 
   destroy() {
     this.destroySceneTextures();
-    [this.trails, this.glyphs, this.bloom, this.composite].forEach((pass) => pass.destroy());
+    [this.warpGrid, this.trails, this.glyphs, this.particles, this.bloom, this.composite].forEach((pass) => pass.destroy());
   }
 }

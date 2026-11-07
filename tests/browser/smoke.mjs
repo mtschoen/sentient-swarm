@@ -3,7 +3,8 @@
 // Usage: node tests/browser/smoke.mjs [--frames N]
 // Reads the composited frame back through window.__murmuration.capture (headless Chromium may never
 // composite a WebGPU canvas, so page.screenshot() is not trusted) and writes artifacts/smoke.png and
-// artifacts/smoke-zoom.png (4x inspect zoom, trails off).
+// artifacts/smoke-zoom.png (4x inspect zoom, trails off), then holds a debug kill at the arena
+// center and writes artifacts/smoke-kill.png.
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
@@ -22,6 +23,8 @@ const RESIZE_TOLERANCE = 0.05;
 const PORTRAIT_VIEWPORT = { width: 800, height: 1200 };
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
 const MAXIMUM_BAND_LUMINANCE = 0.01;
+const KILL_HOLD_FRAMES = 30;
+const KILL_BOX_DEVICE_PIXELS = 60;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
 async function writeDataUrl(name, dataUrl) {
@@ -76,6 +79,38 @@ async function checkResize(page) {
   const restored = await readFrame();
   await waitForFrame(page, restored + 5);
   return page.consoleErrors.length > 0 ? `smoke: console errors after resize: ${page.consoleErrors.join(' | ')}` : null;
+}
+
+// Holds the primary button at the canvas center for KILL_HOLD_FRAMES frames: the debug kill spawns
+// particles and threat there, so the 60 by 60 device-pixel box around the arena center must get
+// brighter (particles plus the warp grid flash) than it was just before the press. Returns a
+// failure message, or null.
+async function checkKillFlash(page) {
+  const arenaRect = (await page.evaluate(() => window.__murmuration.capture())).arenaRect;
+  const region = {
+    x: Math.round(arenaRect.x + arenaRect.width / 2 - KILL_BOX_DEVICE_PIXELS / 2),
+    y: Math.round(arenaRect.y + arenaRect.height / 2 - KILL_BOX_DEVICE_PIXELS / 2),
+    width: KILL_BOX_DEVICE_PIXELS,
+    height: KILL_BOX_DEVICE_PIXELS,
+  };
+  const bounds = await page.locator('#arena').boundingBox();
+  const calm = await page.evaluate((box) => window.__murmuration.capture({ region: box }), region);
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+  await page.mouse.down();
+  let flash;
+  try {
+    const pressed = await page.evaluate(() => window.__murmuration.frame);
+    await waitForFrame(page, pressed + KILL_HOLD_FRAMES);
+    flash = await page.evaluate((box) => window.__murmuration.capture({ region: box }), region);
+  } finally {
+    await page.mouse.up();
+  }
+  await writeDataUrl('smoke-kill.png', flash.pngDataUrl);
+  console.log(`smoke: kill box ${JSON.stringify(region)} luminance ${calm.regionLuminance.toFixed(4)} before, ${flash.regionLuminance.toFixed(4)} after ${KILL_HOLD_FRAMES} held frames`);
+  if (!(flash.regionLuminance > calm.regionLuminance)) {
+    return `smoke: expected the kill box to brighten while the kill is held, got ${calm.regionLuminance.toFixed(4)} before and ${flash.regionLuminance.toFixed(4)} after`;
+  }
+  return page.consoleErrors.length > 0 ? `smoke: console errors after the kill: ${page.consoleErrors.join(' | ')}` : null;
 }
 
 async function run() {
@@ -145,6 +180,11 @@ async function run() {
     if (page.consoleErrors.length > 0) {
       console.error('smoke: console errors after capture:');
       page.consoleErrors.forEach((line) => console.error(line));
+      return EXIT_FAILURE;
+    }
+    const killFailure = await checkKillFlash(page);
+    if (killFailure) {
+      console.error(killFailure);
       return EXIT_FAILURE;
     }
     const capturedStats = await page.evaluate(() => window.__murmuration.stats);

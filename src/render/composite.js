@@ -1,4 +1,4 @@
-// Composite pass (composite.wgsl): scene plus bloom, tonemapped, into the swapchain, with black
+// Composite pass (composite.wgsl): scene plus warp grid layer plus bloom, tonemapped, into the swapchain, with black
 // letterbox bands outside the arena rect.
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { createFullscreenPipeline, loadRenderShader } from './render-shaders.js';
@@ -25,9 +25,10 @@ export class CompositePass {
     this.pipeline = await createFullscreenPipeline(this.device, { label: 'composite', module, fragmentEntryPoint: 'compositeFragment', format: this.format });
   }
 
-  // bindGroups[index] composites sceneTextures[index] with the bloom output.
-  setTextures(sceneTextures, bloomTexture) {
+  // bindGroups[index] composites sceneTextures[index] with the bloom output and the grid layer.
+  setTextures(sceneTextures, bloomTexture, gridTexture) {
     const bloomView = bloomTexture.createView();
+    const gridView = gridTexture.createView();
     this.bindGroups = sceneTextures.map((texture, index) => this.device.createBindGroup({
       label: 'composite-' + index,
       layout: this.pipeline.getBindGroupLayout(0),
@@ -36,6 +37,7 @@ export class CompositePass {
         { binding: 1, resource: texture.createView() },
         { binding: 2, resource: bloomView },
         { binding: 3, resource: this.sampler },
+        { binding: 4, resource: gridView },
       ],
     }));
   }
