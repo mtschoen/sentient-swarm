@@ -1,0 +1,69 @@
+// Particle pass (particles.wgsl): one instanced 4-vertex triangle strip per particle pool slot,
+// additively blended into the scene target after the glyphs, so particles leave trails like
+// glyphs do. Dead slots collapse to a degenerate quad. The pool is passed at draw time and never
+// stored (a capacity change builds a new Simulation and so a new pool); bind groups are cached per
+// particle buffer and cleared by Renderer.setSimulation.
+import { BindGroupCache } from '../gpu/bind-group-cache.js';
+import { createUniformBuffer } from '../gpu/buffers.js';
+import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
+
+export const PARTICLE_VIEW_BYTES = 32;
+export const PARTICLE_DEVICE_PIXELS = 4;
+const VERTICES_PER_PARTICLE = 4;
+const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
+
+// Matches the ParticleView table in particles.wgsl. Same affine world-to-clip sampling as
+// packShipView, so the inspect zoom applies; the quad size also grows with the zoom.
+export function packParticleView({ viewport, particleDevicePixels = PARTICLE_DEVICE_PIXELS, emissionScale = 1 }) {
+  const origin = viewport.worldToClip(0, 0);
+  const unit = viewport.worldToClip(1, 1);
+  return new Float32Array([
+    unit.x - origin.x, unit.y - origin.y,
+    origin.x, origin.y,
+    2 / viewport.canvasWidth, 2 / viewport.canvasHeight,
+    particleDevicePixels * viewport.effectiveZoom, emissionScale,
+  ]);
+}
+
+export class ParticleRenderer {
+  constructor(gpu, { viewport, common }) {
+    this.device = gpu.device;
+    this.viewport = viewport;
+    this.common = common;
+    this.pipeline = null;
+    this.viewBuffer = createUniformBuffer(this.device, PARTICLE_VIEW_BYTES, 'particle-view');
+    this.bindGroupCache = new BindGroupCache((buffers) => this.device.createBindGroup({
+      label: 'particle-bindings',
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: buffers.map((buffer, binding) => ({ binding, resource: { buffer } })),
+    }));
+  }
+
+  async initialize() {
+    const module = this.device.createShaderModule({ label: 'particles', code: await loadRenderShader('particles', this.common) });
+    this.pipeline = await this.device.createRenderPipelineAsync({
+      label: 'particles',
+      layout: 'auto',
+      vertex: { module, entryPoint: 'particleVertex' },
+      fragment: {
+        module,
+        entryPoint: 'particleFragment',
+        targets: [{ format: SCENE_FORMAT, blend: { color: ADDITIVE, alpha: ADDITIVE } }],
+      },
+      primitive: { topology: 'triangle-strip' },
+    });
+  }
+
+  // Draws into an open render pass whose color target is a scene texture; Renderer passes
+  // simulation.particlePool every frame.
+  encode(pass, pool, emissionScale = 1) {
+    this.device.queue.writeBuffer(this.viewBuffer, 0, packParticleView({ viewport: this.viewport, emissionScale }));
+    pass.setPipeline(this.pipeline);
+    pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, pool.buffers.particles]));
+    pass.draw(VERTICES_PER_PARTICLE, pool.capacity);
+  }
+
+  destroy() {
+    this.viewBuffer.destroy();
+  }
+}

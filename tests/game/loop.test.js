@@ -1,0 +1,125 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { FrameLoop } from '../../src/game/loop.js';
+
+function createHarness(options = {}) {
+  let time = 0;
+  let pending = null;
+  const calls = { update: [], render: [], renderDelta: [] };
+  const loop = new FrameLoop({
+    update: (step) => calls.update.push(step),
+    render: (alpha, deltaSeconds) => {
+      calls.render.push(alpha);
+      calls.renderDelta.push(deltaSeconds);
+    },
+    now: () => time,
+    requestFrame: (callback) => {
+      pending = callback;
+      return 1;
+    },
+    ...options,
+  });
+  return {
+    loop,
+    calls,
+    advance(milliseconds) {
+      time += milliseconds;
+      const callback = pending;
+      pending = null;
+      callback(time);
+    },
+    hasPending: () => pending !== null,
+  };
+}
+
+test('a 50 ms gap runs three fixed updates and one render', () => {
+  const harness = createHarness();
+  harness.loop.start();
+  harness.advance(50);
+  assert.equal(harness.calls.update.length, 3);
+  assert.equal(harness.calls.update[0], 1 / 60);
+  assert.equal(harness.calls.render.length, 1);
+  const expectedAlpha = (50 / 1000 - 3 / 60) * 60;
+  assert.ok(Math.abs(harness.calls.render[0] - expectedAlpha) < 1e-9);
+  assert.equal(harness.loop.frameCount, 1);
+});
+
+test('render receives the elapsed seconds since the previous frame', () => {
+  const harness = createHarness();
+  harness.loop.start();
+  harness.advance(8);
+  harness.advance(25);
+  assert.deepEqual(harness.calls.renderDelta.map((seconds) => Math.round(seconds * 1000)), [8, 25]);
+});
+
+test('a 1 s gap clamps to maximumSubsteps updates', () => {
+  const harness = createHarness();
+  harness.loop.start();
+  harness.advance(1000);
+  assert.equal(harness.calls.update.length, 4);
+  assert.equal(harness.calls.render.length, 1);
+  assert.ok(harness.calls.render[0] >= 0 && harness.calls.render[0] < 1);
+});
+
+test('the default scheduler calls requestAnimationFrame without a receiver', () => {
+  const receivers = [];
+  const original = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = function recordReceiver() {
+    receivers.push(this);
+  };
+  try {
+    new FrameLoop({ update() {}, render() {}, now: () => 0 }).start();
+  } finally {
+    globalThis.requestAnimationFrame = original;
+  }
+  assert.equal(receivers.length, 1);
+  assert.ok(receivers[0] === undefined || receivers[0] === globalThis);
+});
+
+test('an injected scheduler is not called with the loop as receiver', () => {
+  const receivers = [];
+  new FrameLoop({
+    update() {},
+    render() {},
+    now: () => 0,
+    requestFrame: function recordReceiver() {
+      receivers.push(this);
+    },
+  }).start();
+  assert.equal(receivers.length, 1);
+  assert.ok(receivers[0] === undefined || receivers[0] === globalThis);
+});
+
+test('start, stop, start before the pending frame runs leaves exactly one scheduling chain', () => {
+  let time = 0;
+  const pending = [];
+  const renders = [];
+  const loop = new FrameLoop({
+    update() {},
+    render: () => renders.push(time),
+    now: () => time,
+    requestFrame: (callback) => pending.push(callback),
+  });
+  loop.start();
+  loop.stop();
+  loop.start();
+  assert.equal(pending.length, 2);
+  for (let frame = 0; frame < 3; frame += 1) {
+    time += 16;
+    const due = pending.splice(0);
+    due.forEach((callback) => callback(time));
+    assert.equal(pending.length, 1, `frame ${frame} scheduled ${pending.length} callbacks`);
+  }
+  assert.equal(renders.length, 3);
+});
+
+test('stop prevents further scheduling', () => {
+  const harness = createHarness();
+  harness.loop.start();
+  harness.advance(16);
+  assert.ok(harness.hasPending());
+  harness.loop.stop();
+  harness.advance(16);
+  assert.equal(harness.hasPending(), false);
+  assert.equal(harness.calls.render.length, 1);
+});

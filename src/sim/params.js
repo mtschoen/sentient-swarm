@@ -1,0 +1,39 @@
+// Packs the SimParams uniform. Byte layout matches the table at the top of common.wgsl.
+import { SPECIES_COUNT } from './layout.js';
+
+export const SIM_PARAMS_BYTES = 96;
+
+const FLOAT_FIELDS = { dt: 0, time: 4, neighborRadius: 16, cellSize: 28, debugKillRadius: 80 };
+// aliveTarget is reserved: Simulation.step never writes it and no shader reads it (SpawnPressure
+// keeps the target on the CPU).
+const UNSIGNED_FIELDS = { gridColumns: 20, gridRows: 24, capacity: 32, aliveTarget: 36, frameSequence: 84 };
+// 1 steers cohesion up the own-species density gradient, 0 up the total-density gradient.
+const SAME_SPECIES_COHESION_OFFSET = 88;
+const VECTOR_FIELDS = { playerPosition: 8, debugKillPosition: 40 };
+const SPAWN_PER_SPECIES_OFFSET = 48;
+
+export function packSimParams(values) {
+  const buffer = new ArrayBuffer(SIM_PARAMS_BYTES);
+  const view = new DataView(buffer);
+  for (const [name, offset] of Object.entries(FLOAT_FIELDS)) {
+    view.setFloat32(offset, values[name] ?? 0, true);
+  }
+  for (const [name, offset] of Object.entries(UNSIGNED_FIELDS)) {
+    view.setUint32(offset, values[name] ?? 0, true);
+  }
+  for (const [name, offset] of Object.entries(VECTOR_FIELDS)) {
+    const vector = values[name] ?? [0, 0];
+    view.setFloat32(offset, vector[0], true);
+    view.setFloat32(offset + 4, vector[1], true);
+  }
+  view.setUint32(SAME_SPECIES_COHESION_OFFSET, values.sameSpeciesCohesion ?? 1, true);
+  // spawnPerSpecies0 holds species 0 to 3, spawnPerSpecies1.x holds species 4; the rest stays 0.
+  const spawnPerSpecies = values.spawnPerSpecies ?? [];
+  if (spawnPerSpecies.length > SPECIES_COUNT) {
+    throw new Error('spawnPerSpecies has ' + spawnPerSpecies.length + ' entries; at most ' + SPECIES_COUNT + ' species');
+  }
+  spawnPerSpecies.forEach((count, species) => {
+    view.setUint32(SPAWN_PER_SPECIES_OFFSET + species * 4, count, true);
+  });
+  return buffer;
+}

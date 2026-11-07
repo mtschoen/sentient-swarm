@@ -1,0 +1,116 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createStorageBuffer, createUniformBuffer, StagingRing } from '../../src/gpu/buffers.js';
+
+globalThis.GPUBufferUsage = {
+  MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, UNIFORM: 64, STORAGE: 128,
+};
+globalThis.GPUMapMode = { READ: 1 };
+
+function createFakeDevice() {
+  const buffers = [];
+  return {
+    buffers,
+    createBuffer(descriptor) {
+      const buffer = {
+        ...descriptor,
+        unmapCount: 0,
+        fillValue: 0,
+        resolveMap: null,
+        mapAsync() {
+          return new Promise((resolve) => { buffer.resolveMap = resolve; });
+        },
+        getMappedRange() {
+          return new Uint8Array(descriptor.size).fill(buffer.fillValue).buffer;
+        },
+        unmap() { buffer.unmapCount += 1; },
+      };
+      buffers.push(buffer);
+      return buffer;
+    },
+  };
+}
+
+function createFakeEncoder() {
+  return { copies: 0, copyBufferToBuffer() { this.copies += 1; } };
+}
+
+test('createStorageBuffer rounds size and sets usage and label', () => {
+  const device = createFakeDevice();
+  const withSource = createStorageBuffer(device, 20, 'agents');
+  assert.equal(withSource.size, 32);
+  assert.equal(withSource.label, 'agents');
+  assert.equal(withSource.usage, 128 | 8 | 4);
+  assert.equal(createStorageBuffer(device, 16, 'x', { copySource: false }).usage, 128 | 8);
+});
+
+test('createUniformBuffer rounds size and sets usage', () => {
+  const buffer = createUniformBuffer(createFakeDevice(), 90, 'params');
+  assert.equal(buffer.size, 96);
+  assert.equal(buffer.usage, 64 | 8);
+  assert.equal(buffer.label, 'params');
+});
+
+test('StagingRing returns data only after mapAsync resolves, once', async () => {
+  const device = createFakeDevice();
+  const ring = new StagingRing(device, 32);
+  const encoder = createFakeEncoder();
+  ring.copyFrom(encoder, {});
+  ring.markSubmitted();
+  assert.deepEqual(ring.readAll(), []);
+  device.buffers[0].fillValue = 7;
+  device.buffers[0].resolveMap();
+  await Promise.resolve();
+  const data = ring.readAll();
+  assert.equal(data.length, 1);
+  assert.ok(data[0] instanceof ArrayBuffer);
+  assert.equal(new Uint8Array(data[0])[0], 7);
+  assert.equal(device.buffers[0].unmapCount, 1);
+  assert.deepEqual(ring.readAll(), []);
+});
+
+test('StagingRing.readAll drains every ready slot oldest first and stops at an older slot still mapping', async () => {
+  const device = createFakeDevice();
+  const ring = new StagingRing(device, 32, 3);
+  const encoder = createFakeEncoder();
+  for (let frame = 0; frame < 3; frame += 1) {
+    ring.copyFrom(encoder, {});
+    ring.markSubmitted();
+    device.buffers[frame].fillValue = frame + 1;
+  }
+  // The newest slot maps first: nothing may be returned ahead of the two older ones.
+  device.buffers[2].resolveMap();
+  await Promise.resolve();
+  assert.deepEqual(ring.readAll(), []);
+  device.buffers[0].resolveMap();
+  device.buffers[1].resolveMap();
+  await Promise.resolve();
+  assert.deepEqual(ring.readAll().map((bytes) => new Uint8Array(bytes)[0]), [1, 2, 3]);
+  assert.ok(ring.slots.every((slot) => slot.state === 'free'));
+});
+
+test('StagingRing skips copyFrom when every slot is pending', () => {
+  const device = createFakeDevice();
+  const ring = new StagingRing(device, 32, 3);
+  const encoder = createFakeEncoder();
+  for (let frame = 0; frame < 3; frame += 1) {
+    ring.copyFrom(encoder, {});
+    ring.markSubmitted();
+  }
+  ring.copyFrom(encoder, {});
+  assert.equal(encoder.copies, 3);
+  assert.equal(ring.skippedCopies, 1);
+});
+
+test('StagingRing reuses a slot after it is read', async () => {
+  const device = createFakeDevice();
+  const ring = new StagingRing(device, 32, 1);
+  const encoder = createFakeEncoder();
+  ring.copyFrom(encoder, {});
+  ring.markSubmitted();
+  device.buffers[0].resolveMap();
+  await Promise.resolve();
+  ring.readAll();
+  ring.copyFrom(encoder, {});
+  assert.equal(encoder.copies, 2);
+});
