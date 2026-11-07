@@ -5,7 +5,8 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 
 // SMOKE_PORT lets parallel checkouts run their smoke side by side.
-const SERVER_PORT = Number(process.env.SMOKE_PORT ?? 5174);
+const DEFAULT_SERVER_PORT = 5174;
+const SERVER_PORT = Number(process.env.SMOKE_PORT) || DEFAULT_SERVER_PORT;
 const START_TIMEOUT_MILLISECONDS = 20_000;
 
 export async function startServer() {
