@@ -49,6 +49,11 @@ Feel targets, in the owner's words: jump into the game as fast as possible, a to
 - Per-agent steering work is bounded: the neighbor pass samples at most a fixed number of neighbors per agent (builder picks the cap and the selection strategy, for example the first K in each of the 3x3 cells or a strided sample) so a dense mass costs linear, not quadratic, time. Collision tests against bullets, beams, pickups, and the player stay exact.
 - Runtime quality can step down within the allocated capacity (particle budget, bloom, sim rate, alive cap) when sustained frame time exceeds budget, because phones throttle thermally after minutes, and a startup probe cannot see that.
 - GPU memory is budgeted up front per preset against the adapter's reported limits (storage buffer binding size, total buffer memory). iOS terminates WebGPU pages under memory pressure, so phone presets stay well below the limits rather than at them.
+- Mobile WebGPU limits are designed for, not discovered: at most eight storage buffers per shader stage, so agent data is packed into interleaved 16-byte aligned structs rather than one buffer per attribute (and no `vec3` in storage layouts); workgroup size at most 256 and workgroup memory at most 16 KB; pipelines compiled asynchronously before any timing is trusted; timestamp queries treated as optional.
+- Readback uses a ring of at least three staging buffers with sequence numbers, because a buffer whose map is pending cannot be copied into and mobile maps take several frames.
+- Bulk counters (kills per frame) are reduced in workgroup memory before one global atomic add per workgroup.
+- Trails and bloom render at half resolution, and additive glyph alpha is attenuated by local density so a dense mass reads as bright texture rather than a white smear.
+- Thermal headroom: the probe's chosen preset leaves roughly 40 percent of the frame budget free, because phones throttle noticeably after a minute of sustained load.
 - Landscape only on phones, using `screen.orientation.lock` where the browser permits and a rotate overlay otherwise.
 - Deploy to GitHub Pages from a public GitHub repo, with per-pull-request preview deployments under the same site, following the pattern from the owner's PolyPhase repo (assembly script, `/<repo>/pr-preview/pr-N/`).
 - Owner's house rules apply: full-word identifiers, no em-dashes in anything generated, source files under about 500 lines or carrying a one-line note why, no hard-coded machine paths, no wall-clock assertions in tests, no committed logs or raw tool output.
@@ -70,7 +75,7 @@ Press start (or just load the page the first time) and you are in the arena. Ene
 
 Designer's calls, made in response to the builder check:
 
-- The arena is a bounded 16:9 rectangle, Geometry Wars style, shown in full at all times. The camera does not follow the player. The arena is letterboxed into whatever viewport it gets; on a phone in landscape that is nearly the whole screen.
+- The arena is a bounded 16:9 rectangle, Geometry Wars style, shown in full at all times. The camera does not follow the player. The arena is letterboxed into whatever viewport it gets. On wider phones (20:9 and similar) the side bands are where the touch sticks and HUD live, so thumbs never cover the arena; on desktop the bands hold the HUD.
 - Walls are soft for agents (a steering force back inside within a margin, so masses pile against walls rather than clip) and hard for the player and bullets. No wrapping, no toroidal grid.
 - Glyph size target: a 4 device-pixel core with a glow about twice that, on both targets. The renderer works in device pixels, not CSS pixels. If a device cannot hold that at its capacity, capacity goes down before glyph size does; the anti-goal is blobs, not low counts.
 - "Every enemy on screen" therefore means every alive agent. The smart bomb kills everything alive.
@@ -90,6 +95,14 @@ Designer's calls, Geometry Wars precedent:
 There is one enemy implementation. Every enemy is a boid with the classic rules (seek the player, cohesion, alignment, separation), plus flee-from-fire, plus an optional preferred orbit radius around the player, plus a row in a species-by-species interaction matrix giving signed attraction or repulsion to neighbors of each other species. A species is a row of those weights plus a glyph, a hue, and a glow profile. Nothing else distinguishes species.
 
 Cohesion and alignment apply only to same-species neighbors. Separation applies to all neighbors. Cross-species influence comes only through the matrix. This keeps populations recognizable (a Lattice sheet stays a sheet when Chasers pour through it) while still letting swarms collide and deform. The neighborhood is part of the behavioral model, not just a performance structure. The lab exposes this as a toggle so the alternative can be compared.
+
+Two ranges of influence (designer's call, from review). At million-agent scale the fine spatial grid's 3x3 neighborhood is under one percent of the arena wide, so agents that only read it are blind beyond a few pixels: a beam cut wider than that would never heal and Predators would never find Chasers. So:
+
+- The fine pass (3x3 cells, capped neighbor sample) computes only separation and same-species alignment. Neighbor contributions are averaged, never summed, so forces do not scale with density and a phone preset and a desktop preset produce the same motion.
+- A coarse field, downsampled from the fine grid every frame and blurred, holds one density channel per species plus one threat channel written by weapons (aim cone, projectile trails, beam segment, bomb shockwave). Medium-range cohesion, the interaction matrix, and flee-from-fire all read this field. It is also what the warp grid, the Sidewinders' target search, and the spawner's "away from the densest mass" rule read.
+- Each species row also carries kinematic bounds (top speed, max turn rate) so slow sheets and fast rivers stay visibly different instead of averaging into one disk.
+
+The spike prototypes the coarse field before the main pipeline is frozen.
 
 Initial species, as the owner and designer imagined them. Treat the names and the intent as given; treat the numbers as a starting point for the lab.
 
@@ -135,7 +148,9 @@ Acquisition and decay, as the designer's call unless the owner objects:
 - Upgrade pickups appear in the arena, dropped from the swarm on kill-streak milestones and occasionally from very dense kills, and are collected by touching them. Pickups are typed and visibly so.
 - Collecting a type arms it with a charge meter that drains while firing. The meter is drawn as a ring around the ship so the player always knows how much upgrade is left.
 - Collecting the same type while it is armed raises the tier (up to three) and refills the charge.
-- Collecting a different type swaps to it (one upgrade at a time plus the base gun). The old one is lost.
+- Collecting a different type swaps to it (one upgrade at a time). Swapping keeps the current tier minus one (never below tier one) and refills the charge, so a pickup is never a landmine; the only way to lose everything is the charge running out or dying. The arena offers one pickup type at a time and rotates it slowly, so building to tier three is reachable with ordinary aim rather than a lucky one-in-five.
+- While an upgrade is armed, it replaces the base gun's fire entirely, so each weapon's silhouette stays clean.
+- Untouched pickups fade out after about ten seconds.
 - When the charge empties, the player drops back to the base gun. This is the "sad when it goes away" moment and it should be scored by the music and the visuals.
 - Death drops the upgrade entirely.
 
