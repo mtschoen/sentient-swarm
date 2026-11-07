@@ -2,6 +2,7 @@
 // plus a decaying threat channel, downsampled from the sorted fine grid every frame and blurred.
 // Writers add threat in fixed point (1 unit = 1 / THREAT_FIXED_POINT_SCALE) with atomicAdd into
 // buffers.threatAccumulator; the convert step folds it into channel 5 and zeroes it.
+import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
 import { COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SHADER_CONSTANTS, SPECIES_COUNT, WORKGROUP_SIZE } from './layout.js';
@@ -27,8 +28,8 @@ export class CoarseField {
     };
     this.densityAccumulator = createStorageBuffer(this.device, COARSE_CELL_COUNT * SPECIES_COUNT * BYTES_PER_FLOAT, 'coarse-field-density-accumulator');
     this.pipelines = null;
-    this.bindGroups = null;
-    this.boundBuffers = [];
+    this.bindGroupCache = new BindGroupCache(([agentsBuffer, cellCounts, cellOffsets, sortedIndices, paramsBuffer]) =>
+      this.createBindGroups(agentsBuffer, { cellCounts, cellOffsets, sortedIndices }, paramsBuffer));
   }
 
   async createModule(name) {
@@ -70,22 +71,18 @@ export class CoarseField {
 
   encode(encoder, agentsBuffer, gridBuffers, paramsBuffer) {
     if (this.pipelines === null) throw new Error('CoarseField.initialize() must finish before encode()');
-    const buffers = [agentsBuffer, gridBuffers.cellCounts, gridBuffers.cellOffsets, gridBuffers.sortedIndices, paramsBuffer];
-    if (buffers.some((buffer, index) => buffer !== this.boundBuffers[index])) {
-      this.bindGroups = this.createBindGroups(agentsBuffer, gridBuffers, paramsBuffer);
-      this.boundBuffers = buffers;
-    }
+    const bindGroups = this.bindGroupCache.get([agentsBuffer, gridBuffers.cellCounts, gridBuffers.cellOffsets, gridBuffers.sortedIndices, paramsBuffer]);
     encoder.clearBuffer(this.densityAccumulator);
     const cellWorkgroups = workgroupsFor(COARSE_CELL_COUNT);
     const pass = encoder.beginComputePass({ label: 'coarse-field' });
     pass.setPipeline(this.pipelines.accumulate);
-    pass.setBindGroup(0, this.bindGroups.accumulate);
+    pass.setBindGroup(0, bindGroups.accumulate);
     pass.dispatchWorkgroups(workgroupsFor(this.capacity));
     pass.setPipeline(this.pipelines.convert);
-    pass.setBindGroup(0, this.bindGroups.convert);
+    pass.setBindGroup(0, bindGroups.convert);
     pass.dispatchWorkgroups(cellWorkgroups);
     pass.setPipeline(this.pipelines.blur);
-    pass.setBindGroup(0, this.bindGroups.blur);
+    pass.setBindGroup(0, bindGroups.blur);
     pass.dispatchWorkgroups(cellWorkgroups);
     pass.end();
   }

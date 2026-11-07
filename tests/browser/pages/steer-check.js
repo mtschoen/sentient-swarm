@@ -1,7 +1,8 @@
 // Runs the grid, coarse field and steering pipeline on seeded agent layouts and checks the
-// resulting motion: (a) Chasers close on the player, (b) a single overfull cell stays valid,
-// (c) a packed Lattice square spreads to about the neighbor radius, (d) pressure keeps a large
-// Chaser swarm from collapsing into a ball while pressure 0 lets it collapse.
+// resulting motion: (a) Chasers close on the player and ping-pong buffers reuse bind groups,
+// (b) a single overfull cell stays valid and its field is exact, (c) a Lattice square holds the
+// spacing its target density implies, (d) pressure keeps a large Chaser swarm from collapsing
+// into a ball while pressure 0 lets it collapse.
 import { createGpuContext } from '/src/gpu/device.js';
 import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
@@ -240,7 +241,34 @@ async function checkSeek(gpu, common) {
   if (failure) return { pass: false, detail: `seek: ${failure}` };
   const finalMean = mean(agents.map(distanceToPlayer));
   const reduction = 1 - finalMean / initialMean;
-  return { pass: reduction >= 0.3, detail: `seek mean distance ${initialMean.toFixed(3)} -> ${finalMean.toFixed(3)} (reduction ${(reduction * 100).toFixed(1)}%, need >= 30%)` };
+  const pingPongProblem = await pingPongFailure(harness);
+  return {
+    pass: reduction >= 0.3 && pingPongProblem === null,
+    detail: `seek mean distance ${initialMean.toFixed(3)} -> ${finalMean.toFixed(3)} (reduction ${(reduction * 100).toFixed(1)}%, need >= 30%), ping-pong ${pingPongProblem ?? 'valid with no bind group rebuilds'}`,
+  };
+}
+
+// Alternates agentsIn and agentsOut every step with no copy back, as a frame loop would.
+// After the first frame in each direction, no step may create a bind group.
+async function pingPongFailure(harness) {
+  const creations = () => harness.field.bindGroupCache.creationCount + harness.steering.bindGroupCache.creationCount;
+  const encodePingPongStep = (encoder, source, target) => {
+    harness.grid.encode(encoder, source, harness.paramsBuffer);
+    harness.field.encode(encoder, source, harness.grid.buffers, harness.paramsBuffer);
+    harness.steering.encode(encoder, source, target, harness.grid.buffers, harness.field.buffers.blurred, harness.speciesBuffer, harness.paramsBuffer);
+  };
+  let creationsAfterWarmUp = 0;
+  for (let step = 0; step < 8; step += 1) {
+    const encoder = harness.device.createCommandEncoder({ label: 'steer-check-ping-pong' });
+    const forward = step % 2 === 0;
+    encodePingPongStep(encoder, forward ? harness.agentsIn : harness.agentsOut, forward ? harness.agentsOut : harness.agentsIn);
+    harness.device.queue.submit([encoder.finish()]);
+    if (step === 1) creationsAfterWarmUp = creations();
+  }
+  const rebuilds = creations() - creationsAfterWarmUp;
+  if (rebuilds !== 0) return `created ${rebuilds} bind group sets on alternating frames`;
+  // An even number of steps leaves the newest agents in agentsIn.
+  return validityFailure(await harness.readAgents());
 }
 
 // (b) All 20000 agents in one grid cell for 10 steps. The neighbor cap bounds the work; the
@@ -275,8 +303,8 @@ async function checkDenseCell(gpu, common) {
   return { pass: failure === null, detail: `dense cell field exact, agents ${failure ?? 'valid'}, step ms ${timings} (informational)` };
 }
 
-// (c) A Lattice square packed at 0.2 neighbor radii spreads: mean nearest-neighbor distance
-// after 120 steps lands between 0.5 and 1.25 neighbor radii.
+// (c) A Lattice square seeded at 0.2 neighbor radii holds its spacing: the mean nearest-neighbor
+// distance after 120 steps is within 25 percent of the density-implied spacing.
 async function checkLatticeSpacing(gpu, common) {
   const side = 48;
   const spacing = 0.2 * NEIGHBOR_RADIUS;
@@ -297,10 +325,14 @@ async function checkLatticeSpacing(gpu, common) {
   const failure = validityFailure(agents);
   if (failure) return { pass: false, detail: `lattice: ${failure}` };
   const finalDistance = meanNearestNeighborDistance(agents);
-  const ratio = finalDistance / NEIGHBOR_RADIUS;
+  // Averaged separation cancels inside a uniform crowd, so the spacing a sheet holds is the one
+  // its coarse pressure allows: targetDensity agents per coarse cell.
+  const coarseCellArea = (ARENA_WIDTH / COARSE_COLUMNS) * (ARENA_HEIGHT / COARSE_ROWS);
+  const expectedSpacing = Math.sqrt(coarseCellArea / defaultSpecies()[LATTICE].targetDensity);
+  const ratio = finalDistance / expectedSpacing;
   return {
-    pass: ratio >= 0.5 && ratio <= 1.25,
-    detail: `lattice nearest neighbor ${initialDistance.toFixed(4)} -> ${finalDistance.toFixed(4)} (${ratio.toFixed(2)} radii, need 0.5 to 1.25)`,
+    pass: ratio >= 0.75 && ratio <= 1.25,
+    detail: `lattice nearest neighbor ${initialDistance.toFixed(4)} -> ${finalDistance.toFixed(4)}, density-implied spacing ${expectedSpacing.toFixed(4)} (ratio ${ratio.toFixed(2)}, need 0.75 to 1.25)`,
   };
 }
 

@@ -1,5 +1,6 @@
 // Steering and integration: steer.wgsl turns neighbors and the coarse field into a new velocity
 // (agentsIn to agentsOut), then integrate.wgsl moves agentsOut in place with soft walls.
+import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
 import { AGENT_STRIDE_BYTES, SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
 
@@ -8,8 +9,8 @@ export class Steering {
     this.device = gpu.device;
     this.common = common;
     this.pipelines = null;
-    this.bindGroups = null;
-    this.boundBuffers = [];
+    this.bindGroupCache = new BindGroupCache(([agentsIn, agentsOut, cellCounts, cellOffsets, sortedIndices, fieldBuffer, speciesTableBuffer, paramsBuffer]) =>
+      this.createBindGroups(agentsIn, agentsOut, { cellCounts, cellOffsets, sortedIndices }, fieldBuffer, speciesTableBuffer, paramsBuffer));
   }
 
   async createModule(name) {
@@ -44,18 +45,14 @@ export class Steering {
   // fieldBuffer is CoarseField.buffers.blurred; gridBuffers come from SpatialGrid built on agentsIn.
   encode(encoder, agentsIn, agentsOut, gridBuffers, fieldBuffer, speciesTableBuffer, paramsBuffer) {
     if (this.pipelines === null) throw new Error('Steering.initialize() must finish before encode()');
-    const buffers = [agentsIn, agentsOut, gridBuffers.cellCounts, gridBuffers.cellOffsets, gridBuffers.sortedIndices, fieldBuffer, speciesTableBuffer, paramsBuffer];
-    if (buffers.some((buffer, index) => buffer !== this.boundBuffers[index])) {
-      this.bindGroups = this.createBindGroups(agentsIn, agentsOut, gridBuffers, fieldBuffer, speciesTableBuffer, paramsBuffer);
-      this.boundBuffers = buffers;
-    }
+    const bindGroups = this.bindGroupCache.get([agentsIn, agentsOut, gridBuffers.cellCounts, gridBuffers.cellOffsets, gridBuffers.sortedIndices, fieldBuffer, speciesTableBuffer, paramsBuffer]);
     const workgroups = Math.ceil(agentsIn.size / AGENT_STRIDE_BYTES / WORKGROUP_SIZE);
     const pass = encoder.beginComputePass({ label: 'steering' });
     pass.setPipeline(this.pipelines.steer);
-    pass.setBindGroup(0, this.bindGroups.steer);
+    pass.setBindGroup(0, bindGroups.steer);
     pass.dispatchWorkgroups(workgroups);
     pass.setPipeline(this.pipelines.integrate);
-    pass.setBindGroup(0, this.bindGroups.integrate);
+    pass.setBindGroup(0, bindGroups.integrate);
     pass.dispatchWorkgroups(workgroups);
     pass.end();
   }

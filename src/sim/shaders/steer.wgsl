@@ -36,7 +36,7 @@ const GRADIENT_SATURATION: f32 = 2.0;
 // Orbiters within this fraction of orbitRadius from the circle move along its tangent.
 const ORBIT_TANGENT_BAND: f32 = 0.2;
 // Fraction of the time-optimal stopping speed that straight seek allows, leaving acceleration
-// headroom for the other terms that share the maximumTurn budget.
+// headroom for the other terms that share the maximumTurn budget. The lab may expose it.
 const ARRIVAL_BRAKING: f32 = 0.7;
 const MINIMUM_LENGTH: f32 = 0.000001;
 
