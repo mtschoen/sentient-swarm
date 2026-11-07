@@ -1,0 +1,206 @@
+name: Publish ${{ github.event.repository.name }}
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize, closed]
+  workflow_dispatch:
+    inputs:
+      preview:
+        description: 'Optional preview: PR number (4) or branch name (fix/mobile-input)'
+        type: string
+      remove:
+        description: Remove the selected preview instead of building it
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Serialize the complete read/modify/publish cycle for the shared Pages site.
+concurrency:
+  group: github-pages
+  queue: max
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name != 'pull_request_target' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      builds: ${{ steps.targets.outputs.builds }}
+      preview-path: ${{ steps.targets.outputs.preview-path }}
+      remove: ${{ steps.targets.outputs.remove }}
+      stored: ${{ steps.targets.outputs.stored }}
+    steps:
+      - name: Resolve trusted build targets
+        id: targets
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PREVIEW: ${{ inputs.preview }}
+          REMOVE: ${{ inputs.remove }}
+        with:
+          script: |
+            const { createHash } = require('node:crypto');
+            const repository = context.repo;
+            const main = await github.rest.repos.getBranch({ ...repository, branch: 'main' });
+            const builds = [{ name: 'production', revision: main.data.commit.sha, base: `/${repository.repo}/` }];
+            const requested = process.env.PREVIEW.trim();
+            const number = context.payload.pull_request?.number || (/^\d+$/.test(requested) ? Number(requested) : null);
+            let previewPath = '';
+            let revision = '';
+            let remove = process.env.REMOVE === 'true';
+            if (number) {
+              const { data: pull } = await github.rest.pulls.get({ ...repository, pull_number: number });
+              if (pull.head.repo?.full_name !== `${repository.owner}/${repository.repo}`) {
+                throw new Error('Only same-repository PR previews are supported.');
+              }
+              previewPath = `pr-preview/pr-${number}`;
+              revision = pull.head.sha;
+              remove ||= pull.state === 'closed';
+            } else if (requested) {
+              // Hashes distinguish names such as fix/mobile and fix-mobile.
+              const slug = requested.replace(/[^a-zA-Z0-9-]/g, '-').slice(0, 48);
+              const hash = createHash('sha256').update(requested).digest('hex').slice(0, 12);
+              previewPath = `branch-preview/${slug}-${hash}`;
+              if (!remove) {
+                const branch = await github.rest.repos.getBranch({ ...repository, branch: requested });
+                revision = branch.data.commit.sha;
+              }
+            } else if (remove) {
+              throw new Error('Select a PR number or branch to remove.');
+            }
+            if (previewPath && !remove) {
+              builds.push({ name: 'preview', revision, base: `/${repository.repo}/${previewPath}/` });
+            }
+            let stored = false;
+            try {
+              await github.rest.repos.getBranch({ ...repository, branch: 'gh-pages' });
+              stored = true;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            core.setOutput('builds', JSON.stringify(builds));
+            core.setOutput('preview-path', previewPath);
+            core.setOutput('remove', String(remove));
+            core.setOutput('stored', String(stored));
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    # PR code runs only here: no write token, secrets, persisted credentials or cache.
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.builds) }}
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.revision }}
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm test
+      - name: Build for the destination path
+        env:
+          PAGES_BASE: ${{ matrix.base }}
+          SOURCE_REVISION: ${{ matrix.revision }}
+        run: |
+          npm run build
+          printf '{"revision":"%s"}\n' "$SOURCE_REVISION" > dist/deployed-version.json
+      - name: Upload static build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site-${{ matrix.name }}
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout trusted main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Read previously published site
+        if: needs.prepare.outputs.stored == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+          path: stored-site
+          persist-credentials: false
+      - name: Download production build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: site-production
+          path: incoming/site-production
+      - name: Download preview build
+        if: needs.prepare.outputs.preview-path != '' && needs.prepare.outputs.remove != 'true'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: site-preview
+          path: incoming/site-preview
+      - name: Assemble production and previews without executing build content
+        env:
+          PREVIEW_PATH: ${{ needs.prepare.outputs.preview-path }}
+          REMOVE_PREVIEW: ${{ needs.prepare.outputs.remove }}
+        run: |
+          bash .github/scripts/assemble-pages.sh
+      - name: Retain combined site for subsequent deployments
+        uses: JamesIves/github-pages-deploy-action@fa24774553152dd7873cd16ebd8d959b010c5445 # v4.9.0
+        with:
+          branch: gh-pages
+          folder: site
+          force: false
+      - name: Upload complete Pages site
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy:
+    needs: [prepare, assemble]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy complete site
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+      - name: Show preview link
+        env:
+          SITE_URL: ${{ steps.deployment.outputs.page_url }}
+          PREVIEW_PATH: ${{ needs.prepare.outputs.preview-path }}
+          REMOVE_PREVIEW: ${{ needs.prepare.outputs.remove }}
+        run: |
+          echo "Production: $SITE_URL" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$PREVIEW_PATH" ]; then
+            if [ "$REMOVE_PREVIEW" = true ]; then
+              echo "Removed preview: $PREVIEW_PATH" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "Preview: ${SITE_URL%/}/$PREVIEW_PATH/" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
