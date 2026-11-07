@@ -25,3 +25,13 @@ export function gridDimensions(neighborRadius) {
 export function agentBufferBytes(capacity) {
   return capacity * AGENT_STRIDE_BYTES;
 }
+
+// Token values for substituteConstants on common.wgsl and every compute shader.
+export const SHADER_CONSTANTS = {
+  WORKGROUP_SIZE,
+  SPECIES_COUNT,
+  MAXIMUM_NEIGHBOR_SAMPLES,
+  COARSE_COLUMNS,
+  COARSE_ROWS,
+  COARSE_CHANNELS,
+};
