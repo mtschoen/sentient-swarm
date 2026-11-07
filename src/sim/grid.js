@@ -1,5 +1,6 @@
 // GPU spatial grid built by counting sort: count alive agents per cell, exclusive prefix sum
 // of the counts, then scatter agent indices so each cell's agents are contiguous.
+import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
 import { SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
@@ -31,9 +32,7 @@ export class SpatialGrid {
     };
     this.blockSums = createStorageBuffer(this.device, WORKGROUP_SIZE * BYTES_PER_U32, 'grid-block-sums');
     this.pipelines = null;
-    this.bindGroups = null;
-    this.boundAgentsBuffer = null;
-    this.boundParamsBuffer = null;
+    this.bindGroupCache = new BindGroupCache(([agentsBuffer, paramsBuffer]) => this.createBindGroups(agentsBuffer, paramsBuffer));
   }
 
   async createModule(name) {
@@ -94,20 +93,16 @@ export class SpatialGrid {
 
   encode(encoder, agentsBuffer, paramsBuffer) {
     if (this.pipelines === null) throw new Error('SpatialGrid.initialize() must finish before encode()');
-    if (agentsBuffer !== this.boundAgentsBuffer || paramsBuffer !== this.boundParamsBuffer) {
-      this.bindGroups = this.createBindGroups(agentsBuffer, paramsBuffer);
-      this.boundAgentsBuffer = agentsBuffer;
-      this.boundParamsBuffer = paramsBuffer;
-    }
+    const bindGroups = this.bindGroupCache.get([agentsBuffer, paramsBuffer]);
     encoder.clearBuffer(this.buffers.cellCounts);
     encoder.clearBuffer(this.buffers.cellCursor);
     const agentWorkgroups = workgroupsFor(this.capacity);
     const cellWorkgroups = workgroupsFor(this.cellCount);
     const pass = encoder.beginComputePass({ label: 'spatial-grid' });
     pass.setPipeline(this.pipelines.count);
-    pass.setBindGroup(0, this.bindGroups.count);
+    pass.setBindGroup(0, bindGroups.count);
     pass.dispatchWorkgroups(agentWorkgroups);
-    pass.setBindGroup(0, this.bindGroups.scan);
+    pass.setBindGroup(0, bindGroups.scan);
     pass.setPipeline(this.pipelines.scanBlocks);
     pass.dispatchWorkgroups(cellWorkgroups);
     pass.setPipeline(this.pipelines.scanBlockSums);
@@ -115,7 +110,7 @@ export class SpatialGrid {
     pass.setPipeline(this.pipelines.addBlockOffsets);
     pass.dispatchWorkgroups(cellWorkgroups);
     pass.setPipeline(this.pipelines.scatter);
-    pass.setBindGroup(0, this.bindGroups.scatter);
+    pass.setBindGroup(0, bindGroups.scatter);
     pass.dispatchWorkgroups(agentWorkgroups);
     pass.end();
   }

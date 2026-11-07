@@ -251,7 +251,7 @@ async function checkSeek(gpu, common) {
 // Alternates agentsIn and agentsOut every step with no copy back, as a frame loop would.
 // After the first frame in each direction, no step may create a bind group.
 async function pingPongFailure(harness) {
-  const creations = () => harness.field.bindGroupCache.creationCount + harness.steering.bindGroupCache.creationCount;
+  const creations = () => harness.grid.bindGroupCache.creationCount + harness.field.bindGroupCache.creationCount + harness.steering.bindGroupCache.creationCount;
   const encodePingPongStep = (encoder, source, target) => {
     harness.grid.encode(encoder, source, harness.paramsBuffer);
     harness.field.encode(encoder, source, harness.grid.buffers, harness.paramsBuffer);
