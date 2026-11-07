@@ -1,17 +1,12 @@
 // Shader source loading and constant substitution for the WGSL pipelines.
 
-const SIMULATION_SHADER_DIRECTORY = new URL('../sim/shaders/', import.meta.url);
-
-// The Vite dev server rewrites a literal new URL('./dir/', import.meta.url) without its trailing
-// slash, which would resolve the name against the parent directory; restore the slash.
-export function shaderUrl(name, baseUrl) {
-  const directory = String(baseUrl).endsWith('/') ? String(baseUrl) : String(baseUrl) + '/';
-  return new URL(name + '.wgsl', directory);
-}
-
-// baseUrl is the directory URL holding the shader; render modules pass their own shaders directory.
-export async function loadShader(name, { fetchFunction = fetch, baseUrl = SIMULATION_SHADER_DIRECTORY } = {}) {
-  const url = shaderUrl(name, baseUrl);
+// The template literal ending in .wgsl is the form Vite analyzes: the build globs the directory,
+// emits each shader as an asset and rewrites the URL. Callers outside src/sim/shaders/ pass their
+// own url built the same way.
+export async function loadShader(name, {
+  fetchFunction = fetch,
+  url = new URL(`../sim/shaders/${name}.wgsl`, import.meta.url),
+} = {}) {
   const response = await fetchFunction(url);
   if (response.ok === false) {
     throw new Error('Failed to load shader ' + name + ': ' + response.status);

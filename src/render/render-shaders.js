@@ -1,10 +1,9 @@
 // Loads render WGSL from src/render/shaders/ and prepends a header (common.wgsl or fullscreen.wgsl).
 import { loadShader, prependCommon } from '../gpu/shaders.js';
 
-const RENDER_SHADER_DIRECTORY = new URL('./shaders/', import.meta.url);
-
+// Template literal ending in .wgsl so the Vite build emits every render shader (see loadShader).
 export async function loadRenderShader(name, header = '') {
-  const source = await loadShader(name, { baseUrl: RENDER_SHADER_DIRECTORY });
+  const source = await loadShader(name, { url: new URL(`./shaders/${name}.wgsl`, import.meta.url) });
   return header === '' ? source : prependCommon(source, header);
 }
 
