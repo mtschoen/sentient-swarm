@@ -27,7 +27,8 @@ export async function createGpuContext(canvas, { navigatorObject = navigator } =
     throw new WebGpuUnavailableError('Could not create a WebGPU canvas context');
   }
   const format = gpu.getPreferredCanvasFormat();
-  context.configure({ device, format, alphaMode: 'opaque' });
+  // COPY_SRC lets the smoke test read back the composited frame (FrameCapture).
+  context.configure({ device, format, alphaMode: 'opaque', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
   return { adapter, device, context, format, limits: device.limits, hasTimestampQuery };
 }
 

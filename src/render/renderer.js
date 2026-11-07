@@ -1,0 +1,110 @@
+// Renderer: trails decay plus glyphs into the current scene target, bloom, then composite into
+// the swapchain. Two rgba16float scene targets at canvas device-pixel size ping-pong for trails.
+//
+// Frame contract, its own submission after the simulation's:
+//   const encoder = device.createCommandEncoder();
+//   renderer.render(encoder, { alpha, time });
+//   device.queue.submit([encoder.finish()]);
+//   renderer.afterSubmit(); // maps a pending captureNextFrame readback
+// settings are read every frame, so they can be changed live.
+import { loadShader, substituteConstants } from '../gpu/shaders.js';
+import { SHADER_CONSTANTS } from '../sim/layout.js';
+import { BloomPass } from './bloom.js';
+import { FrameCapture } from './capture.js';
+import { CompositePass } from './composite.js';
+import { GlyphPass } from './glyphs.js';
+import { SCENE_FORMAT, loadFullscreenHeader } from './render-shaders.js';
+import { TrailDecayPass } from './trails.js';
+
+export const DEFAULT_RENDER_SETTINGS = { glyphDevicePixels: 4, glowScale: 2, trailDecay: 0.90, bloomStrength: 0.8 };
+
+export class Renderer {
+  static async create(gpu, { simulation, viewport }) {
+    const [common, fullscreenHeader] = await Promise.all([
+      loadShader('common').then((source) => substituteConstants(source, SHADER_CONSTANTS)),
+      loadFullscreenHeader(),
+    ]);
+    const renderer = new Renderer(gpu, { simulation, viewport, common, fullscreenHeader });
+    await Promise.all([
+      renderer.trails.initialize(),
+      renderer.glyphs.initialize(),
+      renderer.bloom.initialize(),
+      renderer.composite.initialize(),
+    ]);
+    renderer.resize(viewport.canvasWidth, viewport.canvasHeight);
+    return renderer;
+  }
+
+  // Use Renderer.create; the constructor only allocates.
+  constructor(gpu, { simulation, viewport, common, fullscreenHeader }) {
+    this.gpu = gpu;
+    this.device = gpu.device;
+    this.simulation = simulation;
+    this.viewport = viewport;
+    this.settings = { ...DEFAULT_RENDER_SETTINGS };
+    this.trails = new TrailDecayPass(gpu, { fullscreenHeader });
+    this.glyphs = new GlyphPass(gpu, { common });
+    this.bloom = new BloomPass(gpu, { fullscreenHeader });
+    this.composite = new CompositePass(gpu, { fullscreenHeader });
+    this.frameCapture = new FrameCapture(this.device, gpu.format);
+    this.sceneTextures = [];
+    this.currentIndex = 0;
+  }
+
+  // Recreates every size-dependent texture; new textures start zeroed, which clears trail history.
+  resize(widthDevicePixels, heightDevicePixels) {
+    this.destroySceneTextures();
+    const size = [Math.max(1, widthDevicePixels), Math.max(1, heightDevicePixels)];
+    this.sceneTextures = [0, 1].map((index) => this.device.createTexture({
+      label: 'scene-' + index,
+      size,
+      format: SCENE_FORMAT,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    }));
+    this.sceneViews = this.sceneTextures.map((texture) => texture.createView());
+    this.trails.setSceneTextures(this.sceneTextures);
+    this.bloom.resize(this.sceneTextures, size[0], size[1]);
+    this.composite.setTextures(this.sceneTextures, this.bloom.outputTexture);
+    this.currentIndex = 0;
+  }
+
+  render(encoder, { alpha, time }) {
+    const previousIndex = this.currentIndex;
+    const currentIndex = 1 - previousIndex;
+    const { settings, viewport } = this;
+    const scenePass = encoder.beginRenderPass({
+      label: 'scene',
+      colorAttachments: [{ view: this.sceneViews[currentIndex], loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 0 } }],
+    });
+    this.trails.draw(scenePass, previousIndex, settings.trailDecay);
+    this.glyphs.draw(scenePass, { simulation: this.simulation, viewport, settings, alpha, time });
+    scenePass.end();
+    this.bloom.encode(encoder, currentIndex);
+    const swapchainTexture = this.gpu.context.getCurrentTexture();
+    this.composite.encode(encoder, swapchainTexture.createView(), currentIndex, {
+      arenaRect: viewport.arenaRectDevicePixels,
+      bloomStrength: settings.bloomStrength,
+    });
+    this.frameCapture.encode(encoder, swapchainTexture);
+    this.currentIndex = currentIndex;
+  }
+
+  afterSubmit() {
+    this.frameCapture.afterSubmit();
+  }
+
+  // Resolves with { width, height, format, sourceFormat, pixels } (RGBA bytes) of the next frame.
+  captureNextFrame() {
+    return this.frameCapture.request();
+  }
+
+  destroySceneTextures() {
+    this.sceneTextures.forEach((texture) => texture.destroy());
+    this.sceneTextures = [];
+  }
+
+  destroy() {
+    this.destroySceneTextures();
+    [this.trails, this.glyphs, this.bloom, this.composite].forEach((pass) => pass.destroy());
+  }
+}

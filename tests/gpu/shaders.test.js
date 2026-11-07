@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { loadShader, substituteConstants, prependCommon } from '../../src/gpu/shaders.js';
+import { loadShader, shaderUrl, substituteConstants, prependCommon } from '../../src/gpu/shaders.js';
 
 const constants = {
   WORKGROUP_SIZE: 256,
@@ -28,6 +28,20 @@ test('loadShader returns the text from the injected fetch function', async () =>
   };
   assert.equal(await loadShader('common', { fetchFunction }), 'shader text');
   assert.match(requested[0], /sim\/shaders\/common\.wgsl$/);
+});
+
+test('loadShader resolves the name against an injected baseUrl', async () => {
+  const requested = [];
+  const fetchFunction = async (url) => {
+    requested.push(String(url));
+    return { ok: true, text: async () => '' };
+  };
+  await loadShader('glyphs', { fetchFunction, baseUrl: new URL('http://host/src/render/shaders/') });
+  assert.equal(requested[0], 'http://host/src/render/shaders/glyphs.wgsl');
+});
+
+test('shaderUrl keeps a slash-less base as the directory, as the Vite dev server rewrites it', () => {
+  assert.equal(String(shaderUrl('glyphs', 'http://host/src/render/shaders')), 'http://host/src/render/shaders/glyphs.wgsl');
 });
 
 test('prependCommon puts the common header first', () => {

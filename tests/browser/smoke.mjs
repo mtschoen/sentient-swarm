@@ -1,7 +1,11 @@
 // Browser smoke test. Serves the page with the Vite dev server (see server.mjs).
 // SMOKE_URL, when set, skips spawning and uses that URL instead.
 // Usage: node tests/browser/smoke.mjs [--frames N]
+// Reads the composited frame back through window.__murmuration.capture (headless Chromium may never
+// composite a WebGPU canvas, so page.screenshot() is not trusted) and writes artifacts/smoke.png and
+// artifacts/smoke-zoom.png (4x inspect zoom, trails off).
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
+import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
 
@@ -10,6 +14,16 @@ const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
 const EXIT_NO_ADAPTER = 2;
 const MINIMUM_ALIVE_TOTAL = 1000;
+// Something is drawn, and it is not a white smear.
+const MINIMUM_LUMINANCE = 0.02;
+const MAXIMUM_LUMINANCE = 0.6;
+const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
+
+async function writeDataUrl(name, dataUrl) {
+  await mkdir(ARTIFACTS_DIRECTORY, { recursive: true });
+  const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+  await writeFile(new URL(name, ARTIFACTS_DIRECTORY), Buffer.from(base64, 'base64'));
+}
 
 function parseFrameCount(argumentList) {
   const index = argumentList.indexOf('--frames');
@@ -67,7 +81,23 @@ async function run() {
       console.error(`smoke: expected stats.aliveTotal > ${MINIMUM_ALIVE_TOTAL}, got ${JSON.stringify(stats)}`);
       return EXIT_FAILURE;
     }
-    console.log(`smoke: ok (aliveTotal ${stats.aliveTotal})`);
+    const capture = await page.evaluate(() => window.__murmuration.capture());
+    await writeDataUrl('smoke.png', capture.pngDataUrl);
+    // Trails off so the 4x frame shows glyph shapes rather than motion smears.
+    const zoomCapture = await page.evaluate(() => window.__murmuration.capture({ inspectZoom: 4, settings: { trailDecay: 0 } }));
+    await writeDataUrl('smoke-zoom.png', zoomCapture.pngDataUrl);
+    const luminance = capture.meanLuminance;
+    if (!(luminance > MINIMUM_LUMINANCE && luminance < MAXIMUM_LUMINANCE)) {
+      console.error(`smoke: expected ${MINIMUM_LUMINANCE} < arena mean luminance < ${MAXIMUM_LUMINANCE}, got ${luminance.toFixed(4)} (${capture.width}x${capture.height})`);
+      return EXIT_FAILURE;
+    }
+    if (page.consoleErrors.length > 0) {
+      console.error('smoke: console errors after capture:');
+      page.consoleErrors.forEach((line) => console.error(line));
+      return EXIT_FAILURE;
+    }
+    const capturedStats = await page.evaluate(() => window.__murmuration.stats);
+    console.log(`smoke: ok (aliveTotal ${stats.aliveTotal}, aliveTotal at capture ${capturedStats.aliveTotal}, arena mean luminance ${luminance.toFixed(4)})`);
     return EXIT_OK;
   } catch (error) {
     console.error(`smoke: ${error.message}`);

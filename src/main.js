@@ -4,16 +4,41 @@ import { SpawnPressure } from './sim/spawner.js';
 import { FrameLoop } from './game/loop.js';
 import { createInput } from './input/input.js';
 import { Viewport } from './render/viewport.js';
+import { Renderer } from './render/renderer.js';
+import { meanLuminance } from './render/capture.js';
 import { ARENA_WIDTH, ARENA_HEIGHT } from './sim/layout.js';
 
 const DESKTOP_CAPACITY = 262144;
 const PLAYER_SPEED = 6;
 const DEBUG_KILL_RADIUS = 0.6;
+// Frames rendered with a capture's overrides before the capture, so earlier trails fade (0.9^30 is 4 percent).
+const CAPTURE_SETTLE_FRAMES = 30;
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
 
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function describeCapture(frame, arenaRect) {
+  const { width, height, pixels } = frame;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength), width, height), 0, 0);
+  return { width, height, arenaRect, meanLuminance: meanLuminance(pixels, width, arenaRect), pngDataUrl: canvas.toDataURL('image/png') };
+}
+
+function waitAnimationFrames(count) {
+  return new Promise((resolve) => {
+    let remaining = count;
+    const tick = () => {
+      remaining -= 1;
+      if (remaining <= 0) resolve();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
 }
 
 async function boot() {
@@ -37,6 +62,7 @@ async function boot() {
   viewport.setCanvasSize(canvas.width, canvas.height, devicePixelRatio);
 
   const simulation = await Simulation.create(gpu, { capacity: DESKTOP_CAPACITY });
+  const renderer = await Renderer.create(gpu, { simulation, viewport });
   const spawnPressure = new SpawnPressure({ capacity: DESKTOP_CAPACITY });
   const input = createInput(canvas, viewport);
 
@@ -64,9 +90,34 @@ async function boot() {
     }
   };
 
-  const render = () => {
+  const render = (alpha) => {
+    const encoder = gpu.device.createCommandEncoder();
+    renderer.render(encoder, { alpha, time: simulation.time });
+    gpu.device.queue.submit([encoder.finish()]);
+    renderer.afterSubmit();
     window.__murmuration.frame = loop.frameCount;
     window.__murmuration.ready = true;
+  };
+
+  // Smoke-test readback of a composited frame. With inspectZoom or renderer setting overrides
+  // (for example { trailDecay: 0 }), they hold for CAPTURE_SETTLE_FRAMES frames plus the captured
+  // one, then the previous values return.
+  window.__murmuration.capture = async ({ inspectZoom, settings } = {}) => {
+    const previousZoom = viewport.inspectZoom;
+    const previousSettings = { ...renderer.settings };
+    let frame;
+    try {
+      if (inspectZoom !== undefined || settings !== undefined) {
+        viewport.inspectZoom = inspectZoom ?? previousZoom;
+        Object.assign(renderer.settings, settings);
+        await waitAnimationFrames(CAPTURE_SETTLE_FRAMES);
+      }
+      frame = await renderer.captureNextFrame();
+    } finally {
+      viewport.inspectZoom = previousZoom;
+      Object.assign(renderer.settings, previousSettings);
+    }
+    return describeCapture(frame, viewport.arenaRectDevicePixels);
   };
 
   const loop = new FrameLoop({ update, render });
