@@ -1,5 +1,5 @@
 // Browser check for the coarse field and steering. Loads tests/browser/pages/steer.html, which
-// runs four GPU scenarios (seek, dense cell, Lattice spacing, pressure versus collapse) and
+// runs GPU scenarios (seek, dense cell, Lattice spacing, pressure versus collapse, neighbor cap, default-mix clumping) and
 // reports window.__steerCheck.
 // Usage: node tests/browser/steer.mjs
 // Exit codes: 0 pass, 1 failure (check failed, console errors or timeout).

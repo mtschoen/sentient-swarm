@@ -57,7 +57,8 @@ The smoke fails above 0.6. Reproduce the full-ramp number with a script that ope
 
 ## Tuning notes
 
-- Averaged separation cancels inside a uniform crowd, so the coarse pressure term sets spacing. Lattice with `targetDensity` 150 per coarse cell settles at about 0.02 world units, one fifth of the neighbor radius.
+- Averaged separation cancels inside a uniform crowd, so the coarse pressure term sets spacing. Lattice with `targetDensity` 24 per coarse cell settles at about 0.05 world units, half the neighbor radius.
 - Lattice sheets breathe: an undamped pressure spring against low acceleration. Damping is a lab item for Plan C.
 - Brightness: each glyph is divided by 1 + 4 times the fraction of its coarse cell that glyph bodies cover on screen (`COVERAGE_ATTENUATION` in `glyphs.wgsl`), so a crowd levels off near a quarter of a glyph per pixel at any arena size. The composite tonemaps luminance and keeps hue, so dense cores stay colored instead of white. Trails decay per elapsed time (`trailDecay` is the fraction kept per 1/60 second) and emission is scaled to match, so trail length and brightness do not depend on the refresh rate.
 - Straight seek brakes near the player (`ARRIVAL_BRAKING` 0.7 in `steer.wgsl`), so swarms with pressure off collapse onto the player instead of oscillating through it.
+- No clumps: pressure only acts above `targetDensity`, so the old targets (30 to 150) left a sparse population (the ramp-up, about 18 per coarse cell) with no pressure and Lattice packed 81 percent of its agents within 1 unit of the player. Targets are now 16 to 30 per coarse cell (Chaser 24, Orbiter 18, Skittish 30, Lattice 24, Predator 16; Predator pressure 0.5), so pressure holds every species near uniform spread at any population. Check (e) in `tests/browser/steer.mjs` guards it at full and ramp-up populations.

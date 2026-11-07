@@ -3,7 +3,7 @@
 // (b) a single overfull cell stays valid and its field is exact, (c) a Lattice square holds the
 // spacing its target density implies, (d) pressure keeps a large Chaser swarm from collapsing
 // into a ball while pressure 0 lets it collapse, (e) the neighbor cap bounds the fine pass: one
-// dense-cell step matches a CPU port of the capped sampling and differs from the uncapped one.
+// dense-cell step matches a CPU port of the capped sampling and differs from the uncapped one, (f) the default five-species mix at full capacity does not pack into a clump around the player.
 import { createGpuContext } from '/src/gpu/device.js';
 import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
@@ -58,6 +58,7 @@ function unpackAgents(bytes) {
       x: view.getFloat32(base + AGENT_OFFSETS.position, true),
       y: view.getFloat32(base + AGENT_OFFSETS.position + 4, true),
       flags: view.getUint32(base + AGENT_OFFSETS.flags, true),
+      species: view.getUint32(base + AGENT_OFFSETS.species, true),
     });
   }
   return agents;
@@ -442,6 +443,51 @@ async function checkNeighborCap(gpu, common) {
   };
 }
 
+// (f) The default species mix (equal shares, all five species) at the 262144 capacity, seeded
+// uniformly with the player fixed at the center, for 900 steps: fewer than 15 percent of the
+// agents sit within 1.0 world unit of the player, and no coarse cell holds more than 4 times the
+// capacity-average density per cell (the average of the population under test).
+// The same check also runs at SPARSE_CLUMP_COUNT agents, the population while the demo ramps up
+// (about 18 per coarse cell), where density sits below every targetDensity and pressure is idle.
+const CLUMP_CAPACITY = 262144;
+const SPARSE_CLUMP_COUNT = 40960;
+const CLUMP_STEPS = 900;
+const CLUMP_RADIUS = 1.0;
+const CLUMP_MAXIMUM_FRACTION = 0.15;
+const CLUMP_MAXIMUM_DENSITY_FACTOR = 4;
+
+async function checkNoClump(gpu, common, count, label) {
+  const harness = new Harness(gpu, common, count);
+  await harness.initialize();
+  const random = randomSource(5);
+  const positions = uniformPositions(count, random);
+  const bytes = packAgents(positions, 0, random);
+  const view = new DataView(bytes);
+  for (let index = 0; index < count; index += 1) view.setUint32(index * AGENT_STRIDE_BYTES + AGENT_OFFSETS.species, index % SPECIES_NAMES.length, true);
+  harness.seed(bytes, defaultSpecies());
+  await harness.run(CLUMP_STEPS);
+  const agents = await harness.readAgents();
+  const failure = validityFailure(agents);
+  if (failure) return { pass: false, detail: `clump ${label}: ${failure}` };
+  const near = agents.filter((agent) => distanceToPlayer(agent) < CLUMP_RADIUS).length / count;
+  const cells = new Float64Array(COARSE_COLUMNS * COARSE_ROWS);
+  agents.forEach((agent) => {
+    const column = Math.min(COARSE_COLUMNS - 1, Math.floor(agent.x / (ARENA_WIDTH / COARSE_COLUMNS)));
+    const row = Math.min(COARSE_ROWS - 1, Math.floor(agent.y / (ARENA_HEIGHT / COARSE_ROWS)));
+    cells[column + row * COARSE_COLUMNS] += 1;
+  });
+  const nearBySpecies = SPECIES_NAMES.map((name, species) => {
+    const members = agents.filter((agent) => agent.species === species);
+    return `${name} ${(100 * members.filter((agent) => distanceToPlayer(agent) < CLUMP_RADIUS).length / members.length).toFixed(0)}%`;
+  }).join(' ');
+  const average = count / cells.length;
+  const peak = Math.max(...cells);
+  return {
+    pass: near < CLUMP_MAXIMUM_FRACTION && peak < CLUMP_MAXIMUM_DENSITY_FACTOR * average,
+    detail: `clump ${label} (${count} agents): ${(near * 100).toFixed(1)}% within ${CLUMP_RADIUS} of the player (need < ${CLUMP_MAXIMUM_FRACTION * 100}%; by species ${nearBySpecies}), peak cell ${peak} = ${(peak / average).toFixed(2)}x the average ${average.toFixed(0)} (need < ${CLUMP_MAXIMUM_DENSITY_FACTOR}x)`,
+  };
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   let lostReason = null;
@@ -449,7 +495,7 @@ async function runCheck() {
   gpu.device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
   const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
   const results = [];
-  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap]) {
+  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, (gpuContext, shader) => checkNoClump(gpuContext, shader, CLUMP_CAPACITY, 'full'), (gpuContext, shader) => checkNoClump(gpuContext, shader, SPARSE_CLUMP_COUNT, 'sparse')]) {
     results.push(await check(gpu, common));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${results.map((result) => result.detail).join('; ')}` };
   }

@@ -9,15 +9,15 @@ const MATRIX_PADDED_FLOATS = 32;
 // Numbers are starting points; the lab retunes them.
 const DEFAULT_ROWS = [
   // Chaser: strong seek and cohesion, medium alignment; forms the river.
-  { name: 'Chaser', hue: 0.02, glyph: 0, seek: 1.0, cohesion: 0.9, alignment: 0.5, separation: 0.3, maximumSpeed: 4.0, maximumTurn: 0.6, orbitRadius: 0, flee: 0, pressure: 0.5, targetDensity: 60 },
+  { name: 'Chaser', hue: 0.02, glyph: 0, seek: 1.0, cohesion: 0.9, alignment: 0.5, separation: 0.3, maximumSpeed: 4.0, maximumTurn: 0.6, orbitRadius: 0, flee: 0, pressure: 0.5, targetDensity: 24 },
   // Orbiter: medium seek, holds 2.4 units (15 percent of arena width), strong alignment.
-  { name: 'Orbiter', hue: 0.55, glyph: 1, seek: 0.5, cohesion: 0.3, alignment: 0.9, separation: 0.3, maximumSpeed: 3.0, maximumTurn: 0.5, orbitRadius: 2.4, flee: 0, pressure: 0.2, targetDensity: 40 },
+  { name: 'Orbiter', hue: 0.55, glyph: 1, seek: 0.5, cohesion: 0.3, alignment: 0.9, separation: 0.3, maximumSpeed: 3.0, maximumTurn: 0.5, orbitRadius: 2.4, flee: 0, pressure: 0.2, targetDensity: 18 },
   // Skittish: medium seek, strong cohesion, very strong flee from fire.
-  { name: 'Skittish', hue: 0.15, glyph: 2, seek: 0.5, cohesion: 0.9, alignment: 0.4, separation: 0.3, maximumSpeed: 5.0, maximumTurn: 0.8, orbitRadius: 0, flee: 2.0, pressure: 0.5, targetDensity: 80 },
+  { name: 'Skittish', hue: 0.15, glyph: 2, seek: 0.5, cohesion: 0.9, alignment: 0.4, separation: 0.3, maximumSpeed: 5.0, maximumTurn: 0.8, orbitRadius: 0, flee: 2.0, pressure: 0.5, targetDensity: 30 },
   // Lattice: weak seek, very strong separation, strong alignment, slow.
-  { name: 'Lattice', hue: 0.75, glyph: 3, seek: 0.15, cohesion: 0.1, alignment: 0.9, separation: 1.8, maximumSpeed: 2.0, maximumTurn: 0.3, orbitRadius: 0, flee: 0, pressure: 1.0, targetDensity: 150 },
+  { name: 'Lattice', hue: 0.75, glyph: 3, seek: 0.15, cohesion: 0.1, alignment: 0.9, separation: 1.8, maximumSpeed: 2.0, maximumTurn: 0.3, orbitRadius: 0, flee: 0, pressure: 1.0, targetDensity: 24 },
   // Predator: weak seek; cross-species behaviour comes from the matrix.
-  { name: 'Predator', hue: 0.92, glyph: 4, seek: 0.2, cohesion: 0.2, alignment: 0.3, separation: 0.4, maximumSpeed: 4.5, maximumTurn: 0.7, orbitRadius: 0, flee: 0, pressure: 0.2, targetDensity: 30 },
+  { name: 'Predator', hue: 0.92, glyph: 4, seek: 0.2, cohesion: 0.2, alignment: 0.3, separation: 0.4, maximumSpeed: 4.5, maximumTurn: 0.7, orbitRadius: 0, flee: 0, pressure: 0.5, targetDensity: 16 },
 ];
 
 export function defaultSpecies() {
