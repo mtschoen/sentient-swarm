@@ -3,16 +3,24 @@
 // step stale while distances use current positions. Every kind pierces.
 //
 // Entry main, one thread per projectile slot (the beam slot is skipped):
-// - bullet, scatter, rail, pulseOrb, sidewinder: the capsule from previousPosition to position
+// - bullet, scatter, rail, pulseOrb, sidewinder: that thread walks the capsule from previousPosition to position
 //   with reach radius + CAPSULE_KILL_MARGIN. Its cells are walked along the segment's major axis:
 //   for every grid column (or row) the capsule touches, the minor-axis cell span is the
 //   segment's minor range over that column widened by the reach on both sides, then by the reach
 //   along the major axis for the end caps. At most CAPSULE_CELL_BUDGET cells. An agent dies when
 //   its distance to the segment is at most the reach.
-// - pulseRing: the band [radius - max(RING_MINIMUM_BAND, extra * dt), radius] around position,
-//   so a ring growing faster than the minimum band per step still sweeps without gaps. Only cells
-//   intersecting the annulus are walked: per grid row, the column span of the outer circle minus
-//   the columns lying wholly inside the inner circle. At most RING_CELL_BUDGET cells.
+// - pulseRing: skipped here, see rings.
+// Entry rings, a few workgroups (RING_WORKGROUP_COUNT in projectiles.js): every workgroup scans
+// the slots for alive pulse rings (at most MAXIMUM_LISTED_RINGS), then all the dispatch's threads
+// walk every ring's cells together, interleaved so consecutive cells land in different
+// workgroups. A ring in a dense mass covers hundreds of crowded cells: walked by one thread it
+// cost about 9 ms per frame at 262144 agents with 3 rings, and by one workgroup about 2.4 ms. The
+// band is [radius - max(RING_MINIMUM_BAND, extra * dt), radius] around position, so a ring
+// growing faster than the minimum band per step still sweeps without gaps. Only cells
+// intersecting the annulus are walked: per grid row, the column span of the outer circle minus
+// the columns lying wholly inside the inner circle, in row-major order. At most RING_CELL_BUDGET
+// cells per ring. Each cell's agents are still looped by one thread, as for capsules: the work
+// is bounded by cell count, not by agent count.
 // Entry beam, one workgroup: slot 0 when it is an alive beam. The ray from position along
 // velocity (a unit direction) to the arena edge is a capsule of reach radius walked the same way,
 // with the workgroup's threads taking interleaved major-axis steps (at most columns + rows
@@ -58,6 +66,11 @@ const BEAM_SLOT: u32 = 0u;
 const NO_THREAT: f32 = 0.0;
 
 var<workgroup> workgroupKills: atomic<u32>;
+// Alive pulse ring slots found by this workgroup's scan (zero-initialized per workgroup). The
+// pulse weapon keeps at most about 9 rings alive; rings past MAXIMUM_LISTED_RINGS do not collide.
+const MAXIMUM_LISTED_RINGS: u32 = 256u;
+var<workgroup> ringCount: atomic<u32>;
+var<workgroup> ringSlots: array<u32, MAXIMUM_LISTED_RINGS>;
 
 fn speciesHue(species: u32) -> f32 {
   if (species < 4u) {
@@ -176,14 +189,30 @@ fn collideCapsule(start: vec2f, end: vec2f, reach: f32, firstStep: u32, stepStri
   }
 }
 
+// Collides the cells of one row's column segment [segmentFirst, segmentLast]; base is the ring's
+// running cell index at the segment start. This thread takes the cells whose running index is
+// firstCell modulo cellStride, below RING_CELL_BUDGET. Returns the running index after the segment.
+fn collideRingSegment(row: u32, segmentFirst: i32, segmentLast: i32, base: u32, firstCell: u32, cellStride: u32, center: vec2f, inner: f32, outer: f32) -> u32 {
+  if (segmentLast < segmentFirst) {
+    return base;
+  }
+  let length = u32(segmentLast - segmentFirst + 1);
+  let limit = min(base + length, RING_CELL_BUDGET);
+  for (var cellIndex = base + (firstCell + cellStride - base % cellStride) % cellStride; cellIndex < limit; cellIndex = cellIndex + cellStride) {
+    let column = u32(segmentFirst + i32(cellIndex - base));
+    collideCellWithRing(column + row * params.gridColumns, center, inner, outer);
+  }
+  return base + length;
+}
+
 // Walks the cells intersecting the annulus [inner, outer] around center, at most
-// RING_CELL_BUDGET of them.
-fn collideRing(center: vec2f, inner: f32, outer: f32) {
+// RING_CELL_BUDGET of them, taking the running cell indices firstCell, firstCell + cellStride, ...
+fn collideRing(center: vec2f, inner: f32, outer: f32, firstCell: u32, cellStride: u32) {
   let size = params.cellSize;
   let firstRow = gridCoordinate(center.y - outer, params.gridRows);
   let lastRow = gridCoordinate(center.y + outer, params.gridRows);
-  var budget = RING_CELL_BUDGET;
-  for (var row = firstRow; row <= lastRow && budget > 0u; row = row + 1u) {
+  var base = 0u;
+  for (var row = firstRow; row <= lastRow && base < RING_CELL_BUDGET; row = row + 1u) {
     let low = f32(row) * size - center.y;
     let high = low + size;
     var nearest = min(abs(low), abs(high));
@@ -199,21 +228,19 @@ fn collideRing(center: vec2f, inner: f32, outer: f32) {
     let lastColumn = i32(gridCoordinate(center.x + outerHalfWidth, params.gridColumns));
     // Columns wholly inside (center.x - innerHalfWidth, center.x + innerHalfWidth) are within
     // the inner circle for every point of this row; an empty hole has holeFirst > holeLast.
-    var holeFirst = 1;
-    var holeLast = 0;
+    var holeFirst = lastColumn + 1;
+    var holeLast = lastColumn;
     if (inner > farthest) {
       let innerHalfWidth = sqrt(inner * inner - farthest * farthest);
-      holeFirst = i32(floor((center.x - innerHalfWidth) / size)) + 1;
-      holeLast = i32(ceil((center.x + innerHalfWidth) / size)) - 2;
-    }
-    for (var column = firstColumn; column <= lastColumn && budget > 0u; column = column + 1) {
-      if (column >= holeFirst && column <= holeLast) {
-        column = holeLast;
-        continue;
+      let first = i32(floor((center.x - innerHalfWidth) / size)) + 1;
+      let last = i32(ceil((center.x + innerHalfWidth) / size)) - 2;
+      if (first <= last) {
+        holeFirst = first;
+        holeLast = last;
       }
-      collideCellWithRing(u32(column) + row * params.gridColumns, center, inner, outer);
-      budget = budget - 1u;
     }
+    base = collideRingSegment(row, firstColumn, min(lastColumn, holeFirst - 1), base, firstCell, cellStride, center, inner, outer);
+    base = collideRingSegment(row, max(firstColumn, holeLast + 1), lastColumn, base, firstCell, cellStride, center, inner, outer);
   }
 }
 
@@ -234,14 +261,43 @@ fn main(
   let slot = globalId.x;
   if (slot < arrayLength(&projectiles)) {
     let projectile = projectiles[slot];
-    if ((projectile.flags & PROJECTILE_FLAG_ALIVE) != 0u && projectile.kind != PROJECTILE_KIND_BEAM) {
-      if (projectile.kind == PROJECTILE_KIND_PULSE_RING) {
-        let band = max(RING_MINIMUM_BAND, projectile.extra * params.dt);
-        collideRing(projectile.position, max(0.0, projectile.radius - band), projectile.radius);
-      } else {
-        collideCapsule(projectile.previousPosition, projectile.position, projectile.radius + CAPSULE_KILL_MARGIN, 0u, 1u, CAPSULE_CELL_BUDGET, NO_THREAT);
+    let isCapsule = projectile.kind != PROJECTILE_KIND_BEAM && projectile.kind != PROJECTILE_KIND_PULSE_RING;
+    if ((projectile.flags & PROJECTILE_FLAG_ALIVE) != 0u && isCapsule) {
+      collideCapsule(projectile.previousPosition, projectile.position, projectile.radius + CAPSULE_KILL_MARGIN, 0u, 1u, CAPSULE_CELL_BUDGET, NO_THREAT);
+    }
+  }
+  workgroupBarrier();
+  flushKills(localIndex);
+}
+
+@compute @workgroup_size(WORKGROUP_SIZE)
+fn rings(
+  @builtin(local_invocation_index) localIndex: u32,
+  @builtin(workgroup_id) workgroupId: vec3u,
+  @builtin(num_workgroups) workgroupCount: vec3u,
+) {
+  let slotCount = arrayLength(&projectiles);
+  for (var slot = localIndex; slot < slotCount; slot = slot + WORKGROUP_SIZE) {
+    if ((projectiles[slot].flags & PROJECTILE_FLAG_ALIVE) != 0u && projectiles[slot].kind == PROJECTILE_KIND_PULSE_RING) {
+      let index = atomicAdd(&ringCount, 1u);
+      if (index < MAXIMUM_LISTED_RINGS) {
+        ringSlots[index] = slot;
       }
     }
+  }
+  workgroupBarrier();
+  let ringTotal = min(atomicLoad(&ringCount), MAXIMUM_LISTED_RINGS);
+  // Workgroup-minor thread numbering, so a ring's consecutive cells go to different workgroups;
+  // ring r starts r * RING_CELL_BUDGET threads on, so rings use disjoint threads where they can.
+  // The list order differs between workgroups, so the offset comes from the slot, not the index.
+  let threadTotal = workgroupCount.x * WORKGROUP_SIZE;
+  let thread = localIndex * workgroupCount.x + workgroupId.x;
+  for (var ring = 0u; ring < ringTotal; ring = ring + 1u) {
+    let slot = ringSlots[ring];
+    let projectile = projectiles[slot];
+    let band = max(RING_MINIMUM_BAND, projectile.extra * params.dt);
+    let offset = (slot * RING_CELL_BUDGET) % threadTotal;
+    collideRing(projectile.position, max(0.0, projectile.radius - band), projectile.radius, (thread + threadTotal - offset) % threadTotal, threadTotal);
   }
   workgroupBarrier();
   flushKills(localIndex);

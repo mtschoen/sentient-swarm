@@ -24,6 +24,11 @@ const FLAG_ALIVE = 1;
 // The beam's lifetime is never read: the step pass leaves the beam slot alone.
 const BEAM_LIFETIME = 1;
 const BYTES_PER_FLOAT = 4;
+// Workgroups of the rings entry (projectiles_collide.wgsl): every one scans the slots, then their
+// 8192 threads share the pulse rings' cells (8 rings of RING_CELL_BUDGET cells without overlap).
+// Measured with 3 rings in a wall-pinned mass (worst frame of the projectiles pass): 0.35 ms at
+// 262144 agents and 1.3 ms at 1048576, against 9.3 and 35 ms with one thread per ring.
+export const RING_WORKGROUP_COUNT = 32;
 // SpeciesHues in projectiles_collide.wgsl: two vec4f.
 const HUES_UNIFORM_BYTES = 32;
 const SPECIES_ROW_BYTES = SPECIES_FIELDS.length * BYTES_PER_FLOAT;
@@ -126,7 +131,7 @@ export class Projectiles {
     });
     const [stepModule, collideModule] = await Promise.all([module('projectiles_step'), module('projectiles_collide')]);
     const entry = (binding, type) => ({ binding, visibility: GPUShaderStage.COMPUTE, buffer: { type } });
-    // Shared by the main and beam entry points: params, hues, projectiles, agents, cellCounts,
+    // Shared by the main, rings and beam entry points: params, hues, projectiles, agents, cellCounts,
     // cellOffsets, sortedIndices, particles, threatAccumulator, stats.
     this.collideLayout = this.device.createBindGroupLayout({
       label: 'projectiles-collide-layout',
@@ -137,12 +142,13 @@ export class Projectiles {
       ],
     });
     const collidePipelineLayout = this.device.createPipelineLayout({ bindGroupLayouts: [this.collideLayout] });
-    const [step, collide, beam] = await Promise.all([
+    const [step, collide, rings, beam] = await Promise.all([
       this.device.createComputePipelineAsync({ label: 'projectiles-step', layout: 'auto', compute: { module: stepModule, entryPoint: 'main' } }),
       this.device.createComputePipelineAsync({ label: 'projectiles-collide', layout: collidePipelineLayout, compute: { module: collideModule, entryPoint: 'main' } }),
+      this.device.createComputePipelineAsync({ label: 'projectiles-rings', layout: collidePipelineLayout, compute: { module: collideModule, entryPoint: 'rings' } }),
       this.device.createComputePipelineAsync({ label: 'projectiles-beam', layout: collidePipelineLayout, compute: { module: collideModule, entryPoint: 'beam' } }),
     ]);
-    this.pipelines = { step, collide, beam };
+    this.pipelines = { step, collide, rings, beam };
   }
 
   // Queues a projectile for the next encode and returns the slot it will occupy.
@@ -204,6 +210,8 @@ export class Projectiles {
     pass.setPipeline(this.pipelines.collide);
     pass.setBindGroup(0, collideBindGroup);
     pass.dispatchWorkgroups(workgroups);
+    pass.setPipeline(this.pipelines.rings);
+    pass.dispatchWorkgroups(RING_WORKGROUP_COUNT);
     pass.setPipeline(this.pipelines.beam);
     pass.dispatchWorkgroups(1);
     pass.end();

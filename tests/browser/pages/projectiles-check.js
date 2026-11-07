@@ -5,7 +5,9 @@
 // (a) one rail of radius 0.05 crossing the block diagonally at speed 20 for 0.3 s kills 200 to
 //     2000, leaves no alive agent within 0.05 of its path, and is dead after its lifetime;
 // (b) one bullet, then (reseeded) two identical bullets in the same frame on that path: the pair
-//     kills the single count within 2 percent (no double counting);
+//     kills exactly the single count (agents are motionless, so the kill set is geometric; no
+//     double counting), and the particle pool cursor advances by PROJECTILE_KILL_PARTICLES per
+//     kill (one splash per killed agent, never one per bullet);
 // (c) with the block at x = 15.5 pinned against the right wall, a beam for one frame from (8, 3.5)
 //     toward (16, 4.5) kills agents, leaves none within 0.09 of the ray, the frame's submit
 //     completes with the device alive, and the frame after the beam is cleared kills nothing;
@@ -32,6 +34,8 @@ const KIND = { bullet: 0, rail: 2, pulseOrb: 3, pulseRing: 4 };
 const PROJECTILE_STRIDE_BYTES = 48;
 const PROJECTILE_OFFSETS = { position: 0, velocity: 16, radius: 24, lifetime: 28, kind: 32, flags: 36 };
 const ARENA_INSET = 0.001;
+// KILL_PARTICLE_COUNT in projectiles_collide.wgsl.
+const PROJECTILE_KILL_PARTICLES = 4;
 const CENTER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
 
 function seededRandom(seed) {
@@ -124,6 +128,19 @@ class Harness {
     return Array.from({ length: AGENT_COUNT }, (unused, slot) => (view.getUint32(slot * AGENT_STRIDE_BYTES + AGENT_OFFSETS.flags, true) & AGENT_FLAG_ALIVE) !== 0);
   }
 
+  // The particle pool's spawn cursor (header word 0): every splash claims its particles here.
+  async particleCursor() {
+    const header = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const encoder = this.device.createCommandEncoder({ label: 'projectiles-check-cursor' });
+    encoder.copyBufferToBuffer(this.simulation.particlePool.buffers.particles, 0, header, 0, 16);
+    this.device.queue.submit([encoder.finish()]);
+    await header.mapAsync(GPUMapMode.READ);
+    const cursor = new Uint32Array(header.getMappedRange())[0];
+    header.unmap();
+    header.destroy();
+    return cursor;
+  }
+
   async projectileSlot(slot) {
     const view = new DataView(await readBuffer(this.device, this.projectiles.buffer));
     const base = slot * PROJECTILE_STRIDE_BYTES;
@@ -182,11 +199,14 @@ async function runOverlapCase(harness) {
   harness.seedBlock(CENTER);
   harness.projectiles.queueSpawn(sweepSpawn(KIND.bullet));
   harness.projectiles.queueSpawn(sweepSpawn(KIND.bullet));
+  const cursorBefore = await harness.particleCursor();
   const double = await harness.steps(SWEEP_FRAMES);
+  const cursorDelta = ((await harness.particleCursor()) - cursorBefore) >>> 0;
   const dropped = (await harness.aliveFlags()).filter((flag) => !flag).length;
   return verdictLine([
-    [single > 0 && Math.abs(double - single) <= 0.02 * single, `(b) two overlapping bullets kill ${double}, one kills ${single} (need within 2%)`],
+    [single > 0 && double === single, `(b) two overlapping bullets kill ${double}, one kills ${single} (need equal)`],
     [dropped === double, `(b) alive drop ${dropped} equals the pair's kills`],
+    [cursorDelta === PROJECTILE_KILL_PARTICLES * double, `(b) particle cursor advanced ${cursorDelta} for the pair (need ${PROJECTILE_KILL_PARTICLES} per kill, ${PROJECTILE_KILL_PARTICLES * double})`],
   ]);
 }
 
