@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Murmuration</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; }
+      #arena { display: block; width: 100vw; height: 100vh; touch-action: none; }
+      #message { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+        color: #cfe8ff; font: 16px/1.4 system-ui, sans-serif; text-align: center; padding: 2rem; }
+      #message[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <canvas id="arena"></canvas>
+    <div id="message" hidden></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
