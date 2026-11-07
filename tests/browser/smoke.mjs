@@ -50,8 +50,9 @@ async function run() {
         frames,
         { timeout: READY_TIMEOUT_MILLISECONDS },
       );
+      await page.waitForFunction(() => window.__murmuration?.stats != null, null, { timeout: READY_TIMEOUT_MILLISECONDS });
     } catch (error) {
-      console.error(`smoke: timed out waiting for ready and ${frames} frames: ${error.message.split('\n')[0]}`);
+      console.error(`smoke: timed out waiting for ready, ${frames} frames and stats:${error.message.split('\n')[0]}`);
       page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
     }
