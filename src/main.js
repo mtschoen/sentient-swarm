@@ -10,6 +10,7 @@ import { installCaptureHook } from './render/capture-hook.js';
 import { createDebugPanel } from './ui/debugPanel.js';
 import { capacityFromSearch } from './ui/panelModel.js';
 import { installAudio } from './audio/audio-hook.js';
+import { createHud } from './ui/hud.js';
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
 
@@ -29,12 +30,23 @@ async function boot() {
   }
 
   const viewport = new Viewport();
+  const hud = createHud(document.getElementById('hud'));
   let renderer = null;
+  // The HUD lives in CSS pixels; the viewport rectangle is in device pixels.
+  const layoutHud = () => {
+    const scale = 1 / viewport.devicePixelRatio;
+    const rect = viewport.arenaRectDevicePixels;
+    hud.layout(
+      { x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale },
+      { width: viewport.canvasWidth * scale, height: viewport.canvasHeight * scale },
+    );
+  };
   const resizeCanvas = ({ width, height, devicePixelRatio }) => {
     canvas.width = width;
     canvas.height = height;
     viewport.setCanvasSize(width, height, devicePixelRatio);
     renderer?.resize(width, height);
+    layoutHud();
   };
   // Sized explicitly before the first frame; the observer then keeps it current.
   const sizeCanvasNow = observeCanvasSize(canvas, resizeCanvas);
@@ -56,8 +68,15 @@ async function boot() {
     audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity });
   };
 
+  let gameOverShown = false;
   const render = (alpha, deltaSeconds) => {
     game.render(alpha, deltaSeconds);
+    const state = game.state;
+    hud.update(state);
+    const isGameOver = state.phase === 'gameOver';
+    if (isGameOver && !gameOverShown) hud.showGameOver(state.score, () => game.restart());
+    else if (!isGameOver && gameOverShown) hud.hideGameOver();
+    gameOverShown = isGameOver;
     window.__murmuration.frame = loop.frameCount;
     window.__murmuration.ready = true;
   };
