@@ -5,9 +5,13 @@
 // coarse cell in world units, and the displacement saturates at MAXIMUM_DISPLACEMENT (below the
 // line spacing) so a dense mass dents the grid instead of folding it. Lines are a dim neon blue
 // that brightens with the displacement and with local threat, so kills flash and ripple.
+// Shockwaves: each live impulse (x, y, age, strength) pushes vertices radially outward by
+// strength * exp(-((distance - IMPULSE_SPEED * age)^2) / IMPULSE_WIDTH) * (1 - age / IMPULSE_DURATION_SECONDS)
+// world units, a ring that runs out from the impulse and fades; the push also brightens the lines.
 // Common header prepended.
 
-// Uniform layout (byte offsets), total 48 bytes; packWarpView in warpgrid.js writes it.
+// Uniform layout (byte offsets), total 48 + IMPULSE_CAPACITY * 16 = 176 bytes; packWarpView in
+// warpgrid.js writes it.
 //   0 worldToClipScale    vec2f
 //   8 worldToClipOffset   vec2f
 //  16 densityWeight       f32
@@ -17,6 +21,9 @@
 //  32 columns             u32
 //  36 rows                u32
 //  40 padding1            vec2u
+//  48 impulses            array<vec4f, IMPULSE_CAPACITY> of (x, y, age, strength); strength 0 is dead
+const IMPULSE_CAPACITY: u32 = 8u;
+
 struct WarpView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
@@ -27,6 +34,7 @@ struct WarpView {
   columns: u32,
   rows: u32,
   padding1: vec2u,
+  impulses: array<vec4f, IMPULSE_CAPACITY>,
 }
 
 @group(0) @binding(0) var<uniform> view: WarpView;
@@ -43,6 +51,14 @@ const THREAT_BRIGHTENING: f32 = 0.5;
 const MAXIMUM_THREAT_BRIGHTENING: f32 = 12.0;
 const RIPPLE_RATE: f32 = 14.0;
 const RIPPLE_WAVENUMBER: f32 = 6.0;
+// World units per second the shockwave ring travels, its squared-width divisor, and its lifetime
+// (DEFAULT_IMPULSE_DURATION_SECONDS in impulses.js).
+const IMPULSE_SPEED: f32 = 7.0;
+const IMPULSE_WIDTH: f32 = 0.3;
+const IMPULSE_DURATION_SECONDS: f32 = 1.2;
+// Line brightening per world unit of shockwave push.
+const IMPULSE_BRIGHTENING: f32 = 12.0;
+const IMPULSE_TINT: vec3f = vec3f(0.6, 0.3, 1.0);
 
 struct WarpVaryings {
   @builtin(position) position: vec4f,
@@ -76,6 +92,25 @@ fn potentialAt(position: vec2f) -> f32 {
   return sampled.x * view.densityWeight + sampled.y * view.threatWeight;
 }
 
+// Summed radial push of every live impulse at position, in world units.
+fn impulseDisplacement(position: vec2f) -> vec2f {
+  var total = vec2f(0.0);
+  for (var index = 0u; index < IMPULSE_CAPACITY; index = index + 1u) {
+    let impulse = view.impulses[index];
+    let strength = impulse.w;
+    if (strength <= 0.0) {
+      continue;
+    }
+    let offset = position - impulse.xy;
+    let distance = length(offset);
+    let age = impulse.z;
+    let front = distance - IMPULSE_SPEED * age;
+    let amount = strength * exp(-(front * front) / IMPULSE_WIDTH) * max(1.0 - age / IMPULSE_DURATION_SECONDS, 0.0);
+    total = total + select(vec2f(0.0), offset / max(distance, 1e-6) * amount, distance > 1e-6);
+  }
+  return total;
+}
+
 @vertex
 fn warpVertex(@builtin(vertex_index) vertexIndex: u32) -> WarpVaryings {
   let segment = vertexIndex / 2u;
@@ -98,17 +133,21 @@ fn warpVertex(@builtin(vertex_index) vertexIndex: u32) -> WarpVaryings {
   let magnitude = length(gradient);
   let saturation = 1.0 - exp(-magnitude * DISPLACEMENT_GAIN / MAXIMUM_DISPLACEMENT);
   let direction = select(vec2f(0.0), gradient / max(magnitude, 1e-6), magnitude > 1e-6);
-  let displacement = direction * MAXIMUM_DISPLACEMENT * saturation;
-  // Border lines stay on the arena edge.
+  let shockwave = impulseDisplacement(position);
+  let displacement = direction * MAXIMUM_DISPLACEMENT * saturation + shockwave;
+  // Border lines stay on the arena edge, and a shockwave cannot push inner lines past it into
+  // the letterbox: they pile up against the wall instead.
   let onBorder = vec2<bool>(lattice.x == 0u || lattice.x == view.columns, lattice.y == 0u || lattice.y == view.rows);
-  let displaced = position + select(displacement, vec2f(0.0), onBorder);
+  let displaced = clamp(position + select(displacement, vec2f(0.0), onBorder), vec2f(0.0), vec2f(ARENA_WIDTH, ARENA_HEIGHT));
 
   let threat = sampleField(position).y;
   let ripple = 0.6 + 0.4 * sin(view.time * RIPPLE_RATE - threat * RIPPLE_WAVENUMBER);
   let threatGlow = min(threat * THREAT_BRIGHTENING, MAXIMUM_THREAT_BRIGHTENING) * ripple;
   var output: WarpVaryings;
   output.position = vec4f(displaced * view.worldToClipScale + view.worldToClipOffset, 0.0, 1.0);
-  output.color = LINE_COLOR * LINE_INTENSITY * (1.0 + DISPLACEMENT_BRIGHTENING * saturation + threatGlow);
+  let shockwaveGlow = IMPULSE_BRIGHTENING * length(shockwave);
+  output.color = LINE_COLOR * LINE_INTENSITY * (1.0 + DISPLACEMENT_BRIGHTENING * saturation + threatGlow)
+    + IMPULSE_TINT * LINE_INTENSITY * shockwaveGlow;
   return output;
 }
 

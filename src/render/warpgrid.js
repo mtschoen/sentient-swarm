@@ -2,12 +2,19 @@
 // rgba16float layer that composite adds under the scene, so trail decay never copies (smears) it.
 // No vertex or index buffer: the vertex shader derives each line end from vertex_index (see
 // warpGridLatticePoint, which mirrors it) and displaces it along the gradient of
-// density * densityWeight + threat * threatWeight sampled from the blurred coarse field.
+// density * densityWeight + threat * threatWeight sampled from the blurred coarse field, plus a
+// radial push from each shockwave impulse (ImpulseSet.toUniformArray, impulses.js).
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createUniformBuffer } from '../gpu/buffers.js';
+import { DEFAULT_IMPULSE_CAPACITY } from './impulses.js';
 import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
 
-export const WARP_VIEW_BYTES = 48;
+// Matches IMPULSE_CAPACITY in warpgrid.wgsl.
+export const WARP_IMPULSE_CAPACITY = DEFAULT_IMPULSE_CAPACITY;
+const WARP_VIEW_HEADER_BYTES = 48;
+const IMPULSE_BYTES = 16;
+export const WARP_VIEW_BYTES = WARP_VIEW_HEADER_BYTES + WARP_IMPULSE_CAPACITY * IMPULSE_BYTES;
+const NO_IMPULSES = new Float32Array(WARP_IMPULSE_CAPACITY * 4);
 const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 
 // Horizontal lines: rows + 1 lines of columns segments; vertical lines: columns + 1 lines of rows segments.
@@ -27,13 +34,15 @@ export function warpGridLatticePoint(vertexIndex, columns, rows) {
   return { column: Math.floor(vertical / rows), row: (vertical % rows) + end };
 }
 
-// Matches the WarpView table in warpgrid.wgsl.
-export function packWarpView({ viewport, columns, rows, densityWeight, threatWeight, time }) {
+// Matches the WarpView table in warpgrid.wgsl. impulses: WARP_IMPULSE_CAPACITY * 4 floats of
+// [x, y, age, strength] (ImpulseSet.toUniformArray), none when omitted.
+export function packWarpView({ viewport, columns, rows, densityWeight, threatWeight, time, impulses = NO_IMPULSES }) {
   const origin = viewport.worldToClip(0, 0);
   const unit = viewport.worldToClip(1, 1);
   const bytes = new ArrayBuffer(WARP_VIEW_BYTES);
   new Float32Array(bytes, 0, 8).set([unit.x - origin.x, unit.y - origin.y, origin.x, origin.y, densityWeight, threatWeight, time, 0]);
   new Uint32Array(bytes, 32, 4).set([columns, rows, 0, 0]);
+  new Float32Array(bytes, WARP_VIEW_HEADER_BYTES, WARP_IMPULSE_CAPACITY * 4).set(impulses);
   return bytes;
 }
 
@@ -69,9 +78,9 @@ export class WarpGrid {
   }
 
   // Draws into an open render pass whose color target is the grid layer.
-  encode(pass, fieldBuffer, time, { densityWeight, threatWeight }) {
+  encode(pass, fieldBuffer, time, { densityWeight, threatWeight, impulses }) {
     const { columns, rows, viewport } = this;
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packWarpView({ viewport, columns, rows, densityWeight, threatWeight, time }));
+    this.device.queue.writeBuffer(this.viewBuffer, 0, packWarpView({ viewport, columns, rows, densityWeight, threatWeight, time, impulses }));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, fieldBuffer]));
     pass.draw(2 * warpGridSegmentCount(columns, rows));

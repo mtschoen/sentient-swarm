@@ -109,6 +109,9 @@ function stats(fields) {
     killsUnscored: 0,
     playerHitSequence: 0,
     hitLatch: 0,
+    ringsThisFrame: 0,
+    lastRingX: 0,
+    lastRingY: 0,
     ...fields,
   };
 }
@@ -203,6 +206,50 @@ test('a current hit drops a life, drops the weapon to base, resets the multiplie
   game.render(0);
   const impulses = game.renderer.frames.flatMap((frame) => frame.impulses);
   assert.equal(impulses.length, 1);
+  assert.equal(impulses[0].strength, 1);
+  assert.equal(impulses[0].bloomBoost, true);
+});
+
+test('a bomb queues a strength 1 impulse at the ship that boosts bloom, stamped with the game clock', async () => {
+  const { game, input, advanceClock } = await createGame();
+  game.start();
+  game.update(STEP);
+  advanceClock(2.5);
+  input.state.bomb = true;
+  game.update(STEP);
+  game.render(0);
+  const impulses = game.renderer.frames.flatMap((frame) => frame.impulses);
+  assert.equal(impulses.length, 1);
+  assert.deepEqual(impulses[0], { x: game.player.position.x, y: game.player.position.y, strength: 1, time: 2.5, bloomBoost: true });
+});
+
+test('a stats frame with rings queues one 0.3 impulse at the last ring position, once per frame', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  simulation.scriptedStats.push(stats({ frameSequence: 1, ringsThisFrame: 4, lastRingX: 3.5, lastRingY: 6.25 }));
+  simulation.scriptedStats.push(stats({ frameSequence: 1, ringsThisFrame: 4, lastRingX: 3.5, lastRingY: 6.25 }));
+  simulation.scriptedStats.push(stats({ frameSequence: 2 }));
+  game.update(STEP);
+  game.update(STEP);
+  game.update(STEP);
+  game.render(0);
+  const impulses = game.renderer.frames.flatMap((frame) => frame.impulses);
+  assert.equal(impulses.length, 1);
+  assert.deepEqual(impulses[0], { x: 3.5, y: 6.25, strength: 0.3, time: 0, bloomBoost: false });
+});
+
+test('collecting a pickup queues a 0.15 impulse at the ship', async () => {
+  const { game } = await createGame();
+  game.start();
+  const { x, y } = game.player.position;
+  game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 });
+  game.update(STEP);
+  game.render(0);
+  const impulses = game.renderer.frames.flatMap((frame) => frame.impulses);
+  assert.equal(impulses.length, 1);
+  assert.equal(impulses[0].strength, 0.15);
+  assert.equal(impulses[0].bloomBoost, false);
+  assert.equal(game.state.armed, 'scatter');
 });
 
 test('a hit whose sequence predates the respawn is ignored but still acknowledged', async () => {

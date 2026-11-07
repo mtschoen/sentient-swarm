@@ -7,6 +7,7 @@
 // frame while firing and clears it once afterwards. The GPU clears a slot's alive bit when its
 // lifetime expires or it leaves the arena (projectiles_step.wgsl) and kills agents through the
 // spatial grid (projectiles_collide.wgsl, which adds to the stats kills index like the debug kill).
+// The step pass counts pulse ring detonations into the stats ringsThisFrame index.
 // A spawn that lands on a still-alive slot replaces it.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
@@ -103,10 +104,10 @@ export class Projectiles {
     this.bufferValue = createStorageBuffer(this.device, capacity * PROJECTILE_STRIDE_BYTES, 'projectiles');
     this.huesBuffer = createUniformBuffer(this.device, HUES_UNIFORM_BYTES, 'projectile-species-hues');
     this.pipelines = null;
-    this.stepBindGroupCache = new BindGroupCache(([paramsBuffer, fieldBuffer]) => this.device.createBindGroup({
+    this.stepBindGroupCache = new BindGroupCache(([paramsBuffer, fieldBuffer, statsBuffer]) => this.device.createBindGroup({
       label: 'projectiles-step-bindings',
       layout: this.pipelines.step.getBindGroupLayout(0),
-      entries: [paramsBuffer, this.bufferValue, fieldBuffer].map((buffer, binding) => ({ binding, resource: { buffer } })),
+      entries: [paramsBuffer, this.bufferValue, fieldBuffer, statsBuffer].map((buffer, binding) => ({ binding, resource: { buffer } })),
     }));
     this.collideBindGroupCache = new BindGroupCache(([paramsBuffer, ...storage]) => this.device.createBindGroup({
       label: 'projectiles-collide-bindings',
@@ -198,7 +199,7 @@ export class Projectiles {
     ]);
     const pass = encoder.beginComputePass({ label: 'projectiles' });
     pass.setPipeline(this.pipelines.step);
-    pass.setBindGroup(0, this.stepBindGroupCache.get([paramsBuffer, fieldBuffers.blurred]));
+    pass.setBindGroup(0, this.stepBindGroupCache.get([paramsBuffer, fieldBuffers.blurred, statsBuffer]));
     pass.dispatchWorkgroups(workgroups);
     pass.setPipeline(this.pipelines.collide);
     pass.setBindGroup(0, collideBindGroup);

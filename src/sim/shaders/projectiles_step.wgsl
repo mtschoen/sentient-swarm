@@ -13,11 +13,15 @@
 // A pulseOrb detonates after moving when its lifetime ran out, it left the arena (clamped back
 // to the edge), or the total density at its coarse cell exceeds extra: it becomes a pulseRing
 // at that point with zero velocity, radius RING_START_RADIUS, lifetime RING_LIFETIME and
-// extra RING_GROWTH_SPEED.
+// extra RING_GROWTH_SPEED. Each detonation adds 1 to stats ringsThisFrame; the one that took
+// count 0 also stores its position as f32 bits in lastRingX and lastRingY, so the pair is always
+// one ring's (the CPU turns it into one warp grid impulse per frame).
+// Storage buffers: projectiles, field, stats = 3.
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read_write> projectiles: array<Projectile>;
 @group(0) @binding(2) var<storage, read> field: array<vec4f>;
+@group(0) @binding(3) var<storage, read_write> stats: array<atomic<u32>, STATS_WORD_COUNT>;
 
 // field holds COARSE_CHANNELS floats per cell as vec4 pairs: channels 0..3, then 4..7.
 const VECTORS_PER_CELL: u32 = COARSE_CHANNELS / 4u;
@@ -110,6 +114,10 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
       || totalDensity(coarseCellCoordinate(projectile.position)) > projectile.extra;
     if (detonates) {
       projectile = detonate(projectile);
+      if (atomicAdd(&stats[STAT_RINGS_THIS_FRAME], 1u) == 0u) {
+        atomicStore(&stats[STAT_LAST_RING_X], bitcast<u32>(projectile.position.x));
+        atomicStore(&stats[STAT_LAST_RING_Y], bitcast<u32>(projectile.position.y));
+      }
     }
   }
   projectiles[slot] = projectile;

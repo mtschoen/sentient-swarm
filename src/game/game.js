@@ -5,19 +5,21 @@
 //   1. input.update and read input.state (a gesture starts the run); a rising bomb edge that run.useBomb accepts calls
 //      simulation.requestKillAll before this step, so the bomb kills before projectiles and contact.
 //   2. player.update (Playing only), with mouse aim derived as pointerWorld minus the player.
-//   3. pickups.update, then collect at the player into weapons.collect (before charge expiry).
+//   3. pickups.update, then collect at the player into weapons.collect (before charge expiry); a
+//      collection queues a PICKUP_IMPULSE_STRENGTH impulse at the ship.
 //   4. weapons.update; spawns go to projectiles.queueSpawn and the beam to setBeam (null on the
 //      expiry frame even when the weapon still returned one).
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
 //   6. spawn pressure (paused while Dying and Respawning), then the simulation step is submitted.
 //   7. every ready stats frame (readAllStats, oldest first): kills (killsSinceLastRead) score once
-//      per stats frame and only while Playing;
-//      awards add lives and bombs; every new playerHitSequence is acknowledged (accepted or not)
-//      and offered to run.playerHit, which on success drops the weapon and resets the multiplier.
+//      per stats frame and only while Playing; awards add lives and bombs; a frame with pulse ring
+//      detonations queues one RING_IMPULSE_STRENGTH impulse at its reported ring position; every
+//      new playerHitSequence is acknowledged (accepted or not) and offered to run.playerHit, which
+//      on success drops the weapon and resets the multiplier.
 //   8. run.update drains this step's actions: clearArena requests the kill-all for the next step
-//      and clears projectiles, shockwave queues an impulse for render, respawn recenters the
-//      player, sets the respawn sequence to the next step and resets spawn pressure; gameOver
-//      leaves the run frozen until restart.
+//      and clears projectiles, shockwave (bomb and death) queues an impulse that also boosts
+//      bloom, respawn recenters the player, sets the respawn sequence to the next step and
+//      resets spawn pressure; gameOver leaves the run frozen until restart.
 import { Projectiles } from './projectiles.js';
 import { PlayerShip } from './player.js';
 import { WeaponState } from './weapons.js';
@@ -30,6 +32,9 @@ import { ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '../sim/layout.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 const NO_AIM = Object.freeze({ x: 0, y: 0 });
+// Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
+const RING_IMPULSE_STRENGTH = 0.3;
+const PICKUP_IMPULSE_STRENGTH = 0.15;
 
 function isGesture(inputState) {
   const { move, aim } = inputState;
@@ -155,7 +160,10 @@ export class Game {
     });
     if (playing) {
       const collected = this.pickups.collect(x, y);
-      if (collected !== null) this.weapons.collect(collected);
+      if (collected !== null) {
+        this.weapons.collect(collected);
+        this.queueImpulse(x, y, PICKUP_IMPULSE_STRENGTH, false);
+      }
     }
 
     const aim = this.player.aim;
@@ -213,6 +221,7 @@ export class Game {
     this.latestStats = stats;
     if (stats.frameSequence > this.lastScoredFrameSequence) {
       this.lastScoredFrameSequence = stats.frameSequence;
+      if (stats.ringsThisFrame > 0) this.queueImpulse(stats.lastRingX, stats.lastRingY, RING_IMPULSE_STRENGTH, false);
       if (this.run.phase === RunPhase.Playing) {
         this.score.recordKills(stats.killsSinceLastRead);
         const earned = this.awards.update(this.score.score);
@@ -239,7 +248,7 @@ export class Game {
         this.projectiles.clear();
         break;
       case 'shockwave':
-        this.pendingImpulses.push({ x: action.x, y: action.y, strength: action.strength, time: this.clock() });
+        this.queueImpulse(action.x, action.y, action.strength, true);
         break;
       case 'respawn':
         this.player.respawn();
@@ -253,7 +262,12 @@ export class Game {
     }
   }
 
-  // Impulses queued since the last call (bomb and death shockwaves), for the renderer.
+  // Stamped with the game clock; the renderer ages them against the same clock.
+  queueImpulse(x, y, strength, bloomBoost) {
+    this.pendingImpulses.push({ x, y, strength, time: this.clock(), bloomBoost });
+  }
+
+  // Impulses queued since the last call (bomb, death, ring and pickup shockwaves), for the renderer.
   takeImpulses() {
     const impulses = this.pendingImpulses;
     this.pendingImpulses = [];

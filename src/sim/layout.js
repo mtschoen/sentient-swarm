@@ -35,6 +35,11 @@ export const STATS_INDICES = {
   firstSpecies: 1,
   frameSequence: 7,
   killsUnscored: 8,
+  // Pulse rings detonated this step (projectiles_step.wgsl), and the position (f32 bits) of the
+  // ring that took count 0, so the pair always comes from one ring.
+  ringsThisFrame: 9,
+  lastRingX: 10,
+  lastRingY: 11,
   playerHitSequence: 16,
   hitLatch: 17,
   kills: 18,
@@ -56,6 +61,9 @@ export const SHADER_CONSTANTS = {
   STAT_KILLS: STATS_INDICES.kills,
   STAT_FRAME_SEQUENCE: STATS_INDICES.frameSequence,
   STAT_KILLS_UNSCORED: STATS_INDICES.killsUnscored,
+  STAT_RINGS_THIS_FRAME: STATS_INDICES.ringsThisFrame,
+  STAT_LAST_RING_X: STATS_INDICES.lastRingX,
+  STAT_LAST_RING_Y: STATS_INDICES.lastRingY,
   STAT_PLAYER_HIT_SEQUENCE: STATS_INDICES.playerHitSequence,
   STAT_HIT_LATCH: STATS_INDICES.hitLatch,
 };

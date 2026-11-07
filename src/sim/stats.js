@@ -13,9 +13,11 @@ export const STATS_BYTES = STATS_WORD_COUNT * BYTES_PER_WORD;
 export const STATS_PERSISTENT_OFFSET_BYTES = STATS_PERSISTENT_WORD * BYTES_PER_WORD;
 
 // Decodes a read-back stats buffer; killsTotal is the cumulative scored kills counter.
-// hitLatch is 1 while a hit waits for its acknowledgement.
+// hitLatch is 1 while a hit waits for its acknowledgement. lastRingX and lastRingY are f32 bits,
+// meaningful only when ringsThisFrame is nonzero.
 export function decodeStats(bytes) {
   const values = new Uint32Array(bytes, 0, STATS_WORD_COUNT);
+  const floats = new Float32Array(bytes, 0, STATS_WORD_COUNT);
   return {
     aliveTotal: values[STATS_INDICES.aliveTotal],
     alivePerSpecies: values.slice(STATS_INDICES.firstSpecies, STATS_INDICES.firstSpecies + SPECIES_COUNT),
@@ -24,6 +26,9 @@ export function decodeStats(bytes) {
     killsUnscored: values[STATS_INDICES.killsUnscored],
     playerHitSequence: values[STATS_INDICES.playerHitSequence],
     hitLatch: values[STATS_INDICES.hitLatch],
+    ringsThisFrame: values[STATS_INDICES.ringsThisFrame],
+    lastRingX: floats[STATS_INDICES.lastRingX],
+    lastRingY: floats[STATS_INDICES.lastRingY],
   };
 }
 

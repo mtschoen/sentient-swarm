@@ -1,9 +1,10 @@
 // Stats, one thread per agent slot. Layout of stats (u32, STATS_INDICES in layout.js):
-//   0 aliveTotal, 1..5 alive per species, 6 spare, 7 frameSequence, 8 killsUnscored, then the
-//   persistent tail from 16 (playerHitSequence, hitLatch, kills).
+//   0 aliveTotal, 1..5 alive per species, 6 spare, 7 frameSequence, 8 killsUnscored,
+//   9 ringsThisFrame, 10 lastRingX, 11 lastRingY (f32 bits), then the persistent tail from 16
+//   (playerHitSequence, hitLatch, kills).
 // Each workgroup counts its alive agents in workgroup atomics, then thread 0 flushes every
 // nonzero counter with one global atomicAdd (the counters are words 0..SPECIES_COUNT). Global
-// thread 0 stores params.frameSequence. The kill words and the tail are never touched here: the
+// thread 0 stores params.frameSequence. The kill and ring words and the tail are never touched here: the
 // step clears the per-frame prefix at its start and kill passes add to killsUnscored there and to
 // kills, which sits in the tail and is cumulative. Threads past capacity read no agent but still reach the
 // barrier, which must stay in uniform control flow (FXC enforces this).

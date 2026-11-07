@@ -5,16 +5,20 @@
 //
 // Frame contract, its own submission after the simulation's:
 //   const encoder = device.createCommandEncoder();
-//   renderer.render(encoder, { alpha, time, deltaSeconds }); // deltaSeconds: since the last render
+//   renderer.render(encoder, { alpha, time, deltaSeconds, impulses }); // deltaSeconds: since the last render
 //   device.queue.submit([encoder.finish()]);
 //   renderer.afterSubmit(); // maps a pending captureNextFrame readback
-// settings are read every frame, so they can be changed live.
+// settings are read every frame, so they can be changed live. impulses (optional) are new
+// shockwaves { x, y, strength, time, bloomBoost } stamped with the same clock as time; they join
+// the renderer's ImpulseSet for the warp grid, and a bloomBoost one doubles bloom strength,
+// decaying back over BLOOM_BOOST_SECONDS.
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { SHADER_CONSTANTS } from '../sim/layout.js';
 import { BloomPass } from './bloom.js';
 import { FrameCapture } from './capture.js';
 import { CompositePass } from './composite.js';
 import { GlyphPass } from './glyphs.js';
+import { ImpulseSet, bloomBoostFactor } from './impulses.js';
 import { ParticleRenderer } from './particles.js';
 import { PickupRenderer } from './pickups.js';
 import { ProjectileRenderer } from './projectiles.js';
@@ -73,6 +77,8 @@ export class Renderer {
     this.bloom = new BloomPass(gpu, { fullscreenHeader });
     this.composite = new CompositePass(gpu, { fullscreenHeader });
     this.frameCapture = new FrameCapture(this.device, gpu.format);
+    this.impulses = new ImpulseSet();
+    this.bloomBoostTime = -Infinity;
     this.sceneTextures = [];
     this.gridTexture = null;
     this.currentIndex = 0;
@@ -107,7 +113,11 @@ export class Renderer {
   // Returns false, encoding nothing, while a just-installed simulation has not stepped yet.
   // scene (optional, from the game): { projectiles: Projectiles, pickups: [{ x, y, type, fade }],
   // ship: the ShipRenderer.encode state, or null to hide the ship }.
-  render(encoder, { alpha, time, deltaSeconds = 1 / 60, scene = null }) {
+  render(encoder, { alpha, time, deltaSeconds = 1 / 60, impulses = [], scene = null }) {
+    for (const impulse of impulses) {
+      this.impulses.add(impulse, impulse.time);
+      if (impulse.bloomBoost) this.bloomBoostTime = Math.max(this.bloomBoostTime, impulse.time);
+    }
     if (this.simulation.frameSequence < this.firstDrawableSequence) return false;
     const previousIndex = this.currentIndex;
     const currentIndex = 1 - previousIndex;
@@ -119,6 +129,7 @@ export class Renderer {
     this.warpGrid.encode(gridPass, simulation.fieldBuffer, time, {
       densityWeight: settings.warpDensityWeight,
       threatWeight: settings.warpThreatWeight,
+      impulses: this.impulses.toUniformArray(time),
     });
     gridPass.end();
     const scenePass = encoder.beginRenderPass({
@@ -137,7 +148,7 @@ export class Renderer {
     const swapchainTexture = this.gpu.context.getCurrentTexture();
     this.composite.encode(encoder, swapchainTexture.createView(), currentIndex, {
       arenaRect: viewport.arenaRectDevicePixels,
-      bloomStrength: settings.bloomStrength,
+      bloomStrength: settings.bloomStrength * bloomBoostFactor(time - this.bloomBoostTime),
     });
     this.frameCapture.encode(encoder, swapchainTexture, { arenaRect: { ...viewport.arenaRectDevicePixels } });
     this.currentIndex = currentIndex;

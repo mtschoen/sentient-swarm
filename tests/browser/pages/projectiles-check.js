@@ -12,7 +12,8 @@
 // (d) a pulseOrb fired into the block converts to a pulseRing (its slot reads kind 4); 0.1 s later
 //     kills exist beyond 0.3 of the detonation point and every agent beyond the ring radius plus
 //     0.1 is alive while no agent within the ring radius is (the band sweeps without gaps); the
-//     ring slot is dead after its lifetime;
+//     ring slot is dead after its lifetime; stats ringsThisFrame is 1 in the detonation step only,
+//     with lastRingX and lastRingY at the ring;
 // (e) a sidewinder flying along the block's lower edge turns toward the block (positive y
 //     velocity) and keeps its speed.
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
@@ -93,7 +94,7 @@ class Harness {
     return positions;
   }
 
-  // One step, submitted and awaited, then its stats; returns that frame's kills.
+  // One step, submitted and awaited, then its stats (kept as lastStats); returns that frame's kills.
   async step() {
     const encoder = this.device.createCommandEncoder({ label: 'projectiles-check-frame' });
     this.simulation.step(encoder, STEP_SECONDS, new Uint32Array(SPECIES_COUNT));
@@ -107,6 +108,7 @@ class Harness {
     }
     const stats = this.collected.get(sequence);
     if (stats === undefined) throw new Error(`no stats for frame ${sequence}`);
+    this.lastStats = stats;
     return stats.killsSinceLastRead;
   }
 
@@ -223,14 +225,21 @@ async function runPulseCase(harness) {
   const slot = harness.projectiles.queueSpawn({ x: 5, y: CENTER[1], velocityX: 3, velocityY: 0, radius: 0.05, lifetime: 2, kind: KIND.pulseOrb, extra: 20 });
   let kills = 0;
   let projectile = null;
+  let ringsBefore = 0;
   for (let frame = 0; frame < ORB_FRAME_LIMIT; frame += 1) {
     kills += await harness.step();
     projectile = await harness.projectileSlot(slot);
     if (projectile.kind === KIND.pulseRing) break;
+    ringsBefore += harness.lastStats.ringsThisFrame;
   }
   if (projectile.kind !== KIND.pulseRing) return verdictLine([[false, `(d) orb slot ${slot} still kind ${projectile.kind} after ${ORB_FRAME_LIMIT} frames (need 4)`]]);
   const detonation = projectile.position;
-  kills += await harness.steps(RING_CHECK_FRAMES);
+  const ringStats = harness.lastStats;
+  const ringAt = [ringStats.lastRingX, ringStats.lastRingY];
+  const ringPositionError = Math.hypot(ringAt[0] - detonation[0], ringAt[1] - detonation[1]);
+  kills += await harness.step();
+  const ringsAfter = harness.lastStats.ringsThisFrame;
+  kills += await harness.steps(RING_CHECK_FRAMES - 1);
   const ring = await harness.projectileSlot(slot);
   const alive = await harness.aliveFlags();
   const distances = positions.map((position) => Math.hypot(position[0] - detonation[0], position[1] - detonation[1]));
@@ -242,6 +251,8 @@ async function runPulseCase(harness) {
   const expired = await harness.projectileSlot(slot);
   return verdictLine([
     [true, `(d) orb converted to a ring at (${detonation[0].toFixed(2)}, ${detonation[1].toFixed(2)})`],
+    [ringsBefore === 0 && ringStats.ringsThisFrame === 1 && ringsAfter === 0, `(d) stats ringsThisFrame ${ringsBefore} before, ${ringStats.ringsThisFrame} at, ${ringsAfter} after the detonation step (need 0, 1, 0)`],
+    [ringPositionError < 1e-5, `(d) stats last ring position (${ringAt[0].toFixed(2)}, ${ringAt[1].toFixed(2)}) matches the ring (need within 1e-5)`],
     [killedBeyond > 0, `(d) kills beyond 0.3 of the detonation ${killedBeyond} (need > 0)`],
     [deadOutside === 0, `(d) dead agents beyond ring radius ${ring.radius.toFixed(3)} plus 0.1: ${deadOutside} (need 0)`],
     [aliveInside === 0, `(d) alive agents within the ring radius ${aliveInside} (need 0)`],
