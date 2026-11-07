@@ -12,11 +12,11 @@ export function createTouchSource(canvas) {
   }
 
   function stickValue(entry, position) {
-    const dx = (position.x - entry.originX) / STICK_RADIUS;
-    const dy = (position.y - entry.originY) / STICK_RADIUS;
-    const length = Math.hypot(dx, dy);
+    const horizontalDisplacement = (position.x - entry.originX) / STICK_RADIUS;
+    const verticalDisplacement = (position.y - entry.originY) / STICK_RADIUS;
+    const length = Math.hypot(horizontalDisplacement, verticalDisplacement);
     const scale = length > 1 ? 1 / length : 1;
-    return { x: dx * scale, y: dy * scale };
+    return { x: horizontalDisplacement * scale, y: verticalDisplacement * scale };
   }
 
   function roleInUse(role) {

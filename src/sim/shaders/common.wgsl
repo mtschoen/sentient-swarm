@@ -37,7 +37,7 @@ struct Agent {
 //  24 gridRows           u32
 //  28 cellSize           f32
 //  32 capacity           u32
-//  36 aliveTarget        u32
+//  36 aliveTarget        u32 (reserved: written by no caller and read by no shader)
 //  40 debugKillPosition  vec2f
 //  48 spawnPerSpecies0   vec4u (species 0 to 3)
 //  64 spawnPerSpecies1   vec4u (species 4 in .x, rest 0)

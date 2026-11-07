@@ -47,14 +47,17 @@ export class FrameCapture {
     this.copied = null;
   }
 
-  // Resolves with { width, height, format: 'rgba8unorm', sourceFormat, pixels } from the next frame
-  // that encodes a copy; sourceFormat is the swapchain format (bgra8unorm or rgba8unorm).
+  // Resolves with { width, height, format: 'rgba8unorm', sourceFormat, pixels, details } from the
+  // next frame that encodes a copy; sourceFormat is the swapchain format (bgra8unorm or
+  // rgba8unorm) and details is what that frame passed to encode (for example its arena rect).
   request() {
     return new Promise((resolve, reject) => this.waiting.push({ resolve, reject }));
   }
 
   // Encodes the copy only when a request is waiting and no earlier copy is still in flight.
-  encode(encoder, texture) {
+  // details is a snapshot taken with the copy, so a resize while the map is pending cannot pair
+  // these pixels with a newer frame's layout.
+  encode(encoder, texture, details = {}) {
     if (this.waiting.length === 0 || this.copied !== null) return;
     const { width, height } = texture;
     const bytesPerRow = paddedBytesPerRow(width);
@@ -64,23 +67,34 @@ export class FrameCapture {
       usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
     });
     encoder.copyTextureToBuffer({ texture }, { buffer, bytesPerRow, rowsPerImage: height }, [width, height]);
-    this.copied = { buffer, width, height, bytesPerRow, requests: this.waiting };
+    this.copied = { buffer, width, height, bytesPerRow, details, requests: this.waiting };
     this.waiting = [];
   }
 
   // Call after the command buffer holding encode() is submitted; mapping resolves later.
   afterSubmit() {
     if (this.copied === null) return;
-    const { buffer, width, height, bytesPerRow, requests } = this.copied;
+    const { buffer, width, height, bytesPerRow, details, requests } = this.copied;
     this.copied = null;
     buffer.mapAsync(GPUMapMode.READ).then(() => {
       const bytes = new Uint8Array(buffer.getMappedRange());
       const pixels = unpackRows(bytes, { width, height, bytesPerRow, format: this.format });
       buffer.destroy();
-      requests.forEach(({ resolve }) => resolve({ width, height, format: 'rgba8unorm', sourceFormat: this.format, pixels }));
+      requests.forEach(({ resolve }) => resolve({ width, height, format: 'rgba8unorm', sourceFormat: this.format, pixels, details }));
     }, (error) => {
       buffer.destroy();
       requests.forEach(({ reject }) => reject(error));
     });
+  }
+
+  // Rejects every request not yet mapped and destroys a copy encoded but not yet submitted. A copy
+  // already mapping settles on its own (destroying its buffer elsewhere rejects the map).
+  destroy() {
+    const error = new Error('FrameCapture was destroyed before the frame was read back');
+    const pending = [...this.waiting, ...(this.copied?.requests ?? [])];
+    this.copied?.buffer.destroy();
+    this.copied = null;
+    this.waiting = [];
+    pending.forEach(({ reject }) => reject(error));
   }
 }

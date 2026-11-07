@@ -15,5 +15,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # The assembly tests skip themselves when rsync is missing, which would turn this job green
+      # without running a case; fail instead.
+      - name: Require rsync
+        run: command -v rsync
       - name: Test production and preview assembly with real rsync
         run: python3 tests/pages_assembly_test.py

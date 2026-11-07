@@ -39,9 +39,17 @@ function waitAnimationFrames(count) {
 
 // With inspectZoom or renderer setting overrides (for example { trailDecay: 0 }), they hold for
 // CAPTURE_SETTLE_FRAMES frames plus the captured one, then the previous values return. regions
-// (device-pixel rects) add their means as regionLuminances, in order.
+// (device-pixel rects) add their means as regionLuminances, in order. Calls run one at a time in
+// call order, so overlapping calls cannot save and restore each other's overrides. The arena rect
+// is the one the captured frame was drawn with.
 export function installCaptureHook({ viewport, renderer }) {
-  window.__murmuration.capture = async ({ inspectZoom, settings, regions } = {}) => {
+  let queue = Promise.resolve();
+  window.__murmuration.capture = (options) => {
+    const result = queue.then(() => captureOnce(options));
+    queue = result.catch(() => {});
+    return result;
+  };
+  const captureOnce = async ({ inspectZoom, settings, regions } = {}) => {
     const previousZoom = viewport.inspectZoom;
     const previousSettings = { ...renderer.settings };
     let frame;
@@ -56,6 +64,6 @@ export function installCaptureHook({ viewport, renderer }) {
       viewport.inspectZoom = previousZoom;
       Object.assign(renderer.settings, previousSettings);
     }
-    return describeCapture(frame, viewport.arenaRectDevicePixels, regions);
+    return describeCapture(frame, frame.details.arenaRect, regions);
   };
 }

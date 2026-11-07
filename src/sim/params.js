@@ -4,6 +4,8 @@ import { SPECIES_COUNT } from './layout.js';
 export const SIM_PARAMS_BYTES = 96;
 
 const FLOAT_FIELDS = { dt: 0, time: 4, neighborRadius: 16, cellSize: 28, debugKillRadius: 80 };
+// aliveTarget is reserved: Simulation.step never writes it and no shader reads it (SpawnPressure
+// keeps the target on the CPU).
 const UNSIGNED_FIELDS = { gridColumns: 20, gridRows: 24, capacity: 32, aliveTarget: 36, frameSequence: 84 };
 // 1 steers cohesion up the own-species density gradient, 0 up the total-density gradient.
 const SAME_SPECIES_COHESION_OFFSET = 88;

@@ -123,7 +123,7 @@ export class Renderer {
       arenaRect: viewport.arenaRectDevicePixels,
       bloomStrength: settings.bloomStrength,
     });
-    this.frameCapture.encode(encoder, swapchainTexture);
+    this.frameCapture.encode(encoder, swapchainTexture, { arenaRect: { ...viewport.arenaRectDevicePixels } });
     this.currentIndex = currentIndex;
     return true;
   }
@@ -145,7 +145,8 @@ export class Renderer {
     this.frameCapture.afterSubmit();
   }
 
-  // Resolves with { width, height, format, sourceFormat, pixels } (RGBA bytes) of the next frame.
+  // Resolves with { width, height, format, sourceFormat, pixels, details: { arenaRect } } (RGBA
+  // bytes) of the next frame.
   captureNextFrame() {
     return this.frameCapture.request();
   }
@@ -159,6 +160,8 @@ export class Renderer {
 
   destroy() {
     this.destroySceneTextures();
+    [this.glyphs, this.particles, this.warpGrid].forEach((pass) => pass.bindGroupCache.clear());
     [this.warpGrid, this.trails, this.glyphs, this.particles, this.bloom, this.composite].forEach((pass) => pass.destroy());
+    this.frameCapture.destroy();
   }
 }

@@ -18,8 +18,8 @@ function isWebGpuError(text) {
 }
 
 export async function launchWebGpuBrowser({ measuring = false } = {}) {
-  const args = measuring ? [...WEBGPU_FLAGS, ...UNCAPPED_FRAME_FLAGS] : WEBGPU_FLAGS;
-  const browser = await chromium.launch({ headless: true, args });
+  const argumentsList = measuring ? [...WEBGPU_FLAGS, ...UNCAPPED_FRAME_FLAGS] : WEBGPU_FLAGS;
+  const browser = await chromium.launch({ headless: true, args: argumentsList });
   const page = await browser.newPage();
   page.consoleErrors = [];
   page.on('console', (message) => {

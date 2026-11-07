@@ -20,6 +20,7 @@ import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, AREN
 import { normalizeShares } from '/src/sim/species.js';
 import { SpawnPressure } from '/src/sim/spawner.js';
 import { Simulation } from '/src/sim/simulation.js';
+import { PARTICLE_STRIDE_BYTES } from '/src/sim/particles.js';
 
 const INITIAL_CAPACITY = 65536;
 const GROWN_CAPACITY = 131072;
@@ -35,7 +36,8 @@ const WALL_MARGIN = 0.5;
 const KILL_RADIUS = 2;
 const KILL_FRAMES_TO_WAIT = 3;
 const PARTICLES_PER_KILL = 6;
-const PARTICLE_STRIDE_BYTES = 32;
+// Particle struct (common.wgsl): position, velocity, color, age at 20, lifetime at 24.
+const PARTICLE_AGE_OFFSET = 20;
 const PARTICLE_LIFETIME_OFFSET = 24;
 const PARTICLE_SPREAD_LIMIT = 2.5;
 const THREAT_FIXED_POINT_SCALE = 256;
@@ -131,7 +133,7 @@ function liveParticles(particleBytes, center) {
   let count = 0;
   let farthest = 0;
   for (let base = 0; base < particleBytes.byteLength; base += PARTICLE_STRIDE_BYTES) {
-    const age = view.getFloat32(base + PARTICLE_LIFETIME_OFFSET - 4, true);
+    const age = view.getFloat32(base + PARTICLE_AGE_OFFSET, true);
     const lifetime = view.getFloat32(base + PARTICLE_LIFETIME_OFFSET, true);
     if (!(lifetime > 0 && age < lifetime)) continue;
     count += 1;

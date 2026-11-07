@@ -2,7 +2,8 @@
 // resulting motion: (a) Chasers close on the player and ping-pong buffers reuse bind groups,
 // (b) a single overfull cell stays valid and its field is exact, (c) a Lattice square holds the
 // spacing its target density implies, (d) pressure keeps a large Chaser swarm from collapsing
-// into a ball while pressure 0 lets it collapse.
+// into a ball while pressure 0 lets it collapse, (e) the neighbor cap bounds the fine pass: one
+// dense-cell step matches a CPU port of the capped sampling and differs from the uncapped one.
 import { createGpuContext } from '/src/gpu/device.js';
 import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
@@ -12,6 +13,7 @@ import { SPECIES_NAMES, defaultMatrix, defaultSpecies, packSpeciesTable } from '
 import { SpatialGrid } from '/src/sim/grid.js';
 import { CoarseField } from '/src/sim/field.js';
 import { Steering } from '/src/sim/steer.js';
+import { separationAverage } from './steer-reference.js';
 
 const NEIGHBOR_RADIUS = 0.1;
 const STEP_SECONDS = 1 / 60;
@@ -150,9 +152,9 @@ class Harness {
     }));
   }
 
-  seed(agentBytes, speciesRows) {
+  seed(agentBytes, speciesRows, matrix = defaultMatrix()) {
     this.device.queue.writeBuffer(this.agentsIn, 0, agentBytes);
-    this.device.queue.writeBuffer(this.speciesBuffer, 0, packSpeciesTable(speciesRows, defaultMatrix()));
+    this.device.queue.writeBuffer(this.speciesBuffer, 0, packSpeciesTable(speciesRows, matrix));
   }
 
   encodeStep(encoder) {
@@ -271,8 +273,9 @@ async function pingPongFailure(harness) {
   return validityFailure(await harness.readAgents());
 }
 
-// (b) All 20000 agents in one grid cell for 10 steps. The neighbor cap bounds the work; the
-// per-step completion time is printed for information only and never asserted.
+// (b) All 20000 agents in one grid cell for 10 steps: the field is exact and the agents stay
+// valid. The per-step completion time is printed for information only and never asserted; check
+// (e) is the deterministic gate on the neighbor cap.
 async function checkDenseCell(gpu, common) {
   const count = 20000;
   const random = randomSource(2);
@@ -305,7 +308,7 @@ async function checkDenseCell(gpu, common) {
 
 // (c) A Lattice square seeded off target, expanded to SEED_SPACING_FACTOR times the
 // density-implied spacing (targetDensity agents per coarse cell), is pulled toward it. The sheet
-// breathes rather than settling (ratios between about 0.8 and 1.5 over 900 steps), so the check
+// breathes rather than settling (ratios between about 0.7 and 1.5 over 900 steps), so the check
 // samples the mean nearest-neighbor ratio every LATTICE_SAMPLE_INTERVAL steps from step
 // LATTICE_FIRST_SAMPLE to LATTICE_STEPS and asserts (1) the mean of the samples lies within 25
 // percent of the implied spacing and (2) the first sample differs from the seed ratio by at least
@@ -374,6 +377,71 @@ async function checkPressure(gpu, common) {
   };
 }
 
+// (e) 20000 agents in one grid cell, velocity 0, a species row with only separation (and a turn
+// budget large enough that no clamp applies), zero matrix, one step. The new velocity is then the
+// separation average times maximumSpeed * STEERING_RESPONSE * dt. For each probe agent it must
+// match the CPU port of the capped, strided sampling (steer-reference.js) within
+// CAP_TOLERANCE, and for most probes differ from the uncapped average by more than
+// CAP_MINIMUM_DIFFERENCE, so a fine pass that sampled every neighbor would fail.
+const CAP_PROBES = 16;
+const CAP_TOLERANCE = 1e-5;
+const CAP_MINIMUM_DIFFERENCE = 1e-3;
+// steer.wgsl's STEERING_RESPONSE and the shader's MAXIMUM_NEIGHBOR_SAMPLES.
+const STEERING_RESPONSE = 4;
+const MAXIMUM_NEIGHBOR_SAMPLES = SHADER_CONSTANTS.MAXIMUM_NEIGHBOR_SAMPLES;
+
+async function checkNeighborCap(gpu, common) {
+  const count = 20000;
+  const random = randomSource(5);
+  const harness = new Harness(gpu, common, count);
+  await harness.initialize();
+  const cellOrigin = [80 * NEIGHBOR_RADIUS, 45 * NEIGHBOR_RADIUS];
+  const positions = Array.from({ length: count }, () => [
+    cellOrigin[0] + (0.05 + 0.9 * random()) * NEIGHBOR_RADIUS,
+    cellOrigin[1] + (0.05 + 0.9 * random()) * NEIGHBOR_RADIUS,
+  ]);
+  const agentBytes = packAgents(positions, CHASER, random);
+  const separationOnly = speciesWith(CHASER, { seek: 0, cohesion: 0, alignment: 0, separation: 1, maximumSpeed: 1, maximumTurn: 100, flee: 0, pressure: 0 });
+  harness.seed(agentBytes, separationOnly, new Float32Array(SPECIES_NAMES.length * SPECIES_NAMES.length));
+  await harness.run(1);
+  const { cellCounts, cellOffsets, sortedIndices } = harness.grid.buffers;
+  const [output, counts, offsets, sorted] = await Promise.all([
+    harness.readBuffer(harness.agentsIn, count * AGENT_STRIDE_BYTES),
+    harness.readBuffer(cellCounts, cellCounts.size),
+    harness.readBuffer(cellOffsets, cellOffsets.size),
+    harness.readBuffer(sortedIndices, sortedIndices.size),
+  ]);
+  const grid = {
+    columns: harness.dimensions.columns,
+    rows: harness.dimensions.rows,
+    cellSize: harness.dimensions.cellSize,
+    cellCounts: new Uint32Array(counts),
+    cellOffsets: new Uint32Array(offsets),
+    sortedIndices: new Uint32Array(sorted),
+  };
+  const seeded = new DataView(agentBytes);
+  const positionOf = (index) => [
+    seeded.getFloat32(index * AGENT_STRIDE_BYTES + AGENT_OFFSETS.position, true),
+    seeded.getFloat32(index * AGENT_STRIDE_BYTES + AGENT_OFFSETS.position + 4, true),
+  ];
+  const outputView = new DataView(output);
+  const scale = STEERING_RESPONSE * Math.fround(STEP_SECONDS);
+  let worstError = 0;
+  let differing = 0;
+  for (let index = 0; index < CAP_PROBES; index += 1) {
+    const velocity = [0, 4].map((offset) => outputView.getFloat32(index * AGENT_STRIDE_BYTES + AGENT_OFFSETS.velocity + offset, true));
+    const capped = separationAverage({ index, positionOf, grid, radius: NEIGHBOR_RADIUS, maximumSamples: MAXIMUM_NEIGHBOR_SAMPLES });
+    const uncapped = separationAverage({ index, positionOf, grid, radius: NEIGHBOR_RADIUS, maximumSamples: Infinity });
+    worstError = Math.max(worstError, Math.hypot(velocity[0] - capped[0] * scale, velocity[1] - capped[1] * scale));
+    if (Math.hypot(capped[0] - uncapped[0], capped[1] - uncapped[1]) * scale > CAP_MINIMUM_DIFFERENCE) differing += 1;
+  }
+  const pass = worstError <= CAP_TOLERANCE && differing >= CAP_PROBES / 2;
+  return {
+    pass,
+    detail: `neighbor cap: ${CAP_PROBES} dense-cell probes match the capped CPU reference within ${worstError.toExponential(2)} (need <= ${CAP_TOLERANCE}), ${differing} differ from the uncapped average by > ${CAP_MINIMUM_DIFFERENCE} (need >= ${CAP_PROBES / 2})`,
+  };
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   let lostReason = null;
@@ -381,7 +449,7 @@ async function runCheck() {
   gpu.device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
   const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
   const results = [];
-  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure]) {
+  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap]) {
     results.push(await check(gpu, common));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${results.map((result) => result.detail).join('; ')}` };
   }

@@ -1,5 +1,7 @@
 // Fixed-step accumulator loop: update runs in whole fixed steps, render gets the leftover fraction
-// and the seconds since the previous frame.
+// and the seconds since the previous frame. Every start() and stop() bumps a generation number
+// that each scheduled callback carries, so a callback scheduled before stop() never runs a frame
+// and start(); stop(); start() leaves exactly one scheduling chain.
 export class FrameLoop {
   constructor({
     update,
@@ -19,12 +21,13 @@ export class FrameLoop {
     this.running = false;
     this.accumulator = 0;
     this.previousTime = 0;
-    this.tick = this.tick.bind(this);
+    this.generation = 0;
   }
 
   start() {
     if (this.running) return;
     this.running = true;
+    this.generation += 1;
     this.previousTime = this.now();
     this.accumulator = 0;
     this.schedule();
@@ -33,15 +36,17 @@ export class FrameLoop {
   // Call through a local so the scheduler never receives the loop as its receiver (browsers throw on that).
   schedule() {
     const requestFrame = this.requestFrame;
-    requestFrame(this.tick);
+    const generation = this.generation;
+    requestFrame(() => this.tick(generation));
   }
 
   stop() {
     this.running = false;
+    this.generation += 1;
   }
 
-  tick() {
-    if (!this.running) return;
+  tick(generation = this.generation) {
+    if (!this.running || generation !== this.generation) return;
     const current = this.now();
     const elapsedSeconds = Math.max(0, (current - this.previousTime) / 1000);
     this.previousTime = current;

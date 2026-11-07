@@ -86,7 +86,31 @@ test('an injected scheduler is not called with the loop as receiver', () => {
       receivers.push(this);
     },
   }).start();
+  assert.equal(receivers.length, 1);
   assert.ok(receivers[0] === undefined || receivers[0] === globalThis);
+});
+
+test('start, stop, start before the pending frame runs leaves exactly one scheduling chain', () => {
+  let time = 0;
+  const pending = [];
+  const renders = [];
+  const loop = new FrameLoop({
+    update() {},
+    render: () => renders.push(time),
+    now: () => time,
+    requestFrame: (callback) => pending.push(callback),
+  });
+  loop.start();
+  loop.stop();
+  loop.start();
+  assert.equal(pending.length, 2);
+  for (let frame = 0; frame < 3; frame += 1) {
+    time += 16;
+    const due = pending.splice(0);
+    due.forEach((callback) => callback(time));
+    assert.equal(pending.length, 1, `frame ${frame} scheduled ${pending.length} callbacks`);
+  }
+  assert.equal(renders.length, 3);
 });
 
 test('stop prevents further scheduling', () => {

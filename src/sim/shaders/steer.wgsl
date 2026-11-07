@@ -12,7 +12,9 @@
 //   sameSpeciesCohesion is 0), faded by clamp(1 - density / targetDensity)
 //   where density is the total at the agent's cell; the matrix row along the signed sum of the
 //   other species' gradients; flee down the threat gradient; pressure down the total-density
-//   gradient with weight pressure * (density - targetDensity) once density exceeds targetDensity.
+//   gradient with weight pressure * (density - targetDensity) once density exceeds targetDensity;
+//   like the other field terms its direction saturates (saturatedDirection), so float noise in a
+//   flat over-dense interior pushes weakly instead of at full strength in a random direction.
 //
 // Every term adds to a desired velocity: weight times a direction of length at most 1 times
 // maximumSpeed, except seek (weight times seekVelocity, which brakes near the player) and
@@ -42,6 +44,8 @@ const ARRIVAL_BRAKING: f32 = 0.7;
 const MINIMUM_LENGTH: f32 = 0.000001;
 
 // raw and blurred hold COARSE_CHANNELS floats per cell as vec4 pairs: channels 0..3, then 4..7.
+const VECTORS_PER_CELL: u32 = COARSE_CHANNELS / 4u;
+
 struct CoarseSample {
   low: vec4f,
   high: vec4f,
@@ -58,7 +62,7 @@ fn matrixWeight(species: u32, other: u32) -> f32 {
 fn coarseSample(coordinate: vec2i) -> CoarseSample {
   let clamped = clamp(coordinate, vec2i(0, 0), vec2i(i32(COARSE_COLUMNS) - 1, i32(COARSE_ROWS) - 1));
   let cell = u32(clamped.x) + u32(clamped.y) * COARSE_COLUMNS;
-  return CoarseSample(field[cell * 2u], field[cell * 2u + 1u]);
+  return CoarseSample(field[cell * VECTORS_PER_CELL], field[cell * VECTORS_PER_CELL + 1u]);
 }
 
 fn channelOf(sample: CoarseSample, channel: u32) -> f32 {
@@ -70,14 +74,6 @@ fn channelOf(sample: CoarseSample, channel: u32) -> f32 {
 
 fn totalDensity(sample: CoarseSample) -> f32 {
   return dot(sample.low, vec4f(1.0)) + sample.high.x;
-}
-
-fn safeNormalize(vector: vec2f) -> vec2f {
-  let vectorLength = length(vector);
-  if (vectorLength < MINIMUM_LENGTH) {
-    return vec2f(0.0, 0.0);
-  }
-  return vector / vectorLength;
 }
 
 // Full length at GRADIENT_SATURATION and above, proportionally shorter below it.
@@ -235,7 +231,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   if (density > targetDensity) {
     let totalGradient = vec2f(totalDensity(gradientX), totalDensity(gradientY));
-    desired = desired - safeNormalize(totalGradient) * speciesField(species, FIELD_PRESSURE) * (density - targetDensity) * maximumSpeed;
+    desired = desired - saturatedDirection(totalGradient) * speciesField(species, FIELD_PRESSURE) * (density - targetDensity) * maximumSpeed;
   }
 
   var steering = (desired - agent.velocity) * STEERING_RESPONSE;
