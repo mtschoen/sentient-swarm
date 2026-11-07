@@ -9,6 +9,8 @@ const WEBGPU_FLAGS = [
   '--ignore-gpu-blocklist',
   // Without this, requestDevice fails here: dxcompiler.dll cannot load (Windows Error 87).
   '--disable-dawn-features=use_dxc',
+  // The smoke's mouse-down unlocks the page's audio; keep browser checks silent.
+  '--mute-audio',
 ];
 const UNCAPPED_FRAME_FLAGS = ['--disable-gpu-vsync', '--disable-frame-rate-limit'];
 

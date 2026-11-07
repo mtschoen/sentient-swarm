@@ -12,6 +12,7 @@ import { installCaptureHook } from './render/capture-hook.js';
 import { createDebugPanel } from './ui/debugPanel.js';
 import { capacityFromSearch } from './ui/panelModel.js';
 import { ARENA_WIDTH, ARENA_HEIGHT } from './sim/layout.js';
+import { installAudio } from './audio/audio-hook.js';
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
 
@@ -47,6 +48,8 @@ async function boot() {
   renderer = await Renderer.create(gpu, { simulation, viewport });
   const spawnPressure = new SpawnPressure({ capacity: initialCapacity });
   const input = createInput(canvas, viewport);
+  const audio = installAudio();
+  window.__murmuration.audio = audio;
 
   const player = { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 };
   let lastStats = null;
@@ -80,6 +83,7 @@ async function boot() {
       lastStats = stats;
       window.__murmuration.stats = stats;
     }
+    audio.update({ fixedStep, freshStats: stats, capacity: simulation.capacity });
   };
 
   const render = (alpha, deltaSeconds) => {

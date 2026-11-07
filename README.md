@@ -14,6 +14,7 @@ A browser WebGPU page that simulates hundreds of thousands of flocking enemies o
 - Move the player point with WASD or the arrow keys, the left stick of a gamepad, or by dragging in the left half of the screen on touch.
 - Hold the left mouse button to kill agents at the pointer. On touch, hold the right half of the screen and drag to aim; on a gamepad, push the right stick. Both kill 1.5 world units from the player along the aim (at the player before the touch is dragged). Kills splash particles.
 - Hold the right mouse button for a 4x inspect zoom around the arena.
+- The first click, tap or key press starts the procedural techno (it speeds up, opens its filters and adds a lead as the arena fills and kills land). Press M to mute or resume the music.
 - Press the backquote key, or use the `debug` button in the top right corner, to open the demo controls panel. It is hidden by default and holds:
   - a capacity select (65536, 262144, 1048576, 4194304 agent slots; a change rebuilds the simulation and carries live agents over),
   - the same-species cohesion toggle (off steers cohesion up the total-density gradient instead of the own-species one),
@@ -32,6 +33,8 @@ Caveats:
 - Headless Chromium may never composite a WebGPU canvas, so `page.screenshot()` is not trusted. The page publishes `window.__murmuration.capture`, which copies the swapchain texture back through the GPU; the smoke reads it for its luminance checks.
 - The smoke writes `artifacts/smoke.png`, `artifacts/smoke-zoom.png` and `artifacts/smoke-kill.png`. `artifacts/` is not committed.
 - The smoke never opens the debug panel.
+- The smoke's kill check mouse-down is the first gesture, so it also checks that the audio unlocks and the sequencer schedules steps. Chromium runs with `--mute-audio`, so the smoke is silent.
+- `SMOKE_PORT` overrides the smoke server port (default 5174), for running smokes from parallel checkouts.
 
 ## Measured
 

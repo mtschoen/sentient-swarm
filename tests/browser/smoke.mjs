@@ -156,6 +156,24 @@ async function checkKillFlash(page) {
   return page.consoleErrors.length > 0 ? `smoke: console errors after the kill: ${page.consoleErrors.join(' | ')}` : null;
 }
 
+// Audio check. The kill check's mouse-down is the page's first gesture, so it must have created the
+// AudioContext and started the sequencer (the browser runs muted). Waits briefly for steps to be
+// scheduled, then requires no console errors. Returns a failure message, or null.
+async function checkAudioUnlocked(page) {
+  const readAudio = () => evaluateWithin(page, 'reading audio state', () => {
+    const { engine, music } = window.__murmuration.audio;
+    return { state: engine.context?.state ?? null, steps: music.sequencer.nextStepIndex, hint: document.getElementById('audio-hint')?.textContent };
+  });
+  let audio = await readAudio();
+  for (let attempt = 0; attempt < 20 && audio.steps < 8; attempt += 1) {
+    await page.waitForTimeout(100);
+    audio = await readAudio();
+  }
+  console.log(`smoke: audio context ${audio.state}, ${audio.steps} steps scheduled, hint "${audio.hint}"`);
+  if (audio.state === null || audio.steps < 8) return `smoke: expected the audio to unlock on the first mouse-down and schedule steps, got ${JSON.stringify(audio)}`;
+  return page.consoleErrors.length > 0 ? `smoke: console errors after the audio unlock: ${page.consoleErrors.join(' | ')}` : null;
+}
+
 // resources holds the server and browser so the deadline path can close them too.
 async function closeResources(resources) {
   const { browser, server } = resources;
@@ -235,6 +253,11 @@ async function run(resources) {
     const killFailure = await checkKillFlash(page);
     if (killFailure) {
       console.error(killFailure);
+      return EXIT_FAILURE;
+    }
+    const audioFailure = await checkAudioUnlocked(page);
+    if (audioFailure) {
+      console.error(audioFailure);
       return EXIT_FAILURE;
     }
     const capturedStats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
