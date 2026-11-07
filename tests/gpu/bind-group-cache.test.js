@@ -20,6 +20,18 @@ test('BindGroupCache creates once per buffer set and reuses alternating sets', (
   assert.equal(created.length, 2);
 });
 
+test('BindGroupCache.clear drops every entry, so the same buffers build new bind groups', () => {
+  const cache = new BindGroupCache((buffers) => ({ buffers }));
+  const buffer = { label: 'agents' };
+  const before = cache.get([buffer]);
+  cache.clear();
+  assert.equal(cache.entries.size, 0);
+  const after = cache.get([buffer]);
+  assert.notEqual(after, before);
+  assert.equal(cache.creationCount, 2);
+  assert.equal(cache.get([buffer]), after);
+});
+
 test('BindGroupCache tells apart distinct buffers that share a label', () => {
   const cache = new BindGroupCache((buffers) => ({ buffers }));
   cache.get([{ label: 'same' }]);

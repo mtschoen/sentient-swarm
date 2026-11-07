@@ -3,6 +3,7 @@ import { Simulation } from './sim/simulation.js';
 import { SpawnPressure } from './sim/spawner.js';
 import { FrameLoop } from './game/loop.js';
 import { applyControlsToSimulation, movePlayer } from './game/controls.js';
+import { CapacitySwap } from './game/capacity-swap.js';
 import { createInput } from './input/input.js';
 import { Viewport } from './render/viewport.js';
 import { Renderer } from './render/renderer.js';
@@ -44,15 +45,30 @@ async function boot() {
   const initialCapacity = capacityFromSearch(location.search);
   let simulation = await Simulation.create(gpu, { capacity: initialCapacity });
   renderer = await Renderer.create(gpu, { simulation, viewport });
-  let spawnPressure = new SpawnPressure({ capacity: initialCapacity });
+  const spawnPressure = new SpawnPressure({ capacity: initialCapacity });
   const input = createInput(canvas, viewport);
 
   const player = { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 };
   let lastStats = null;
 
+  // A capacity change pauses stepping from its request until the new simulation is installed
+  // (see CapacitySwap); one change at a time, and the panel disables its controls meanwhile.
+  // install runs synchronously in the recreate's continuation, so no frame sees a destroyed
+  // simulation. SpawnPressure keeps its ramp across the change.
+  const capacitySwap = new CapacitySwap({
+    getCapacity: () => simulation.capacity,
+    recreate: (capacity) => simulation.recreateWithCapacity(capacity),
+    install: (next) => {
+      simulation = next;
+      renderer.setSimulation(next);
+      spawnPressure.setCapacity(next.capacity);
+    },
+  });
+
   const update = (fixedStep) => {
     input.update();
     movePlayer(player, input.state, fixedStep);
+    if (capacitySwap.simulationPaused) return;
     applyControlsToSimulation(simulation, input.state, player);
     const spawnPerSpecies = spawnPressure.update(fixedStep, lastStats?.aliveTotal ?? 0, simulation.shares);
     const encoder = gpu.device.createCommandEncoder();
@@ -77,24 +93,7 @@ async function boot() {
 
   installCaptureHook({ viewport, renderer });
 
-  // One recreate at a time: a change that arrives while one is pending is ignored (the panel also
-  // disables its select meanwhile). The frame loop keeps stepping the old simulation until the new
-  // one is ready; recreateWithCapacity destroys the old instance as its last step, and the swap
-  // below runs in the same microtask continuation, so no frame sees a destroyed simulation.
-  // SpawnPressure fixes capacity at construction, so it is rebuilt with the simulation.
-  let capacityChangePending = false;
-  const onCapacityChange = async (capacity) => {
-    if (capacityChangePending || capacity === simulation.capacity) return;
-    capacityChangePending = true;
-    try {
-      simulation = await simulation.recreateWithCapacity(capacity);
-      renderer.setSimulation(simulation);
-      spawnPressure = new SpawnPressure({ capacity });
-    } finally {
-      capacityChangePending = false;
-    }
-  };
-  createDebugPanel({ getSimulation: () => simulation, renderer, onCapacityChange });
+  createDebugPanel({ getSimulation: () => simulation, renderer, onCapacityChange: (capacity) => capacitySwap.request(capacity) });
 
   const loop = new FrameLoop({ update, render });
   loop.start();

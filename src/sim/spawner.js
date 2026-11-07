@@ -57,6 +57,13 @@ export class SpawnPressure {
     return this.capacity * lerp(this.floorFraction, this.ceilingFraction, clampUnit(this.elapsed / this.rampSeconds));
   }
 
+  // For a capacity change: keeps the ramp position and the rounding carry, so the target scales
+  // with the new capacity instead of restarting from the floor.
+  setCapacity(capacity) {
+    this.capacity = capacity;
+    this.maximumPerFrame = Math.floor(capacity / SPAWN_CAP_DIVISOR);
+  }
+
   reset() {
     this.elapsed = 0;
     this.carry.fill(0);

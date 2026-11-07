@@ -8,7 +8,9 @@
 // (e) recreateWithCapacity(131072) keeps at least 95 percent of the alive agents after one more step;
 // (f) a one-frame debug kill of radius 2 at the arena center, with zero spawning, reports kills, drops
 // aliveTotal by exactly that many, reports zero kills a frame later, fills at least 6 particle slots
-// per kill (capped at the pool capacity) all within 2.5 of the center, and adds threat near the center.
+// per kill (capped at the pool capacity) all within 2.5 of the center, and adds threat near the center;
+// (g) shrinking a 131072-slot simulation whose only alive agents sit in slots 100000 and up to
+// 65536 slots keeps every one of them (compaction, not a slot prefix).
 import { createGpuContext } from '/src/gpu/device.js';
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT } from '/src/sim/layout.js';
 import { normalizeShares } from '/src/sim/species.js';
@@ -33,6 +35,10 @@ const PARTICLE_STRIDE_BYTES = 32;
 const PARTICLE_LIFETIME_OFFSET = 24;
 const PARTICLE_SPREAD_LIMIT = 2.5;
 const THREAT_FIXED_POINT_SCALE = 256;
+const SHRINK_FROM_CAPACITY = 131072;
+const SHRINK_TO_CAPACITY = 65536;
+const SHRINK_FIRST_SLOT = 100000;
+const SHRINK_AGENT_COUNT = 1000;
 
 // Steps once, submits, and waits for the GPU so the stats ring can map; returns the frame's step.
 async function submitStep(device, simulation, spawnPerSpecies) {
@@ -176,6 +182,37 @@ async function runKillCheck(device, simulation) {
   };
 }
 
+// Seeds SHRINK_AGENT_COUNT alive agents (spawn-in done, all species) in slots from
+// SHRINK_FIRST_SLOT of a fresh simulation, steps once so the params uniform is written, shrinks it
+// and counts the survivors after one more step.
+async function runShrinkCheck(gpu) {
+  const { device } = gpu;
+  const zeroSpawns = () => new Uint32Array(SPECIES_COUNT);
+  let simulation = await Simulation.create(gpu, { capacity: SHRINK_FROM_CAPACITY });
+  const bytes = new ArrayBuffer(SHRINK_AGENT_COUNT * AGENT_STRIDE_BYTES);
+  const view = new DataView(bytes);
+  for (let agent = 0; agent < SHRINK_AGENT_COUNT; agent += 1) {
+    const base = agent * AGENT_STRIDE_BYTES;
+    view.setFloat32(base + AGENT_OFFSETS.position, 1 + (agent % 40) * 0.35, true);
+    view.setFloat32(base + AGENT_OFFSETS.position + 4, 1 + Math.floor(agent / 40) * 0.28, true);
+    view.setUint32(base + AGENT_OFFSETS.species, agent % SPECIES_COUNT, true);
+    view.setUint32(base + AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
+  }
+  device.queue.writeBuffer(simulation.agentsBuffer, SHRINK_FIRST_SLOT * AGENT_STRIDE_BYTES, bytes);
+  const collected = new Map();
+  await submitStep(device, simulation, zeroSpawns());
+  const before = await waitForStats(device, simulation, collected, simulation.frameSequence);
+  simulation = await simulation.recreateWithCapacity(SHRINK_TO_CAPACITY);
+  await submitStep(device, simulation, zeroSpawns());
+  const after = await waitForStats(device, simulation, collected, simulation.frameSequence);
+  simulation.destroy();
+  const pass = before?.aliveTotal === SHRINK_AGENT_COUNT && after?.aliveTotal === SHRINK_AGENT_COUNT;
+  return {
+    pass,
+    detail: `${pass ? 'PASS' : 'FAIL'} shrink ${SHRINK_FROM_CAPACITY} -> ${SHRINK_TO_CAPACITY} with ${SHRINK_AGENT_COUNT} alive agents from slot ${SHRINK_FIRST_SLOT}: alive ${before?.aliveTotal ?? 'none'} before, ${after?.aliveTotal ?? 'none'} after (need all ${SHRINK_AGENT_COUNT})`,
+  };
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   const { device } = gpu;
@@ -236,7 +273,11 @@ async function runCheck() {
   if (lostReason !== null) return { pass: false, detail: `device lost during the kill check: ${lostReason}` };
   details.push(killResult.detail);
   simulation.destroy();
-  return { pass: aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass, detail: details.join('; ') };
+  const shrinkResult = await runShrinkCheck(gpu);
+  if (lostReason !== null) return { pass: false, detail: `device lost during the shrink check: ${lostReason}` };
+  details.push(shrinkResult.detail);
+  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass;
+  return { pass, detail: details.join('; ') };
 }
 
 runCheck().then(

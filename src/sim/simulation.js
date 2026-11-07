@@ -18,11 +18,12 @@
 // into the staging ring; swap, so agentsBuffer is the newest output.
 import { StagingRing, createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
+import { AgentCompaction } from './compact.js';
 import { CoarseField } from './field.js';
 import { SpatialGrid } from './grid.js';
 import { DebugKillPass } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
-import { AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
 import { SIM_PARAMS_BYTES, packSimParams } from './params.js';
 import { Spawner } from './spawn.js';
 import { defaultMatrix, defaultSpecies, normalizeShares, packSpeciesTable } from './species.js';
@@ -43,7 +44,15 @@ export class Simulation {
       throw new Error(`Simulation capacity ${capacity} needs ${agentBytes} bytes per agent buffer; this device binds at most ${gpu.limits.maxStorageBufferBindingSize}`);
     }
     const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
+    // createBuffer does not throw when memory runs out; it returns an invalid buffer. The scope
+    // turns that into a rejection here, before a caller (recreateWithCapacity) touches anything.
+    gpu.device.pushErrorScope('out-of-memory');
     const simulation = new Simulation(gpu, { capacity, neighborRadius, species, matrix, shares, particleCapacity }, common);
+    const memoryError = await gpu.device.popErrorScope();
+    if (memoryError) {
+      simulation.destroy();
+      throw new Error(`Simulation capacity ${capacity} ran out of GPU memory: ${memoryError.message}`);
+    }
     await Promise.all([
       simulation.grid.initialize(),
       simulation.field.initialize(),
@@ -60,6 +69,7 @@ export class Simulation {
   constructor(gpu, { capacity, neighborRadius, species, matrix, shares, particleCapacity }, common) {
     this.gpu = gpu;
     this.device = gpu.device;
+    this.common = common;
     this.capacityValue = capacity;
     this.neighborRadius = neighborRadius;
     this.dimensions = gridDimensions(neighborRadius);
@@ -180,9 +190,15 @@ export class Simulation {
     return bytes === null ? null : decodeStats(bytes);
   }
 
-  // Builds a Simulation with the same settings at newCapacity, copies the first
-  // min(capacity, newCapacity) agent slots into it, and destroys this one. Stats resume after
-  // the new instance's next step.
+  // Builds a Simulation with the same settings at newCapacity, carries the alive agents over and
+  // destroys this one. The caller must not step this instance while the promise is pending
+  // (main.js pauses stepping through CapacitySwap), so the carried state is the final one.
+  // The alive agents are compacted into the first slots of the new buffer: the grid is rebuilt on
+  // the newest agents and compact.wgsl copies its listed agents in grid order, so a shrink keeps
+  // every alive agent that fits. Species, matrix, shares and the cohesion mode are read again
+  // after the awaits, so edits made meanwhile are not lost. On a rejection (allocation or
+  // pipeline failure) this instance is untouched and still usable. Stats resume after the new
+  // instance's next step.
   async recreateWithCapacity(newCapacity) {
     const next = await Simulation.create(this.gpu, {
       capacity: newCapacity,
@@ -192,11 +208,27 @@ export class Simulation {
       shares: this.sharesValue,
       particleCapacity: this.particlePoolValue.capacity,
     });
+    let compaction;
+    try {
+      compaction = await AgentCompaction.create(this.gpu, { common: this.common });
+    } catch (error) {
+      next.destroy();
+      throw error;
+    }
     const encoder = this.device.createCommandEncoder({ label: 'simulation-recreate' });
-    const copiedBytes = Math.min(this.capacityValue, newCapacity) * AGENT_STRIDE_BYTES;
-    encoder.copyBufferToBuffer(this.agentsBuffer, 0, next.agentBuffers[next.inputIndex], 0, copiedBytes);
+    this.grid.encode(encoder, this.agentsBuffer, this.paramsBufferValue);
+    compaction.encode(encoder, {
+      paramsBuffer: this.paramsBufferValue,
+      gridBuffers: this.grid.buffers,
+      agentsIn: this.agentsBuffer,
+      agentsOut: next.agentBuffers[next.inputIndex],
+      targetCapacity: newCapacity,
+    });
     this.device.queue.submit([encoder.finish()]);
     await this.device.queue.onSubmittedWorkDone();
+    compaction.destroy();
+    next.setSpecies(this.species, this.matrix);
+    next.setShares(this.sharesValue);
     next.setSameSpeciesCohesion(this.sameSpeciesCohesion);
     next.frameSequenceValue = this.frameSequenceValue;
     next.timeValue = this.timeValue;

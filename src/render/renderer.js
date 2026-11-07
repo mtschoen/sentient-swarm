@@ -58,13 +58,15 @@ export class Renderer {
     this.trails = new TrailDecayPass(gpu, { fullscreenHeader });
     this.warpGrid = new WarpGrid(gpu, { viewport, common });
     this.glyphs = new GlyphPass(gpu, { common });
-    this.particles = new ParticleRenderer(gpu, { pool: simulation.particlePool, viewport, common });
+    this.particles = new ParticleRenderer(gpu, { viewport, common });
     this.bloom = new BloomPass(gpu, { fullscreenHeader });
     this.composite = new CompositePass(gpu, { fullscreenHeader });
     this.frameCapture = new FrameCapture(this.device, gpu.format);
     this.sceneTextures = [];
     this.gridTexture = null;
     this.currentIndex = 0;
+    // render() draws only once simulation.frameSequence reaches this (see setSimulation).
+    this.firstDrawableSequence = 0;
   }
 
   // Recreates every size-dependent texture; new textures start zeroed, which clears trail history.
@@ -91,7 +93,9 @@ export class Renderer {
     this.currentIndex = 0;
   }
 
+  // Returns false, encoding nothing, while a just-installed simulation has not stepped yet.
   render(encoder, { alpha, time }) {
+    if (this.simulation.frameSequence < this.firstDrawableSequence) return false;
     const previousIndex = this.currentIndex;
     const currentIndex = 1 - previousIndex;
     const { settings, viewport, simulation } = this;
@@ -120,12 +124,20 @@ export class Renderer {
     });
     this.frameCapture.encode(encoder, swapchainTexture);
     this.currentIndex = currentIndex;
+    return true;
   }
 
-  // Points the renderer at a new Simulation (after recreateWithCapacity); every pass reads the
-  // simulation's buffers at draw time, so nothing else is rebuilt.
+  // Points the renderer at a new Simulation (after recreateWithCapacity). Every pass reads the
+  // simulation's buffers at draw time; the bind group caches that hold the old, destroyed buffers
+  // are cleared. The new simulation's coarse field stays zero until its first step, so drawing
+  // before that would show every copied glyph unattenuated (a bright spike that the trail
+  // textures would carry for many frames) over a flat grid. The old buffers are already
+  // destroyed, so instead render() skips frames, and the canvas keeps the last presented frame,
+  // until the first step of the new simulation (at most one frame on a 60 Hz display).
   setSimulation(simulation) {
     this.simulation = simulation;
+    [this.glyphs, this.particles, this.warpGrid].forEach((pass) => pass.bindGroupCache.clear());
+    this.firstDrawableSequence = simulation.frameSequence + 1;
   }
 
   afterSubmit() {

@@ -18,6 +18,14 @@ export class BindGroupCache {
     return this.identities.get(buffer);
   }
 
+  // Forgets every cached bind group, for an owner whose buffers were replaced (a new Simulation);
+  // the old bind groups then become garbage instead of being held for the page's lifetime.
+  clear() {
+    this.entries.clear();
+    this.identities = new WeakMap();
+    this.nextIdentity = 0;
+  }
+
   get(buffers) {
     const key = buffers.map((buffer) => this.identityOf(buffer)).join(',');
     if (!this.entries.has(key)) {

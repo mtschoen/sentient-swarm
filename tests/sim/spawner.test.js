@@ -54,6 +54,16 @@ test('nothing spawns once alive count reaches the target', () => {
   assert.equal(total(counts), 0);
 });
 
+test('setCapacity keeps the ramp position and rescales the target and the frame cap', () => {
+  const pressure = new SpawnPressure({ capacity: CAPACITY });
+  pressure.update(45, null, EQUAL_SHARES, 1);
+  const fraction = pressure.targetAlive / CAPACITY;
+  pressure.setCapacity(CAPACITY * 4);
+  assert.equal(pressure.elapsed, 45);
+  assert.ok(Math.abs(pressure.targetAlive - fraction * CAPACITY * 4) < 1e-6);
+  assert.equal(pressure.maximumPerFrame, (CAPACITY * 4) / 60);
+});
+
 test('reset() returns elapsed to 0', () => {
   const pressure = new SpawnPressure({ capacity: CAPACITY });
   pressure.update(45, 0, EQUAL_SHARES);

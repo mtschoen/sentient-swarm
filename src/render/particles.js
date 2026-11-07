@@ -1,7 +1,8 @@
 // Particle pass (particles.wgsl): one instanced 4-vertex triangle strip per particle pool slot,
 // additively blended into the scene target after the glyphs, so particles leave trails like
-// glyphs do. Dead slots collapse to a degenerate quad. The pool is read at draw time (a capacity
-// change builds a new Simulation and so a new pool); bind groups are cached per particle buffer.
+// glyphs do. Dead slots collapse to a degenerate quad. The pool is passed at draw time and never
+// stored (a capacity change builds a new Simulation and so a new pool); bind groups are cached per
+// particle buffer and cleared by Renderer.setSimulation.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
@@ -25,9 +26,8 @@ export function packParticleView({ viewport, particleDevicePixels = PARTICLE_DEV
 }
 
 export class ParticleRenderer {
-  constructor(gpu, { pool = null, viewport, common }) {
+  constructor(gpu, { viewport, common }) {
     this.device = gpu.device;
-    this.pool = pool;
     this.viewport = viewport;
     this.common = common;
     this.pipeline = null;
@@ -54,9 +54,9 @@ export class ParticleRenderer {
     });
   }
 
-  // Draws into an open render pass whose color target is a scene texture. pool defaults to the
-  // constructor's; Renderer passes simulation.particlePool every frame.
-  encode(pass, pool = this.pool) {
+  // Draws into an open render pass whose color target is a scene texture; Renderer passes
+  // simulation.particlePool every frame.
+  encode(pass, pool) {
     this.device.queue.writeBuffer(this.viewBuffer, 0, packParticleView({ viewport: this.viewport }));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, pool.buffers.particles]));

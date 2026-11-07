@@ -24,6 +24,8 @@ const STYLE = `
 .murmuration-panel pre { margin: 0; font: 12px/1.4 ui-monospace, monospace; }
 .murmuration-panel .matrix { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; }
 .murmuration-panel .matrix input { width: 100%; box-sizing: border-box; }
+.murmuration-panel fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.murmuration-panel .status { margin: 4px 0; color: #ffb4a8; }
 `;
 
 function element(documentObject, tagName, properties = {}, children = []) {
@@ -58,6 +60,9 @@ export function createDebugPanel({
   const root = element(documentObject, 'div', { className: 'murmuration-panel', hidden: true });
   const button = element(documentObject, 'button', { className: 'murmuration-panel-button', type: 'button', textContent: 'debug (' + TOGGLE_KEY + ')' });
   const readout = element(documentObject, 'pre');
+  // Every control sits in this fieldset, so disabling it disables them all during a capacity swap.
+  const controls = element(documentObject, 'fieldset');
+  const status = element(documentObject, 'p', { className: 'status', hidden: true });
   const framesPerSecond = new FramesPerSecond();
   let frameHandle = null;
   let framesSinceReadout = 0;
@@ -67,20 +72,30 @@ export function createDebugPanel({
     simulation.setSpecies(simulation.species, simulation.matrix);
   };
   const section = (title) => {
-    root.append(element(documentObject, 'h3', { textContent: title }));
+    controls.append(element(documentObject, 'h3', { textContent: title }));
+  };
+  const showStatus = (text) => {
+    status.textContent = text;
+    status.hidden = text === '';
   };
 
   // Capacity select and the same-species cohesion toggle.
   section('Simulation');
   const capacitySelect = element(documentObject, 'select', {}, CAPACITY_OPTIONS.map((capacity) => element(documentObject, 'option', { value: capacity, textContent: capacity.toLocaleString('en-US') })));
   capacitySelect.value = String(getSimulation().capacity);
+  // The UI boundary for a capacity change: a rejection (for example an allocation the device
+  // cannot hold) is shown here and the previous simulation keeps running.
   capacitySelect.addEventListener('change', async () => {
-    capacitySelect.disabled = true;
+    const requested = Number(capacitySelect.value);
+    controls.disabled = true;
+    showStatus('');
     try {
-      await onCapacityChange(Number(capacitySelect.value));
+      await onCapacityChange(requested);
+    } catch (error) {
+      showStatus(`Capacity ${requested.toLocaleString('en-US')} failed, kept ${getSimulation().capacity.toLocaleString('en-US')}: ${error.message}`);
     } finally {
       capacitySelect.value = String(getSimulation().capacity);
-      capacitySelect.disabled = false;
+      controls.disabled = false;
       capacitySelect.blur();
     }
   });
@@ -89,8 +104,9 @@ export function createDebugPanel({
     getSimulation().setSameSpeciesCohesion(cohesionToggle.checked);
     cohesionToggle.blur();
   });
-  root.append(
+  controls.append(
     element(documentObject, 'label', {}, [element(documentObject, 'span', { textContent: 'capacity' }), capacitySelect]),
+    status,
     element(documentObject, 'label', {}, [element(documentObject, 'span', { textContent: 'same-species cohesion' }), cohesionToggle]),
   );
 
@@ -98,7 +114,7 @@ export function createDebugPanel({
   section('Spawn shares');
   const rawShares = Array.from(getSimulation().shares);
   SPECIES_NAMES.forEach((name, index) => {
-    root.append(slider(documentObject, { ...SHARE_SLIDER, label: name }, rawShares[index], (value) => {
+    controls.append(slider(documentObject, { ...SHARE_SLIDER, label: name }, rawShares[index], (value) => {
       rawShares[index] = value;
       getSimulation().setShares(rawShares);
     }));
@@ -111,7 +127,7 @@ export function createDebugPanel({
       getSimulation().species[index][spec.key] = value;
       applySpecies();
     }));
-    root.append(element(documentObject, 'details', {}, [element(documentObject, 'summary', { textContent: SPECIES_NAMES[index] }), ...body]));
+    controls.append(element(documentObject, 'details', {}, [element(documentObject, 'summary', { textContent: SPECIES_NAMES[index] }), ...body]));
   });
 
   // Matrix: the row is the acting species, the column the species it reacts to.
@@ -131,17 +147,16 @@ export function createDebugPanel({
       matrixGrid.append(cell);
     }
   });
-  root.append(matrixGrid);
+  controls.append(matrixGrid);
 
   section('Renderer');
   RENDER_SLIDERS.forEach((spec) => {
-    root.append(slider(documentObject, spec, renderer.settings[spec.key], (value) => {
+    controls.append(slider(documentObject, spec, renderer.settings[spec.key], (value) => {
       renderer.settings[spec.key] = value;
     }));
   });
 
-  section('Readout');
-  root.append(readout);
+  root.append(controls, element(documentObject, 'h3', { textContent: 'Readout' }), readout);
 
   const refreshReadout = () => {
     readout.textContent = describeStats(readStats(), framesPerSecond.value);
