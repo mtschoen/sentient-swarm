@@ -9,6 +9,7 @@ const READY_TIMEOUT_MILLISECONDS = 10_000;
 const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
 const EXIT_NO_ADAPTER = 2;
+const MINIMUM_ALIVE_TOTAL = 1000;
 
 function parseFrameCount(argumentList) {
   const index = argumentList.indexOf('--frames');
@@ -60,7 +61,12 @@ async function run() {
       page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
     }
-    console.log('smoke: ok');
+    const stats = await page.evaluate(() => window.__murmuration.stats);
+    if (!stats || !(stats.aliveTotal > MINIMUM_ALIVE_TOTAL)) {
+      console.error(`smoke: expected stats.aliveTotal > ${MINIMUM_ALIVE_TOTAL}, got ${JSON.stringify(stats)}`);
+      return EXIT_FAILURE;
+    }
+    console.log(`smoke: ok (aliveTotal ${stats.aliveTotal})`);
     return EXIT_OK;
   } catch (error) {
     console.error(`smoke: ${error.message}`);
