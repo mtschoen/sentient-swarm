@@ -6,11 +6,17 @@
 // artifacts/smoke-zoom.png (4x inspect zoom, trails off), then holds a debug kill at the arena
 // center and writes artifacts/smoke-kill.png (trails off, glyphs hidden: particles and grid only).
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
+// Liveness: every page.evaluate is bounded by EVALUATE_TIMEOUT_MILLISECONDS (a capture resolves only
+// on a later rendered frame, so a renderer that throws or stops would leave it pending forever),
+// and the whole run by SMOKE_DEADLINE_MILLISECONDS, after which it closes the browser and the
+// server and exits 1.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
 
 const READY_TIMEOUT_MILLISECONDS = 10_000;
+const EVALUATE_TIMEOUT_MILLISECONDS = 20_000;
+const SMOKE_DEADLINE_MILLISECONDS = 150_000;
 const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
 const EXIT_NO_ADAPTER = 2;
@@ -45,6 +51,19 @@ function parseFrameCount(argumentList) {
   return frames;
 }
 
+// Rejects when promise has not settled within milliseconds; the timer never outlives the race.
+function withTimeout(promise, milliseconds, label) {
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} did not finish within ${milliseconds} ms`)), milliseconds);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+function evaluateWithin(page, label, pageFunction, argument) {
+  return withTimeout(page.evaluate(pageFunction, argument), EVALUATE_TIMEOUT_MILLISECONDS, label);
+}
+
 function waitForFrame(page, target) {
   return page.waitForFunction((frame) => window.__murmuration.frame >= frame, target, { timeout: READY_TIMEOUT_MILLISECONDS });
 }
@@ -55,8 +74,8 @@ function waitForFrame(page, target) {
 // comparison would fail on the ramp alone. Instead the growth over the 60 frames after the resize
 // must match the growth over the 60 frames before it, within 5 percent of the count.
 async function checkResize(page) {
-  const readFrame = () => page.evaluate(() => window.__murmuration.frame);
-  const readAlive = async () => (await page.evaluate(() => window.__murmuration.stats)).aliveTotal;
+  const readFrame = () => evaluateWithin(page, 'reading the frame count', () => window.__murmuration.frame);
+  const readAlive = async () => (await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats)).aliveTotal;
   const start = await readFrame();
   const earlier = await readAlive();
   await waitForFrame(page, start + RESIZE_WINDOW_FRAMES);
@@ -65,7 +84,7 @@ async function checkResize(page) {
   const resized = await readFrame();
   await waitForFrame(page, resized + RESIZE_WINDOW_FRAMES);
   const after = await readAlive();
-  const portrait = await page.evaluate(() => window.__murmuration.capture());
+  const portrait = await evaluateWithin(page, 'the portrait capture', () => window.__murmuration.capture());
   const { arenaRect } = portrait;
   const expected = { x: 0, y: 375, width: 800, height: 450 };
   if (portrait.width !== PORTRAIT_VIEWPORT.width || JSON.stringify(arenaRect) !== JSON.stringify(expected)) {
@@ -97,7 +116,7 @@ async function checkResize(page) {
 // radius. The center rise must beat the control change by KILL_FLASH_MARGIN. Returns a failure
 // message, or null.
 async function checkKillFlash(page) {
-  const arenaRect = (await page.evaluate(() => window.__murmuration.capture())).arenaRect;
+  const arenaRect = (await evaluateWithin(page, 'the arena rect capture', () => window.__murmuration.capture())).arenaRect;
   const boxAt = (fractionX, fractionY) => ({
     x: Math.round(arenaRect.x + arenaRect.width * fractionX - KILL_BOX_DEVICE_PIXELS / 2),
     y: Math.round(arenaRect.y + arenaRect.height * fractionY - KILL_BOX_DEVICE_PIXELS / 2),
@@ -105,7 +124,9 @@ async function checkKillFlash(page) {
     height: KILL_BOX_DEVICE_PIXELS,
   });
   const regions = [boxAt(0.5, 0.5), boxAt(0.25, 0.25)];
-  const captureFlashLayers = () => page.evaluate(
+  const captureFlashLayers = () => evaluateWithin(
+    page,
+    'a kill flash capture',
     ([boxes, settings]) => window.__murmuration.capture({ settings, regions: boxes }),
     [regions, KILL_FLASH_SETTINGS],
   );
@@ -131,22 +152,29 @@ async function checkKillFlash(page) {
   return page.consoleErrors.length > 0 ? `smoke: console errors after the kill: ${page.consoleErrors.join(' | ')}` : null;
 }
 
-async function run() {
+// resources holds the server and browser so the deadline path can close them too.
+async function closeResources(resources) {
+  const { browser, server } = resources;
+  resources.browser = null;
+  resources.server = null;
+  if (browser) await browser.close().catch(() => {});
+  if (server) server.child.kill();
+}
+
+async function run(resources) {
   const frames = parseFrameCount(process.argv.slice(2));
-  let server = null;
-  let browser = null;
   try {
     let url = process.env.SMOKE_URL;
     if (!url) {
-      server = await startServer();
-      url = server.url;
+      resources.server = await startServer();
+      url = resources.server.url;
     }
     const launched = await launchWebGpuBrowser();
-    browser = launched.browser;
+    resources.browser = launched.browser;
     const { page } = launched;
 
     await page.goto(url);
-    const adapterAvailable = await page.evaluate(async () => {
+    const adapterAvailable = await evaluateWithin(page, 'the adapter probe', async () => {
       if (!navigator.gpu) return false;
       return (await navigator.gpu.requestAdapter()) !== null;
     });
@@ -174,7 +202,7 @@ async function run() {
       page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
     }
-    const stats = await page.evaluate(() => window.__murmuration.stats);
+    const stats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
     if (!stats || !(stats.aliveTotal > MINIMUM_ALIVE_TOTAL)) {
       console.error(`smoke: expected stats.aliveTotal > ${MINIMUM_ALIVE_TOTAL}, got ${JSON.stringify(stats)}`);
       return EXIT_FAILURE;
@@ -185,10 +213,10 @@ async function run() {
       page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
     }
-    const capture = await page.evaluate(() => window.__murmuration.capture());
+    const capture = await evaluateWithin(page, 'the main capture', () => window.__murmuration.capture());
     await writeDataUrl('smoke.png', capture.pngDataUrl);
     // Trails off so the 4x frame shows glyph shapes rather than motion smears.
-    const zoomCapture = await page.evaluate(() => window.__murmuration.capture({ inspectZoom: 4, settings: { trailDecay: 0 } }));
+    const zoomCapture = await evaluateWithin(page, 'the zoom capture', () => window.__murmuration.capture({ inspectZoom: 4, settings: { trailDecay: 0 } }));
     await writeDataUrl('smoke-zoom.png', zoomCapture.pngDataUrl);
     const luminance = capture.meanLuminance;
     if (!(luminance > MINIMUM_LUMINANCE && luminance < MAXIMUM_LUMINANCE)) {
@@ -205,16 +233,26 @@ async function run() {
       console.error(killFailure);
       return EXIT_FAILURE;
     }
-    const capturedStats = await page.evaluate(() => window.__murmuration.stats);
+    const capturedStats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
     console.log(`smoke: ok (aliveTotal ${stats.aliveTotal}, aliveTotal at capture ${capturedStats.aliveTotal}, arena mean luminance ${luminance.toFixed(4)})`);
     return EXIT_OK;
   } catch (error) {
     console.error(`smoke: ${error.message}`);
     return EXIT_FAILURE;
   } finally {
-    if (browser) await browser.close().catch(() => {});
-    if (server) server.child.kill();
+    await closeResources(resources);
   }
 }
 
-process.exitCode = await run();
+const resources = { server: null, browser: null };
+let deadlineTimer;
+const deadline = new Promise((resolve) => {
+  deadlineTimer = setTimeout(() => {
+    console.error(`smoke: the run did not finish within ${SMOKE_DEADLINE_MILLISECONDS} ms; failing`);
+    resolve(EXIT_FAILURE);
+  }, SMOKE_DEADLINE_MILLISECONDS);
+});
+const exitCode = await Promise.race([run(resources), deadline]);
+clearTimeout(deadlineTimer);
+await closeResources(resources);
+process.exit(exitCode);
