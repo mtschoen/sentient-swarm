@@ -12,29 +12,46 @@ export const GLYPH_VIEW_BYTES = 48;
 const VERTICES_PER_GLYPH = 4;
 const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 
-// Device-pixel area of one glyph body divided by the device-pixel area of one coarse cell, at
-// any zoom (both scale with its square). Times the coarse density (agents per cell) it gives the
-// fraction of a cell the glyph bodies cover, so density attenuation follows what is on screen: a
-// smaller arena packs more fixed-size glyph pixels into each cell and attenuates more.
-export function glyphCoverageScale(viewport, glyphDevicePixels) {
+// Smallest ship length in device pixels, so ships keep a readable silhouette on small arenas.
+export const MINIMUM_SHIP_DEVICE_PIXELS = 8;
+// Ships grow with the inspect zoom raised to this power, slower than the view, so zooming in
+// separates a crowd instead of enlarging its overlap.
+export const SHIP_ZOOM_EXPONENT = 0.5;
+
+// On-screen ship length (the glyph body, local [-1, 1]) in device pixels: shipArenaFraction of the
+// arena height, at least MINIMUM_SHIP_DEVICE_PIXELS, times effectiveZoom ** SHIP_ZOOM_EXPONENT.
+// A fraction of 0 or less hides the ships (the smoke's kill-flash check does this).
+export function shipDevicePixels(viewport, shipArenaFraction) {
+  if (!(shipArenaFraction > 0)) return 0;
+  const unzoomed = Math.max(MINIMUM_SHIP_DEVICE_PIXELS, shipArenaFraction * viewport.arenaRectDevicePixels.height);
+  return unzoomed * viewport.effectiveZoom ** SHIP_ZOOM_EXPONENT;
+}
+
+// Device-pixel area of one on-screen ship body divided by the on-screen device-pixel area of one
+// coarse cell (which grows with the square of the zoom). Times the coarse density (agents per
+// cell) it gives the fraction of a cell the ship bodies cover, so density attenuation follows what
+// is on screen: zooming in spreads the ships apart and attenuates less.
+export function glyphCoverageScale(viewport, shipPixels) {
   const rect = viewport.arenaRectDevicePixels;
-  const cellArea = (rect.width / COARSE_COLUMNS) * (rect.height / COARSE_ROWS);
-  return (glyphDevicePixels * glyphDevicePixels) / Math.max(cellArea, 1e-6);
+  const zoom = viewport.effectiveZoom;
+  const cellArea = (rect.width / COARSE_COLUMNS) * (rect.height / COARSE_ROWS) * zoom * zoom;
+  return (shipPixels * shipPixels) / Math.max(cellArea, 1e-6);
 }
 
 // Matches the GlyphView table in glyphs.wgsl. World to clip is affine, so two worldToClip samples
-// give its scale and offset (inspectZoom included); the glyph size also grows with the zoom.
+// give its scale and offset (inspectZoom included); the ship size comes from shipDevicePixels.
 // emissionScale comes from trailFrameFactors.
 export function packGlyphView({ viewport, settings, alpha, time, emissionScale = 1 }) {
   const origin = viewport.worldToClip(0, 0);
   const unit = viewport.worldToClip(1, 1);
+  const shipPixels = shipDevicePixels(viewport, settings.shipArenaFraction);
   return new Float32Array([
     unit.x - origin.x, unit.y - origin.y,
     origin.x, origin.y,
     2 / viewport.canvasWidth, 2 / viewport.canvasHeight,
-    settings.glyphDevicePixels * viewport.effectiveZoom, settings.glowScale,
+    shipPixels, settings.glowScale,
     alpha, time,
-    glyphCoverageScale(viewport, settings.glyphDevicePixels), emissionScale,
+    glyphCoverageScale(viewport, shipPixels), emissionScale,
   ]);
 }
 

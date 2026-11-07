@@ -1,12 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GLYPH_VIEW_BYTES, glyphCoverageScale, packGlyphView } from '../../src/render/glyphs.js';
+import {
+  GLYPH_VIEW_BYTES, MINIMUM_SHIP_DEVICE_PIXELS, glyphCoverageScale, packGlyphView, shipDevicePixels,
+} from '../../src/render/glyphs.js';
 import { Viewport } from '../../src/render/viewport.js';
 
-const settings = { glyphDevicePixels: 4, glowScale: 2, trailDecay: 0.9, bloomStrength: 0.8 };
+const settings = { shipArenaFraction: 0.02, glowScale: 2, trailDecay: 0.9, bloomStrength: 0.8 };
 
 function applyTransform(view, x, y) {
   return { x: view[0] * x + view[2], y: view[1] * y + view[3] };
+}
+
+function near(actual, expected, tolerance = 1e-9) {
+  assert.ok(Math.abs(actual - expected) < tolerance, `expected ${expected}, got ${actual}`);
 }
 
 test('packGlyphView fills the 48-byte GlyphView layout', () => {
@@ -14,19 +20,41 @@ test('packGlyphView fills the 48-byte GlyphView layout', () => {
   viewport.setCanvasSize(1600, 900);
   const view = packGlyphView({ viewport, settings, alpha: 0.25, time: 3, emissionScale: 0.5 });
   assert.equal(view.byteLength, GLYPH_VIEW_BYTES);
-  // A 1600 by 900 arena has 25 by 25 device-pixel coarse cells; a 4-pixel glyph covers 16 / 625.
-  assert.deepEqual(Array.from(view.slice(4)), Array.from(new Float32Array([2 / 1600, 2 / 900, 4, 2, 0.25, 3, 16 / 625, 0.5])));
+  // A 900-pixel-tall arena gives an 18-pixel ship; its 25 by 25 pixel coarse cells give 324 / 625.
+  assert.deepEqual(Array.from(view.slice(4)), Array.from(new Float32Array([2 / 1600, 2 / 900, 18, 2, 0.25, 3, 324 / 625, 0.5])));
 });
 
-test('glyph coverage grows as the arena shrinks and ignores the inspect zoom', () => {
+test('ship size follows the arena height, with a minimum, and a zero fraction hides ships', () => {
+  const large = new Viewport();
+  large.setCanvasSize(3840, 2160);
+  const small = new Viewport();
+  small.setCanvasSize(320, 180);
+  near(shipDevicePixels(large, 0.018), 0.018 * 2160);
+  assert.equal(shipDevicePixels(small, 0.018), MINIMUM_SHIP_DEVICE_PIXELS);
+  assert.equal(shipDevicePixels(large, 0), 0);
+  assert.equal(packGlyphView({ viewport: large, settings: { ...settings, shipArenaFraction: 0 }, alpha: 0, time: 0 })[6], 0);
+});
+
+test('the inspect zoom grows ships by its square root and lowers their coverage', () => {
+  const viewport = new Viewport();
+  viewport.setCanvasSize(1280, 720);
+  const unzoomed = shipDevicePixels(viewport, 0.02);
+  const coverageUnzoomed = glyphCoverageScale(viewport, unzoomed);
+  near(coverageUnzoomed, (14.4 * 14.4) / 400);
+  viewport.inspectZoom = 4;
+  const zoomed = shipDevicePixels(viewport, 0.02);
+  near(zoomed, unzoomed * 2);
+  // Ships grow 2x while cells grow 4x, so coverage drops to a quarter.
+  near(glyphCoverageScale(viewport, zoomed), coverageUnzoomed / 4);
+  assert.equal(packGlyphView({ viewport, settings, alpha: 0, time: 0 })[10], Math.fround(coverageUnzoomed / 4));
+});
+
+test('glyph coverage grows as the arena shrinks at a fixed ship size', () => {
   const large = new Viewport();
   large.setCanvasSize(1280, 720);
   const small = new Viewport();
   small.setCanvasSize(800, 1200);
-  assert.ok(Math.abs(glyphCoverageScale(large, 4) - 16 / 400) < 1e-12);
-  assert.ok(Math.abs(glyphCoverageScale(small, 4) / glyphCoverageScale(large, 4) - (1280 * 720) / (800 * 450)) < 1e-9);
-  small.inspectZoom = 4;
-  assert.equal(packGlyphView({ viewport: small, settings, alpha: 0, time: 0 })[10], Math.fround(glyphCoverageScale(small, 4)));
+  near(glyphCoverageScale(small, 10) / glyphCoverageScale(large, 10), (1280 * 720) / (800 * 450));
 });
 
 test('packGlyphView world-to-clip transform matches viewport.worldToClip, zoom included', () => {
@@ -40,5 +68,6 @@ test('packGlyphView world-to-clip transform matches viewport.worldToClip, zoom i
     assert.ok(Math.abs(actual.x - expected.x) < 1e-5);
     assert.ok(Math.abs(actual.y - expected.y) < 1e-5);
   }
-  assert.equal(view[6], 16, 'glyph size grows with the inspect zoom');
+  // The 2000 by 1000 canvas letterboxes to a 1000-pixel-tall arena; 4x zoom doubles the ship.
+  near(view[6], Math.fround(0.02 * 1000 * 2), 1e-4);
 });

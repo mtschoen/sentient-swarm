@@ -1,6 +1,6 @@
 // Agent ships: one instance per agent slot, a 4-vertex triangle strip pulled from the agent
 // buffer. Dead agents collapse to a degenerate quad. common.wgsl and ships.wgsl are prepended.
-// The quad is glyphDevicePixels * glowScale device pixels wide, rotated so local +x is the heading;
+// The quad is shipDevicePixels * glowScale device pixels wide, rotated so local +x is the heading;
 // the ship body lies inside radius 1 and the glow and engine plume reach out to radius glowScale.
 // Heading: the velocity direction, blended toward the player at low speed (agents carry no
 // heading), so idle and spawning ships face the player instead of snapping to an arbitrary axis.
@@ -11,14 +11,15 @@
 // Density attenuation works in screen coverage: the coarse density (agents per cell) times
 // coverageScale (glyph body area over coarse cell area, in device pixels) is the fraction of the
 // cell that glyph bodies cover, and each glyph is divided by 1 + COVERAGE_ATTENUATION * coverage,
-// so a crowd's summed radiance per pixel levels off near 1 / COVERAGE_ATTENUATION glyphs at any
-// arena size. emissionScale (trailFrameFactors) keeps steady-state brightness refresh-independent.
+// but never below ATTENUATION_FLOOR (capped so the floor's summed radiance stays under
+// MAXIMUM_CROWD_RADIANCE), so dense cores stay bright and colored rather than murky.
+// emissionScale (trailFrameFactors) keeps steady-state brightness refresh-independent.
 
 // Uniform layout (byte offsets), total 48 bytes; packGlyphView in glyphs.js writes it.
 //   0 worldToClipScale    vec2f
 //   8 worldToClipOffset   vec2f
 //  16 devicePixelToClip   vec2f
-//  24 glyphDevicePixels   f32 (already multiplied by the inspect zoom)
+//  24 shipDevicePixels   f32 (ship length, shipDevicePixels in glyphs.js, zoom included)
 //  28 glowScale           f32
 //  32 alpha               f32
 //  36 time                f32
@@ -28,7 +29,7 @@ struct GlyphView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
   devicePixelToClip: vec2f,
-  glyphDevicePixels: f32,
+  shipDevicePixels: f32,
   glowScale: f32,
   alpha: f32,
   time: f32,
@@ -45,11 +46,16 @@ struct GlyphView {
 const HUE_JITTER_RANGE: f32 = 0.03;
 const GLYPH_SATURATION: f32 = 0.8;
 const COVERAGE_ATTENUATION: f32 = 4.0;
+// Lowest brightness factor the density attenuation may apply, so crowds stay bright and colored.
+const ATTENUATION_FLOOR: f32 = 0.3;
+// Ceiling on the floor's summed radiance (floor times coverage): past it the floor falls off as
+// 1 / coverage, so a full ramp under trails does not saturate into a white smear.
+const MAXIMUM_CROWD_RADIANCE: f32 = 0.75;
 const GLOW_INTENSITY: f32 = 0.05;
 const GLOW_FALLOFF: f32 = 3.0;
 const SPAWN_PULSE_RATE: f32 = 18.0;
 // Fill brightness relative to the rim.
-const FILL_BRIGHTNESS: f32 = 0.35;
+const FILL_BRIGHTNESS: f32 = 0.25;
 // Below this speed (world units per second) the heading leans toward the player.
 const HEADING_IDLE_SPEED: f32 = 0.4;
 // Plume length in local units at full speed, its minimum share at rest, its half-width and peak.
@@ -86,7 +92,7 @@ fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
   let agent = agents[instanceIndex];
   // A zero glyph or glow size (the smoke hides glyphs this way) collapses early, so the fragment
   // stage never divides by it.
-  if (!isAlive(agent.flags) || view.glyphDevicePixels <= 0.0 || view.glowScale <= 0.0) {
+  if (!isAlive(agent.flags) || view.shipDevicePixels <= 0.0 || view.glowScale <= 0.0) {
     output.position = vec4f(2.0, 2.0, 0.0, 1.0);
     output.local = vec2f(0.0);
     output.color = vec3f(0.0);
@@ -99,7 +105,7 @@ fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
   let forward = shipHeading(position, agent.velocity);
   let side = vec2f(-forward.y, forward.x);
   // World and device pixels both grow y downward, so the world direction is the screen direction.
-  let offsetDevicePixels = (forward * corner.x + side * corner.y) * (0.5 * view.glyphDevicePixels * view.glowScale);
+  let offsetDevicePixels = (forward * corner.x + side * corner.y) * (0.5 * view.shipDevicePixels * view.glowScale);
   let center = position * view.worldToClipScale + view.worldToClipOffset;
   output.position = vec4f(center + offsetDevicePixels * view.devicePixelToClip * vec2f(1.0, -1.0), 0.0, 1.0);
   output.local = corner * view.glowScale;
@@ -114,7 +120,9 @@ fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
   let densities = field[cell * 2u];
   let localDensity = densities.x + densities.y + densities.z + densities.w + field[cell * 2u + 1u].x;
   let coverage = localDensity * view.coverageScale;
-  var alpha = select(calmPulse, spawnPulse, spawning) / (1.0 + COVERAGE_ATTENUATION * coverage);
+  let attenuationFloor = min(ATTENUATION_FLOOR, MAXIMUM_CROWD_RADIANCE / max(coverage, 1e-6));
+  let attenuation = max(1.0 / (1.0 + COVERAGE_ATTENUATION * coverage), attenuationFloor);
+  var alpha = select(calmPulse, spawnPulse, spawning) * attenuation;
   if (spawning) {
     alpha *= 0.5;
   }
@@ -133,9 +141,9 @@ fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
 @fragment
 fn glyphFragment(input: GlyphVaryings) -> @location(0) vec4f {
   let signedDistance = shipDistance(input.shape, input.local);
-  // One device pixel spans 2 / glyphDevicePixels local units; the body edge is antialiased over it
+  // One device pixel spans 2 / shipDevicePixels local units; the body edge is antialiased over it
   // and the rim is the outermost pixel inside the edge.
-  let pixelUnits = 2.0 / view.glyphDevicePixels;
+  let pixelUnits = 2.0 / view.shipDevicePixels;
   let body = 1.0 - smoothstep(-0.5 * pixelUnits, 0.5 * pixelUnits, signedDistance);
   let interior = 1.0 - smoothstep(-1.5 * pixelUnits, -0.5 * pixelUnits, signedDistance);
   let rim = body - interior;
