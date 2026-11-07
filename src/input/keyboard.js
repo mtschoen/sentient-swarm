@@ -1,4 +1,5 @@
 // Keyboard movement: WASD or arrow keys, in the same screen-down convention as the gamepad stick.
+// Space held is the bomb button (the game bombs on its rising edge).
 // Keys typed into a form field (the debug panel's number inputs) are ignored.
 const DIRECTIONS = {
   w: { x: 0, y: -1 },
@@ -10,6 +11,7 @@ const DIRECTIONS = {
   d: { x: 1, y: 0 },
   arrowright: { x: 1, y: 0 },
 };
+const BOMB_KEY = ' ';
 
 function isFormField(target) {
   const tagName = target?.tagName;
@@ -18,7 +20,7 @@ function isFormField(target) {
 
 export function createKeyboardSource(windowObject) {
   const held = new Set();
-  const source = { move: { x: 0, y: 0 }, dispose };
+  const source = { move: { x: 0, y: 0 }, bomb: false, dispose };
 
   function refresh() {
     let x = 0;
@@ -33,19 +35,28 @@ export function createKeyboardSource(windowObject) {
 
   function onKeyDown(event) {
     const key = event.key?.toLowerCase();
-    if (!(key in DIRECTIONS) || isFormField(event.target)) return;
+    if (isFormField(event.target)) return;
+    if (key === BOMB_KEY) {
+      source.bomb = true;
+      // Space would otherwise scroll the page or press a focused button.
+      event.preventDefault?.();
+      return;
+    }
+    if (!(key in DIRECTIONS)) return;
     held.add(key);
     refresh();
   }
 
   function onKeyUp(event) {
     const key = event.key?.toLowerCase();
+    if (key === BOMB_KEY) source.bomb = false;
     if (held.delete(key)) refresh();
   }
 
   // A key released while the window was unfocused never sends keyup.
   function onBlur() {
     held.clear();
+    source.bomb = false;
     refresh();
   }
 

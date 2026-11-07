@@ -1,9 +1,7 @@
 import { createGpuContext, describeUnsupported, WebGpuUnavailableError } from './gpu/device.js';
 import { Simulation } from './sim/simulation.js';
-import { SpawnPressure } from './sim/spawner.js';
 import { FrameLoop } from './game/loop.js';
-import { applyControlsToSimulation, movePlayer } from './game/controls.js';
-import { CapacitySwap } from './game/capacity-swap.js';
+import { Game } from './game/game.js';
 import { createInput } from './input/input.js';
 import { Viewport } from './render/viewport.js';
 import { Renderer } from './render/renderer.js';
@@ -11,7 +9,6 @@ import { observeCanvasSize } from './render/canvas-size.js';
 import { installCaptureHook } from './render/capture-hook.js';
 import { createDebugPanel } from './ui/debugPanel.js';
 import { capacityFromSearch } from './ui/panelModel.js';
-import { ARENA_WIDTH, ARENA_HEIGHT } from './sim/layout.js';
 import { installAudio } from './audio/audio-hook.js';
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
@@ -44,60 +41,33 @@ async function boot() {
   sizeCanvasNow();
 
   const initialCapacity = capacityFromSearch(location.search);
-  let simulation = await Simulation.create(gpu, { capacity: initialCapacity });
+  const simulation = await Simulation.create(gpu, { capacity: initialCapacity });
   renderer = await Renderer.create(gpu, { simulation, viewport });
-  const spawnPressure = new SpawnPressure({ capacity: initialCapacity });
   const input = createInput(canvas, viewport);
   const audio = installAudio();
   window.__murmuration.audio = audio;
+  // The game waits in Ready, the swarm running without player contact, until the first gesture.
+  const game = await Game.create({ gpu, simulation, renderer, input, capacity: initialCapacity });
 
-  const player = { x: ARENA_WIDTH / 2, y: ARENA_HEIGHT / 2 };
-  let lastStats = null;
-
-  // A capacity change pauses stepping from its request until the new simulation is installed
-  // (see CapacitySwap); one change at a time, and the panel disables its controls meanwhile.
-  // install runs synchronously in the recreate's continuation, so no frame sees a destroyed
-  // simulation. SpawnPressure keeps its ramp across the change.
-  const capacitySwap = new CapacitySwap({
-    getCapacity: () => simulation.capacity,
-    recreate: (capacity) => simulation.recreateWithCapacity(capacity),
-    install: (next) => {
-      simulation = next;
-      renderer.setSimulation(next);
-      spawnPressure.setCapacity(next.capacity);
-    },
-  });
-
+  // The game steps the simulation; stats carry the latest read-back frame plus the game state.
   const update = (fixedStep) => {
-    input.update();
-    movePlayer(player, input.state, fixedStep);
-    if (capacitySwap.simulationPaused) return;
-    applyControlsToSimulation(simulation, input.state, player);
-    const spawnPerSpecies = spawnPressure.update(fixedStep, lastStats, simulation.shares, simulation.frameSequence + 1);
-    const encoder = gpu.device.createCommandEncoder();
-    simulation.step(encoder, fixedStep, spawnPerSpecies);
-    gpu.device.queue.submit([encoder.finish()]);
-    simulation.afterSubmit();
-    const stats = simulation.readStats();
-    if (stats) {
-      lastStats = stats;
-      window.__murmuration.stats = stats;
-    }
-    audio.update({ fixedStep, freshStats: stats, capacity: simulation.capacity });
+    game.update(fixedStep);
+    if (game.latestStats) window.__murmuration.stats = { ...game.latestStats, ...game.state };
+    audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity });
   };
 
   const render = (alpha, deltaSeconds) => {
-    const encoder = gpu.device.createCommandEncoder();
-    renderer.render(encoder, { alpha, time: simulation.time, deltaSeconds });
-    gpu.device.queue.submit([encoder.finish()]);
-    renderer.afterSubmit();
+    game.render(alpha, deltaSeconds);
     window.__murmuration.frame = loop.frameCount;
     window.__murmuration.ready = true;
   };
 
   installCaptureHook({ viewport, renderer });
 
-  createDebugPanel({ getSimulation: () => simulation, renderer, onCapacityChange: (capacity) => capacitySwap.request(capacity) });
+  // The capacity swap goes through the game, one at a time (the panel also disables its controls
+  // meanwhile); stepping pauses until the new simulation is in place.
+  const onCapacityChange = (capacity) => game.setCapacity(capacity);
+  createDebugPanel({ getSimulation: () => game.simulation, renderer, onCapacityChange });
 
   const loop = new FrameLoop({ update, render });
   loop.start();

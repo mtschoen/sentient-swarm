@@ -217,3 +217,23 @@ test('dispose removes the keyboard listeners', () => {
   input.update();
   assert.deepEqual(input.state.move, { x: 0, y: 0 });
 });
+
+test('Space and the right mouse button hold the bomb button', () => {
+  const { canvas, windowObject, input } = createFixture();
+  const space = keyEvent('keydown', ' ');
+  windowObject.dispatchEvent(space);
+  input.update();
+  assert.equal(input.state.bomb, true);
+  windowObject.dispatchEvent(keyEvent('keyup', ' '));
+  input.update();
+  assert.equal(input.state.bomb, false);
+  windowObject.dispatchEvent(keyEvent('keydown', ' ', { tagName: 'INPUT' }));
+  input.update();
+  assert.equal(input.state.bomb, false);
+  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 300, clientY: 100, button: 2, buttons: 2 }));
+  input.update();
+  assert.equal(input.state.bomb, true);
+  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 2, buttons: 0 }));
+  input.update();
+  assert.equal(input.state.bomb, false);
+});

@@ -1,4 +1,5 @@
-// Mouse input: world position, primary button, and right-button temporary zoom.
+// Mouse input: world position, primary button, and the right button (held: secondaryDown, the
+// game's bomb button, plus the temporary inspect zoom).
 // Button state follows event.buttons on every pointer event, because a mouse sends pointerdown
 // only for the first pressed button and pointerup only for the last released one (chord changes
 // in between arrive as pointermove). pointercancel, lostpointercapture and window blur release
@@ -9,7 +10,7 @@ const PRIMARY_BUTTON_BIT = 1;
 const SECONDARY_BUTTON_BIT = 2;
 
 export function createPointerSource(canvas, viewport, windowObject) {
-  const source = { world: null, primaryDown: false, update, dispose };
+  const source = { world: null, primaryDown: false, secondaryDown: false, update, dispose };
   let screenPosition = null;
   let zoomHeld = false;
 
@@ -22,11 +23,13 @@ export function createPointerSource(canvas, viewport, windowObject) {
 
   function applyButtons(buttons) {
     source.primaryDown = (buttons & PRIMARY_BUTTON_BIT) !== 0;
-    setZoomHeld((buttons & SECONDARY_BUTTON_BIT) !== 0);
+    source.secondaryDown = (buttons & SECONDARY_BUTTON_BIT) !== 0;
+    setZoomHeld(source.secondaryDown);
   }
 
   function release() {
     source.primaryDown = false;
+    source.secondaryDown = false;
     setZoomHeld(false);
   }
 

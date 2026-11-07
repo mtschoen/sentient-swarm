@@ -1,11 +1,15 @@
 // Browser smoke test. Serves the page with the Vite dev server (see server.mjs).
 // SMOKE_URL, when set, skips spawning and uses that URL instead.
-// Usage: node tests/browser/smoke.mjs [--frames N]
+// Usage: node tests/browser/smoke.mjs [--frames N] [--play N]
 // Reads the composited frame back through window.__murmuration.capture (headless Chromium may never
 // composite a WebGPU canvas, so page.screenshot() is not trusted) and writes artifacts/smoke.png and
 // artifacts/smoke-zoom.png (4x inspect zoom, trails off) and artifacts/smoke-ships.png (1x, trails
-// off), then holds a debug kill at the arena center and writes artifacts/smoke-kill.png (trails off,
-// glyphs hidden: particles and grid only).
+// off) while the game waits in Ready, then clicks to start the run, whose arena clear floods kill
+// particles, and writes artifacts/smoke-kill.png (trails off, glyphs hidden: particles and grid only).
+// --play N instead drives a synthetic gamepad (navigator.getGamepads stubbed before the page
+// loads, read by the real input path): the left stick moves the ship 2 units left of center and
+// starts the run, then the right stick fires toward the arena center for N frames; the score
+// must be positive with no console errors.
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 // Liveness: every page.evaluate is bounded by EVALUATE_TIMEOUT_MILLISECONDS (a capture resolves only
 // on a later rendered frame, so a renderer that throws or stops would leave it pending forever),
@@ -34,12 +38,17 @@ const RESIZE_TOLERANCE = 0.05;
 const PORTRAIT_VIEWPORT = { width: 800, height: 1200 };
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
 const MAXIMUM_BAND_LUMINANCE = 0.01;
-// Equals CAPTURE_SETTLE_FRAMES in capture-hook.js: the hold spans the flash capture's settle frames.
-const KILL_HOLD_FRAMES = 30;
-// Measured rise with glyphs hidden is about 0.27 at the center against about 0.001 in the control box.
-const KILL_FLASH_MARGIN = 0.1;
-const KILL_FLASH_SETTINGS = { trailDecay: 0, shipArenaFraction: 0 };
-const KILL_BOX_DEVICE_PIXELS = 60;
+// The start click lands this many frames into the flood capture's 30 settle frames
+// (CAPTURE_SETTLE_FRAMES in capture-hook.js), so the capture sees a young flood.
+const START_CLICK_SETTLE_FRAMES = 24;
+const START_CLICK_HOLD_FRAMES = 3;
+// Measured rise is about 0.023 (0.0175 -> 0.041) over three runs.
+const FLOOD_MARGIN = 0.01;
+const FLOOD_SETTINGS = { trailDecay: 0, shipArenaFraction: 0 };
+// --play: the ship moves left at full stick for this many frames (6 units per second, about 2 units
+// at 60 frames per second), then fires to the right, toward the arena center.
+const PLAY_MOVE_FRAMES = 20;
+const PLAY_TIMEOUT_MILLISECONDS = 60_000;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
 async function writeDataUrl(name, dataUrl) {
@@ -67,6 +76,14 @@ function withTimeout(promise, milliseconds, label) {
 
 function evaluateWithin(page, label, pageFunction, argument) {
   return withTimeout(page.evaluate(pageFunction, argument), EVALUATE_TIMEOUT_MILLISECONDS, label);
+}
+
+function parsePlayFrames(argumentList) {
+  const index = argumentList.indexOf('--play');
+  if (index === -1) return null;
+  const frames = Number.parseInt(argumentList[index + 1], 10);
+  if (!Number.isInteger(frames) || frames <= 0) throw new Error('--play needs a positive integer');
+  return frames;
 }
 
 function waitForFrame(page, target) {
@@ -109,55 +126,75 @@ async function checkResize(page) {
   return page.consoleErrors.length > 0 ? `smoke: console errors after resize: ${page.consoleErrors.join(' | ')}` : null;
 }
 
-// Kill flash check. Two captures with KILL_FLASH_SETTINGS (overrides settle 30 frames before each
-// capture): one calm, one taken while the primary button is held at the canvas center, so the hold
-// spans the second capture's settle frames (KILL_HOLD_FRAMES, the CAPTURE_SETTLE_FRAMES of capture-hook.js).
-// Trails are off so history cannot saturate the boxes. Glyphs are hidden (shipArenaFraction 0)
-// because the kill also removes the dense glyph mass from the center box, which cancels most of the
-// particle and grid flash in a full render (measured: net change -0.03 to +0.04), so the check
-// measures what the kill adds, particles plus the threat-lit warp grid.
-// Both captures sample a 60 by 60 device-pixel box at the arena center and a control box of the
-// same size at 25 percent of the arena width and height, far outside the 0.6 world-unit kill
-// radius. The center rise must beat the control change by KILL_FLASH_MARGIN. Returns a failure
-// message, or null.
-async function checkKillFlash(page) {
-  const arenaRect = (await evaluateWithin(page, 'the arena rect capture', () => window.__murmuration.capture())).arenaRect;
-  const boxAt = (fractionX, fractionY) => ({
-    x: Math.round(arenaRect.x + arenaRect.width * fractionX - KILL_BOX_DEVICE_PIXELS / 2),
-    y: Math.round(arenaRect.y + arenaRect.height * fractionY - KILL_BOX_DEVICE_PIXELS / 2),
-    width: KILL_BOX_DEVICE_PIXELS,
-    height: KILL_BOX_DEVICE_PIXELS,
-  });
-  const regions = [boxAt(0.5, 0.5), boxAt(0.25, 0.25)];
-  const captureFlashLayers = () => evaluateWithin(
-    page,
-    'a kill flash capture',
-    ([boxes, settings]) => window.__murmuration.capture({ settings, regions: boxes }),
-    [regions, KILL_FLASH_SETTINGS],
-  );
+// Start clear check. The game waits in Ready until the first gesture; a click at the canvas
+// center starts the run, and the start clears the arena with the kill-all pass, whose splash floods
+// particles everywhere. Two captures with FLOOD_SETTINGS (overrides settle 30 frames before
+// each capture): one calm, and one whose settle frames contain the click, START_CLICK_SETTLE_FRAMES
+// in, so the flood is a few frames old when captured. Trails are off so history cannot saturate the
+// arena, and glyphs are hidden (shipArenaFraction 0) because the clear also removes every glyph.
+// The arena mean must rise by FLOOD_MARGIN and the phase must go from ready to playing. Returns a
+// failure message, or null.
+async function checkStartClear(page) {
+  const phaseBefore = (await evaluateWithin(page, 'reading the phase', () => window.__murmuration.stats)).phase;
+  if (phaseBefore !== 'ready') return `smoke: expected the game to wait in phase ready before any input, got ${phaseBefore}`;
+  const captureFlood = () => evaluateWithin(page, 'a start clear capture', (settings) => window.__murmuration.capture({ settings }), FLOOD_SETTINGS);
+  const calm = await captureFlood();
   const bounds = await page.locator('#arena').boundingBox();
-  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
-  const calm = await captureFlashLayers();
+  const centerX = bounds.x + bounds.width / 2;
+  const centerY = bounds.y + bounds.height / 2;
+  await page.mouse.move(centerX, centerY);
+  const settleStart = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
+  const floodCapture = captureFlood();
+  await waitForFrame(page, settleStart + START_CLICK_SETTLE_FRAMES);
+  // Held for a few frames, as a person's click is: input samples the button once per step.
   await page.mouse.down();
-  let flash;
   try {
-    flash = await captureFlashLayers();
+    await waitForFrame(page, settleStart + START_CLICK_SETTLE_FRAMES + START_CLICK_HOLD_FRAMES);
   } finally {
     await page.mouse.up();
   }
-  await writeDataUrl('smoke-kill.png', flash.pngDataUrl);
-  const [centerBefore, controlBefore] = calm.regionLuminances;
-  const [centerAfter, controlAfter] = flash.regionLuminances;
-  const centerRise = centerAfter - centerBefore;
-  const controlChange = controlAfter - controlBefore;
-  console.log(`smoke: kill flash (trails off, glyphs hidden, ${KILL_HOLD_FRAMES} held frames) center box ${centerBefore.toFixed(4)} -> ${centerAfter.toFixed(4)}, control box ${controlBefore.toFixed(4)} -> ${controlAfter.toFixed(4)}`);
-  if (!(centerRise - Math.abs(controlChange) > KILL_FLASH_MARGIN)) {
-    return `smoke: expected the center box rise (${centerRise.toFixed(4)}) to exceed the control box change (${controlChange.toFixed(4)}) by more than ${KILL_FLASH_MARGIN}`;
+  const flood = await floodCapture;
+  await writeDataUrl('smoke-kill.png', flood.pngDataUrl);
+  const phaseAfter = (await evaluateWithin(page, 'reading the phase', () => window.__murmuration.stats)).phase;
+  console.log(`smoke: start clear (trails off, glyphs hidden) arena mean ${calm.meanLuminance.toFixed(4)} -> ${flood.meanLuminance.toFixed(4)}, phase ${phaseBefore} -> ${phaseAfter}`);
+  if (phaseAfter === 'ready') return 'smoke: expected the click to start the run, the phase is still ready';
+  if (!(flood.meanLuminance - calm.meanLuminance > FLOOD_MARGIN)) {
+    return `smoke: expected the start clear to raise the arena mean luminance by more than ${FLOOD_MARGIN}`;
   }
-  return page.consoleErrors.length > 0 ? `smoke: console errors after the kill: ${page.consoleErrors.join(' | ')}` : null;
+  return page.consoleErrors.length > 0 ? `smoke: console errors after the start: ${page.consoleErrors.join(' | ')}` : null;
 }
 
-// Audio check. The kill check's mouse-down is the page's first gesture, so it must have created the
+// Replaces navigator.getGamepads, before any page script runs, with one standard pad whose axes
+// the smoke sets through window.__smokeGamepad.
+function installSyntheticGamepad() {
+  const buttons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
+  const gamepad = { id: 'smoke synthetic gamepad', index: 0, connected: true, mapping: 'standard', axes: [0, 0, 0, 0], buttons };
+  window.__smokeGamepad = gamepad;
+  Object.defineProperty(Navigator.prototype, 'getGamepads', { configurable: true, value: () => [gamepad] });
+}
+
+async function setSticks(page, axes) {
+  await evaluateWithin(page, 'setting the sticks', (values) => { window.__smokeGamepad.axes = values; }, axes);
+}
+
+// Moves the ship 2 units left (the first stick push starts the run), then fires right toward the
+// arena center for frames frames. Returns a failure message, or null.
+async function checkPlay(page, frames) {
+  const begin = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
+  await setSticks(page, [-1, 0, 0, 0]);
+  await waitForFrame(page, begin + PLAY_MOVE_FRAMES);
+  await setSticks(page, [0, 0, 1, 0]);
+  const firing = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
+  await page.waitForFunction((target) => window.__murmuration.frame >= target, firing + frames, { timeout: PLAY_TIMEOUT_MILLISECONDS });
+  await setSticks(page, [0, 0, 0, 0]);
+  const stats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  console.log(`smoke: play ${frames} frames: score ${stats.score}, multiplier ${stats.multiplier}, lives ${stats.lives}, bombs ${stats.bombs}, armed ${stats.armed} ${stats.tier}, phase ${stats.phase}, aliveTotal ${stats.aliveTotal}`);
+  if (page.consoleErrors.length > 0) return `smoke: console errors during play: ${page.consoleErrors.join(' | ')}`;
+  if (!(stats.score > 0)) return `smoke: expected a positive score after ${frames} frames of fire, got ${stats.score}`;
+  return null;
+}
+
+// Audio check. The start clear check's click is the page's first gesture, so it must have created the
 // AudioContext and started the sequencer (the browser runs muted). Waits briefly for steps to be
 // scheduled, then requires no console errors. Returns a failure message, or null.
 async function checkAudioUnlocked(page) {
@@ -171,7 +208,7 @@ async function checkAudioUnlocked(page) {
     audio = await readAudio();
   }
   console.log(`smoke: audio context ${audio.state}, ${audio.steps} steps scheduled, hint "${audio.hint}"`);
-  if (audio.state === null || audio.steps < 8) return `smoke: expected the audio to unlock on the first mouse-down and schedule steps, got ${JSON.stringify(audio)}`;
+  if (audio.state === null || audio.steps < 8) return `smoke: expected the audio to unlock on the start click and schedule steps, got ${JSON.stringify(audio)}`;
   return page.consoleErrors.length > 0 ? `smoke: console errors after the audio unlock: ${page.consoleErrors.join(' | ')}` : null;
 }
 
@@ -186,6 +223,7 @@ async function closeResources(resources) {
 
 async function run(resources) {
   const frames = parseFrameCount(process.argv.slice(2));
+  const playFrames = parsePlayFrames(process.argv.slice(2));
   try {
     let url = process.env.SMOKE_URL;
     if (!url) {
@@ -195,6 +233,7 @@ async function run(resources) {
     const launched = await launchWebGpuBrowser();
     resources.browser = launched.browser;
     const { page } = launched;
+    if (playFrames !== null) await page.addInitScript(installSyntheticGamepad);
 
     await page.goto(url);
     const adapterAvailable = await evaluateWithin(page, 'the adapter probe', async () => {
@@ -225,6 +264,15 @@ async function run(resources) {
       page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
     }
+    if (playFrames !== null) {
+      const playFailure = await checkPlay(page, playFrames);
+      if (playFailure) {
+        console.error(playFailure);
+        return EXIT_FAILURE;
+      }
+      console.log('smoke: ok (play)');
+      return EXIT_OK;
+    }
     const stats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
     if (!stats || !(stats.aliveTotal > MINIMUM_ALIVE_TOTAL)) {
       console.error(`smoke: expected stats.aliveTotal > ${MINIMUM_ALIVE_TOTAL}, got ${JSON.stringify(stats)}`);
@@ -254,9 +302,9 @@ async function run(resources) {
       page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
     }
-    const killFailure = await checkKillFlash(page);
-    if (killFailure) {
-      console.error(killFailure);
+    const startFailure = await checkStartClear(page);
+    if (startFailure) {
+      console.error(startFailure);
       return EXIT_FAILURE;
     }
     const audioFailure = await checkAudioUnlocked(page);
