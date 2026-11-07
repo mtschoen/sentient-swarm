@@ -245,3 +245,29 @@ fn killParticle(position: vec2f, angle: f32, color: u32, randomState: ptr<functi
   particle.padding = 0.0;
   return particle;
 }
+
+// Same 32-byte layout as Agent with the flags word atomic, for passes that kill agents.
+struct AtomicAgent {
+  position: vec2f,
+  velocity: vec2f,
+  species: u32,
+  flags: atomic<u32>,
+  phase: f32,
+  hueJitter: f32,
+}
+
+// One kill splash is `count` particles evenly spaced around a circle from a random rotation.
+// Storage pointers cannot be function parameters, so each pass keeps a thin wrapper that claims
+// slots on its own pool binding and fills them from this: seed comes from killBurstSeed and
+// particle index of count is derived from it alone, so the particles are independent.
+fn killBurstSeed(agentIndex: u32, frameSequence: u32) -> u32 {
+  return pcgHash(agentIndex ^ pcgHash(frameSequence * 2u + 1u));
+}
+
+fn killBurstParticle(index: u32, count: u32, seed: u32, position: vec2f, color: u32) -> Particle {
+  var rotationState = seed;
+  let rotation = nextRandom(&rotationState) * TAU;
+  var randomState = pcgHash(seed + index + 1u);
+  let angle = rotation + f32(index) * TAU / f32(count);
+  return killParticle(position, angle, color, &randomState);
+}

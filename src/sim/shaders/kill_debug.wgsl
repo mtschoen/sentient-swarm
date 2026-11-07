@@ -9,16 +9,6 @@
 //   adds one threat unit (THREAT_FIXED_POINT_SCALE fixed point) to its coarse cell.
 // The barrier sits outside every branch; threads past capacity still reach it.
 
-// Same 32-byte layout as Agent with the flags word atomic.
-struct AtomicAgent {
-  position: vec2f,
-  velocity: vec2f,
-  species: u32,
-  flags: atomic<u32>,
-  phase: f32,
-  hueJitter: f32,
-}
-
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read_write> agents: array<AtomicAgent>;
 @group(0) @binding(2) var<storage, read_write> stats: array<atomic<u32>, STATS_WORD_COUNT>;
@@ -34,11 +24,9 @@ fn emitKillParticles(slot: u32, position: vec2f, species: u32, hueJitter: f32) {
   let capacity = arrayLength(&pool.particles);
   let first = atomicAdd(&pool.cursor, KILL_PARTICLE_COUNT) % capacity;
   let color = killParticleColor(speciesTable[speciesFieldIndex(species, SPECIES_FIELD_HUE)], hueJitter);
-  var randomState = pcgHash(slot ^ pcgHash(params.frameSequence * 2u + 1u));
-  let rotation = nextRandom(&randomState) * TAU;
+  let seed = killBurstSeed(slot, params.frameSequence);
   for (var index = 0u; index < KILL_PARTICLE_COUNT; index = index + 1u) {
-    let angle = rotation + f32(index) * TAU / f32(KILL_PARTICLE_COUNT);
-    pool.particles[(first + index) % capacity] = killParticle(position, angle, color, &randomState);
+    pool.particles[(first + index) % capacity] = killBurstParticle(index, KILL_PARTICLE_COUNT, seed, position, color);
   }
 }
 

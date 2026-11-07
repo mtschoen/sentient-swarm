@@ -21,7 +21,8 @@ const AGENT_COUNT = 5000;
 const SEED_RADIUS = 3;
 const STEP_SECONDS = 1 / 60;
 const HIT_FRAME_LIMIT = 600;
-const LATCH_FRAMES = 30;
+const LATCH_FRAMES = 60;
+const STALE_ACKNOWLEDGE_FRAMES = 30;
 const ACKNOWLEDGE_FRAMES = 3;
 const SECOND_HIT_FRAME_LIMIT = 120;
 const INVULNERABLE_FRAMES = 60;
@@ -128,7 +129,7 @@ async function runCheck() {
   verdicts.push([stats.aliveTotal <= aliveBefore - 1, `(a) alive ${aliveBefore} -> ${stats.aliveTotal} (need a drop of at least 1)`]);
   if (!(firstHit > 0)) return { pass: false, detail: verdictLine(verdicts) };
 
-  // (b) the latch holds without an acknowledgement.
+  // (b) the latch holds without an acknowledgement and a stale acknowledgement does not release it.
   let latchHeld = true;
   for (let frame = 0; frame < LATCH_FRAMES; frame += 1) {
     stats = await harness.step();
@@ -137,12 +138,23 @@ async function runCheck() {
   const overlapWhileLatched = await harness.overlapping();
   verdicts.push([latchHeld, `(b) unacknowledged for ${LATCH_FRAMES} frames: hit sequence stayed ${firstHit} with the latch set (last ${stats.playerHitSequence}, latch ${stats.hitLatch})`]);
   verdicts.push([overlapWhileLatched > 0, `(b) agents overlapping the player while latched ${overlapWhileLatched} (need > 0)`]);
+
+  simulation.acknowledgeHit(firstHit - 1);
+  let staleHeld = true;
+  for (let frame = 0; frame < STALE_ACKNOWLEDGE_FRAMES; frame += 1) {
+    stats = await harness.step();
+    if (stats.playerHitSequence !== firstHit || stats.hitLatch !== 1) staleHeld = false;
+  }
+  const overlapAfterStale = await harness.overlapping();
+  verdicts.push([staleHeld, `(b) stale acknowledgement ${firstHit - 1} for ${STALE_ACKNOWLEDGE_FRAMES} frames: hit sequence stayed ${firstHit} with the latch set (last ${stats.playerHitSequence}, latch ${stats.hitLatch})`]);
+  verdicts.push([overlapAfterStale > 0, `(b) agents overlapping the player after the stale acknowledgement ${overlapAfterStale} (need > 0)`]);
+
   simulation.acknowledgeHit(firstHit);
   const acknowledgedAt = simulation.frameSequence;
   for (let frame = 0; frame < ACKNOWLEDGE_FRAMES; frame += 1) stats = await harness.step();
   for (let frame = 0; frame < SECOND_HIT_FRAME_LIMIT && stats.playerHitSequence === firstHit; frame += 1) stats = await harness.step();
   const secondHit = stats.playerHitSequence;
-  verdicts.push([secondHit > acknowledgedAt, `(b) second hit at frame ${secondHit} after acknowledging at frame ${acknowledgedAt} (need later)`]);
+  verdicts.push([secondHit > firstHit && secondHit > acknowledgedAt, `(b) second hit at frame ${secondHit} after acknowledging ${firstHit} at frame ${acknowledgedAt} (need later than both)`]);
 
   // (c) invulnerable.
   simulation.acknowledgeHit(secondHit);

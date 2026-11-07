@@ -29,16 +29,6 @@
 // Storage buffers: projectiles, agents, cellCounts, cellOffsets, sortedIndices, particles (pool
 // cursor in its header), threatAccumulator, stats = 8; uniforms: params, hues.
 
-// Same 32-byte layout as Agent with the flags word atomic.
-struct AtomicAgent {
-  position: vec2f,
-  velocity: vec2f,
-  species: u32,
-  flags: atomic<u32>,
-  phase: f32,
-  hueJitter: f32,
-}
-
 // Species hues 0..3, then species 4 in second.x; copied from the species table every frame.
 struct SpeciesHues {
   first: vec4f,
@@ -80,11 +70,9 @@ fn emitKillParticles(agentIndex: u32, position: vec2f, species: u32, hueJitter: 
   let capacity = arrayLength(&pool.particles);
   let first = atomicAdd(&pool.cursor, KILL_PARTICLE_COUNT) % capacity;
   let color = killParticleColor(speciesHue(species), hueJitter);
-  var randomState = pcgHash(agentIndex ^ pcgHash(params.frameSequence * 2u + 1u));
-  let rotation = nextRandom(&randomState) * TAU;
+  let seed = killBurstSeed(agentIndex, params.frameSequence);
   for (var index = 0u; index < KILL_PARTICLE_COUNT; index = index + 1u) {
-    let angle = rotation + f32(index) * TAU / f32(KILL_PARTICLE_COUNT);
-    pool.particles[(first + index) % capacity] = killParticle(position, angle, color, &randomState);
+    pool.particles[(first + index) % capacity] = killBurstParticle(index, KILL_PARTICLE_COUNT, seed, position, color);
   }
 }
 
