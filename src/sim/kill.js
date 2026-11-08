@@ -67,6 +67,12 @@ export function packKillArea(area) {
   return bytes;
 }
 
+// The six buffers, in binding order, that the debug kill and kill-all shaders share (the params
+// uniform at 0, then the storage buffers); kill-all appends its area uniform.
+function killBuffers({ agentsBuffer, statsBuffer, particleBuffers, threatAccumulator, speciesTableBuffer, paramsBuffer }) {
+  return [paramsBuffer, agentsBuffer, statsBuffer, particleBuffers.particles, threatAccumulator, speciesTableBuffer];
+}
+
 function agentWorkgroups(agentsBuffer) {
   return Math.ceil(agentsBuffer.size / AGENT_STRIDE_BYTES / WORKGROUP_SIZE);
 }
@@ -76,10 +82,8 @@ export class DebugKillPass extends ComputePass {
     super(gpu, { common, shaderName: 'kill_debug', label: 'kill-debug' });
   }
 
-  encode(encoder, { agentsBuffer, statsBuffer, particleBuffers, threatAccumulator, speciesTableBuffer, paramsBuffer }) {
-    this.dispatch(encoder, [
-      paramsBuffer, agentsBuffer, statsBuffer, particleBuffers.particles, threatAccumulator, speciesTableBuffer,
-    ], agentWorkgroups(agentsBuffer));
+  encode(encoder, context) {
+    this.dispatch(encoder, killBuffers(context), agentWorkgroups(context.agentsBuffer));
   }
 }
 
@@ -104,7 +108,8 @@ export class KillAllPass extends ComputePass {
 
   // area: null kills every alive agent; { x, y, radius } only those within radius of (x, y). It
   // is written with queue.writeBuffer, so one kill-all per submission.
-  encode(encoder, { agentsBuffer, statsBuffer, particleBuffers, threatAccumulator, speciesTableBuffer, paramsBuffer }, area = null) {
+  encode(encoder, context, area = null) {
+    const { agentsBuffer, particleBuffers, paramsBuffer } = context;
     if (this.countPipeline === null) throw new Error('KillAllPass.initialize() must finish before encode()');
     this.device.queue.writeBuffer(this.areaBuffer, 0, packKillArea(area));
     const workgroups = agentWorkgroups(agentsBuffer);
@@ -113,9 +118,7 @@ export class KillAllPass extends ComputePass {
     pass.setBindGroup(0, this.countBindGroupCache.get([paramsBuffer, agentsBuffer, particleBuffers.particles]));
     pass.dispatchWorkgroups(workgroups);
     pass.end();
-    this.dispatch(encoder, [
-      paramsBuffer, agentsBuffer, statsBuffer, particleBuffers.particles, threatAccumulator, speciesTableBuffer, this.areaBuffer,
-    ], workgroups);
+    this.dispatch(encoder, [...killBuffers(context), this.areaBuffer], workgroups);
   }
 
   destroy() {

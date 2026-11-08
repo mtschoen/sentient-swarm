@@ -4,7 +4,7 @@
 // its share within 10 percent relative; (c) the read-back frameSequence lags the CPU frame by at
 // most 3; (d) after frame 1 every agent was spawned that frame: it sits at least ARENA_WIDTH / 4
 // from the player and within the default spawn band of a wall (task C0b) with 29 spawn-in frames left, in-range species, phase and hueJitter, and zero
-// velocity unless integrate's wall spring already pushed it (inside WALL_MARGIN of an edge);
+// velocity unless integrate's wall spring already pushed it (inside DEFAULT_WALL_MARGIN of an edge);
 // (e) recreateWithCapacity(131072) keeps at least 95 percent of the alive agents after one more step;
 // (f) a one-frame debug kill of radius 2 at the arena center, with zero spawning, reports kills, drops
 // aliveTotal by exactly that many, reports zero kills a frame later, fills at least DEFAULT_KILL_BURST_PARTICLES particle slots
@@ -29,7 +29,7 @@ import { SpawnPressure } from '/src/sim/spawner.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { DENSITY_READBACK_INTERVAL } from '/src/sim/density-readback.js';
 import { PARTICLE_HEADER_BYTES, PARTICLE_STRIDE_BYTES } from '/src/sim/particles.js';
-import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH } from '/src/sim/params.js';
+import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_WALL_MARGIN } from '/src/sim/params.js';
 
 const INITIAL_CAPACITY = 65536;
 const GROWN_CAPACITY = 131072;
@@ -40,8 +40,6 @@ const MAXIMUM_SEQUENCE_LAG = 3;
 const PLAYER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
 const READBACK_ATTEMPTS = 20;
 const PHASE_TOLERANCE = 1e-5;
-// integrate.wgsl's wall margin; integrate runs in the spawn frame and pushes agents inside it.
-const WALL_MARGIN = 0.5;
 const KILL_RADIUS = 2;
 const KILL_FRAMES_TO_WAIT = 3;
 const PARTICLES_PER_KILL = DEFAULT_KILL_BURST_PARTICLES;
@@ -122,7 +120,7 @@ function spawnPlacement(agentBytes) {
     if (x < 0 || x > ARENA_WIDTH || y < 0 || y > ARENA_HEIGHT) return { failure: `slot ${slot} spawned outside the arena at (${x}, ${y})` };
     const wallDistance = Math.min(x, y, ARENA_WIDTH - x, ARENA_HEIGHT - y);
     if (wallDistance > DEFAULT_SPAWN_BAND_WIDTH) return { failure: `slot ${slot} spawned ${wallDistance.toFixed(3)} from the nearest wall, outside the ${DEFAULT_SPAWN_BAND_WIDTH} band` };
-    const insideMargin = wallDistance < WALL_MARGIN;
+    const insideMargin = wallDistance < DEFAULT_WALL_MARGIN;
     if (!insideMargin && (velocity[0] !== 0 || velocity[1] !== 0)) return { failure: `slot ${slot} has velocity ${velocity} in its spawn frame` };
     if (spawnFrames !== SPAWN_FRAMES - 1) return { failure: `slot ${slot} has ${spawnFrames} spawn-in frames after integrate, expected ${SPAWN_FRAMES - 1}` };
     if (species >= SPECIES_COUNT) return { failure: `slot ${slot} has species ${species}` };

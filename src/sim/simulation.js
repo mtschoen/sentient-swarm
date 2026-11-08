@@ -56,7 +56,7 @@ import { STATS_BYTES, STATS_PERSISTENT_OFFSET_BYTES, StatsPass, decodeStats } fr
 import { Steering } from './steer.js';
 
 // PlayerShip's default radius (src/game/player.js).
-const DEFAULT_PLAYER_RADIUS = 0.12;
+export const DEFAULT_PLAYER_RADIUS = 0.12;
 
 export class Simulation {
   static async create(gpu, {

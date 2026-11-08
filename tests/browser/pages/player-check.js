@@ -20,7 +20,7 @@
 //     and the next step kills nothing.
 import { createGpuContext } from '/src/gpu/device.js';
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '/src/sim/layout.js';
-import { Simulation } from '/src/sim/simulation.js';
+import { DEFAULT_PLAYER_RADIUS, Simulation } from '/src/sim/simulation.js';
 import { Game } from '/src/game/game.js';
 import { InputState } from '/src/input/input.js';
 import { defaultSpecies } from '/src/sim/species.js';
@@ -38,7 +38,6 @@ const SECOND_HIT_FRAME_LIMIT = 120;
 const INVULNERABLE_FRAMES = 60;
 const CLEAR_SPAWN = [200, 0, 0, 0, 0];
 const READBACK_ATTEMPTS = 20;
-const PLAYER_RADIUS = 0.12;
 const CONTACT_MARGIN = 0.02;
 const CENTER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
 
@@ -79,7 +78,7 @@ class Harness {
 
   // One step (player state set first, as the game does), submitted and awaited; returns its stats.
   async step(spawnPerSpecies = new Uint32Array(SPECIES_COUNT)) {
-    this.simulation.setPlayerState({ x: CENTER[0], y: CENTER[1], radius: PLAYER_RADIUS, invulnerable: this.invulnerable });
+    this.simulation.setPlayerState({ x: CENTER[0], y: CENTER[1], radius: DEFAULT_PLAYER_RADIUS, invulnerable: this.invulnerable });
     const encoder = this.device.createCommandEncoder({ label: 'player-check-frame' });
     this.simulation.step(encoder, STEP_SECONDS, spawnPerSpecies);
     this.device.queue.submit([encoder.finish()]);
@@ -104,7 +103,7 @@ class Harness {
       if ((view.getUint32(base + AGENT_OFFSETS.flags, true) & AGENT_FLAG_ALIVE) === 0) continue;
       const x = view.getFloat32(base + AGENT_OFFSETS.position, true);
       const y = view.getFloat32(base + AGENT_OFFSETS.position + 4, true);
-      if (Math.hypot(x - CENTER[0], y - CENTER[1]) <= PLAYER_RADIUS + CONTACT_MARGIN) count += 1;
+      if (Math.hypot(x - CENTER[0], y - CENTER[1]) <= DEFAULT_PLAYER_RADIUS + CONTACT_MARGIN) count += 1;
     }
     return count;
   }

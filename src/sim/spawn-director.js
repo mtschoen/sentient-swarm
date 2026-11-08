@@ -17,7 +17,8 @@
 // of the ray from the player along the aim never emits a wave (a wave in progress stops when its
 // gate enters the lane; the bank waits for the next wave), and new gates avoid the lane, so the
 // lane the player is shooting open does not refill from its far end; a gate that stays in the lane
-// for AIM_LANE_CLOSE_SECONDS closes, so a new one opens elsewhere. The first fill ignores the lane. Time is the summed deltaSeconds of update (injected), randomness the injected random.
+// for AIM_LANE_CLOSE_SECONDS closes, so a new one opens elsewhere. The first fill ignores the lane.
+// Time is the summed deltaSeconds of update (injected), randomness the injected random.
 // The shader side (spawn.wgsl) samples each new agent's position from the emitting gates, weighted
 // by emission and by speciesBias toward the gate's favored species; see spawnGates.
 import { ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from './layout.js';

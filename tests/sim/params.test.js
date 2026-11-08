@@ -35,7 +35,7 @@ test('packSimParams produces the 240-byte uniform layout', () => {
 test('packSimParams defaults missing fields to zero', () => {
   const view = new DataView(packSimParams({}));
   for (let offset = 0; offset < SIM_PARAMS_BYTES; offset += 4) {
-    // Same-species cohesion defaults to on the seek scale to 1 (full seek), the spawn distance to
+    // Same-species cohesion defaults to on, the seek scale to 1 (full seek), the spawn distance to
     // 0.25 of the arena width, and the kill burst, spawn band and density bias to their defaults.
     if (offset === 108) assert.equal(view.getFloat32(offset, true), 1);
     else if (offset === 36) assert.equal(view.getFloat32(offset, true), 0.25);

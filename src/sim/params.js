@@ -115,6 +115,8 @@ const COMFORT_RADIUS_OFFSET = 228;
 // 1 (the default) applies the coarse-field pressure term in steer.wgsl, 0 leaves it out.
 const COARSE_FIELD_PRESSURE_OFFSET = 232;
 const VECTOR_FIELDS = { playerPosition: 8, debugKillPosition: 40 };
+// spawnPerSpecies0 at 48 and spawnPerSpecies1 at 64 (species 4 in .x); bytes 68 to 79 are reserved
+// padding that stays zero.
 const SPAWN_PER_SPECIES_OFFSET = 48;
 
 export function packSimParams(values) {
