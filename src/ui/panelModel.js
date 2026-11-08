@@ -67,7 +67,7 @@ export const LAB_KNOB_GROUPS = [
   { title: 'Spawn ramp', knobs: [
     { key: 'floorFraction', label: 'floor', minimum: 0, maximum: 0.1, step: 0.001 },
     { key: 'rampSeconds', label: 'ramp seconds', minimum: 10, maximum: 300, step: 1 },
-    { key: 'ceilingFraction', label: 'ceiling', minimum: 0.1, maximum: 1, step: 0.01 },
+    { key: 'ceilingFraction', label: 'ceiling', minimum: 0.02, maximum: 1, step: 0.01 },
     { key: 'curveExponent', label: 'curve exponent', minimum: 1, maximum: 4, step: 0.1 },
     { key: 'seekFloorFraction', label: 'seek floor', minimum: 0, maximum: 1, step: 0.01 },
     { key: 'spawnDistanceStartFraction', label: 'spawn distance start', minimum: 0.25, maximum: 0.4, step: 0.01 },

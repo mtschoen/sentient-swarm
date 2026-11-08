@@ -61,11 +61,11 @@ test('the packed default table and the default matrix are finite', () => {
 
 test('the default rows pin their starting numbers', () => {
   const pinned = {
-    Chaser: [0.02, 1.0, 0.9, 0.5, 0.3, 4.0, 0.6, 0, 0, 0.5, 24],
-    Orbiter: [0.55, 0.5, 0.3, 0.9, 0.3, 3.0, 0.5, 2.4, 0, 0.2, 18],
-    Skittish: [0.15, 0.5, 0.9, 0.4, 0.3, 5.0, 0.8, 0, 2.0, 0.5, 30],
-    Lattice: [0.75, 0.15, 0.1, 0.9, 1.8, 2.0, 0.3, 0, 0, 1.0, 24],
-    Predator: [0.92, 0.2, 0.2, 0.3, 0.4, 4.5, 0.7, 0, 0, 0.5, 16],
+    Chaser: [0.02, 0.6, 0.5, 1.4, 0.9, 4.5, 0.9, 0, 0.4, 0.6, 120],
+    Orbiter: [0.55, 0.5, 0.3, 0.9, 0.3, 3.0, 0.5, 2.4, 0, 0.2, 90],
+    Skittish: [0.15, 0.5, 0.9, 0.4, 0.3, 5.0, 0.8, 0, 2.0, 0.5, 150],
+    Lattice: [0.75, 0.15, 0.1, 0.9, 1.8, 2.0, 0.3, 0, 0, 1.0, 120],
+    Predator: [0.92, 0.2, 0.2, 0.3, 0.4, 4.5, 0.7, 0, 0, 0.5, 80],
   };
   const fields = ['hue', 'seek', 'cohesion', 'alignment', 'separation', 'maximumSpeed', 'maximumTurn', 'orbitRadius', 'flee', 'pressure', 'targetDensity'];
   for (const row of defaultSpecies()) assert.deepEqual(fields.map((field) => row[field]), pinned[row.name], row.name);

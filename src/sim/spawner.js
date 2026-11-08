@@ -5,8 +5,11 @@
 // multiplier on every species' seek weight, SimParams.seekScale) is lerp(seekFloorFraction, 1,
 // rampProgress); the minimum spawn distance from the player (SimParams.spawnDistanceFraction, of the
 // arena width) is lerp(spawnDistanceStartFraction, 0.25, rampProgress), never under the spec's
-// quarter. The defaults ease in (exponent 2) from 1 percent to 90 percent over 120 seconds, with
-// seek at 10 percent and spawns 0.4 of the arena width away at the start. Count alone does not set
+// quarter. The defaults ease in (exponent 2) from 1 percent to 10 percent over 120 seconds, with
+// seek at 10 percent and spawns 0.4 of the arena width away at the start. The 10 percent ceiling is
+// owner ruling R37 (2026-11-08): above about a tenth of capacity the swarm fills the arena edge to
+// edge at the species' comfort densities and reads as fog; at a tenth it packs into a shape with
+// empty space around it. Count alone does not set
 // the time to the first death: at full seek a stationary ship died about 1.5 to 2 seconds in at
 // any count down to 135 agents (the first Chasers arrive about a second after their spawn-in), and
 // far spawns alone did not help either; weak early seek plus far early spawns did (task C0 report).
@@ -40,7 +43,7 @@ const SPAWN_CAP_DIVISOR = 60;
 export const DEFAULT_RAMP = Object.freeze({
   floorFraction: 0.01,
   rampSeconds: 120,
-  ceilingFraction: 0.9,
+  ceilingFraction: 0.1,
   curveExponent: 2,
   seekFloorFraction: 0.1,
   spawnDistanceStartFraction: 0.4,

@@ -31,7 +31,8 @@ import { DEFAULT_RAMP } from '../sim/spawner.js';
 import { MIX_VERSION, RULE_FIELDS, RULE_RANGES, decodeMix } from './labPresets.js';
 import { LAB_KNOBS, RENDER_SLIDERS, clampToSpec } from './panelModel.js';
 
-export const DEFAULT_WATCH_ALIVE_FRACTION = 0.3;
+// The shipped ramp's ceiling (owner ruling R37), so Watch shows the swarm the game actually reaches.
+export const DEFAULT_WATCH_ALIVE_FRACTION = 0.1;
 const MIX_HASH_PREFIX = '#mix=';
 const MATRIX_LIMIT = 4;
 const NEIGHBOR_RADIUS_RANGE = [0.05, 0.5];

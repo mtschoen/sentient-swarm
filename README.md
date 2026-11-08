@@ -58,7 +58,7 @@ You start on the base gun: three energy balls in a spread with unlimited ammo. T
 ### Difficulty
 
 - New enemies enter through spawn gates: three drifting rings at the arena edges or in the interior, never inside a safe radius around you or in the lane you are aiming down. A gate lives about 14 seconds. Every 1.6 seconds one gate emits a wave for 0.7 seconds (it brightens just before), so pressure comes in bursts with quiet gaps. The first fill after a start or respawn opens every gate at once.
-- The alive target ramps from 1 percent to 90 percent of capacity over 120 seconds on a squared curve, enemies seek the ship more strongly as the ramp goes (10 percent at the start), and spawns start farther away (0.4 of the arena width, shrinking to 0.25). Killed enemies refill at 15 percent of the alive target per second, spent in the wave bursts.
+- The alive target ramps from 1 percent to 10 percent of capacity over 120 seconds on a squared curve (a tenth is where the swarm still packs into a shape instead of filling the arena), enemies seek the ship more strongly as the ramp goes (10 percent at the start), and spawns start farther away (0.4 of the arena width, shrinking to 0.25). Killed enemies refill at 15 percent of the alive target per second, spent in the wave bursts.
 
 ### Scoring
 

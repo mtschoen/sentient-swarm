@@ -9,7 +9,7 @@ const STEP_SECONDS = 1 / 60;
 // to 90 percent over 120 seconds; seek starts at 10 percent strength and the spawn distance from
 // the player at 0.4 of the arena width, and both ramp with the count (to full seek and 0.25).
 const DEFAULT_FLOOR = 0.01;
-const DEFAULT_CEILING = 0.9;
+const DEFAULT_CEILING = 0.1;
 const DEFAULT_RAMP_SECONDS = 120;
 const DEFAULT_SEEK_FLOOR = 0.1;
 const DEFAULT_SPAWN_DISTANCE_START = 0.4;
@@ -328,7 +328,7 @@ test('DEFAULT_RAMP pins every tuned value', () => {
   assert.deepEqual({ ...DEFAULT_RAMP }, {
     floorFraction: 0.01,
     rampSeconds: 120,
-    ceilingFraction: 0.9,
+    ceilingFraction: 0.1,
     curveExponent: 2,
     seekFloorFraction: 0.1,
     spawnDistanceStartFraction: 0.4,
