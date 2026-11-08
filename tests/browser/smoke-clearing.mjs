@@ -11,8 +11,8 @@
 //   the ship's row, from CORRIDOR_START_X to CORRIDOR_END_X (clear of the ship, where seek
 //   gathers the swarm). Control: the same columns in the rows CONTROL_ROW_OFFSET above and below,
 //   untouched by the beam. The corridor's mean density must stay under half the control's at 3 s.
-// --bursts: the R12 visual gates. artifacts/kill-burst.png: the base gun firing into the swarm at
-//   default settings, captured after BURST_FIRE_FRAMES of fire. artifacts/bomb-burst.png: the
+// --bursts: the R12 visual gates, with the ship invulnerable throughout. artifacts/kill-burst.png:
+//   the base gun firing into the swarm at default settings, captured after BURST_FIRE_FRAMES of fire. artifacts/bomb-burst.png: the
 //   floor raised to BOMB_FLOOR_FRACTION, a bomb through the dense arena, captured
 //   BOMB_CAPTURE_FRAMES after the press; the particle pool's live count (read from its header) is
 //   reported against the pool size before and after the bomb.
@@ -166,6 +166,8 @@ async function readParticleLoad(page, helpers) {
 
 // Returns a failure message, or null.
 export async function captureBursts(page, helpers) {
+  // A death would flood the pool with its own clear and empty the arena before the bomb.
+  await helpers.evaluateWithin(page, 'making the ship invulnerable', () => window.__murmuration.game.debugInvulnerable(true));
   await moveToLeftWall(page, helpers);
   await helpers.setSticks(page, [0, 0, 1, 0]);
   await framesLater(page, helpers, BURST_FIRE_FRAMES);
