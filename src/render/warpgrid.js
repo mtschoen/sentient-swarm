@@ -6,15 +6,20 @@
 // radial push from each shockwave impulse (ImpulseSet.toUniformArray, impulses.js).
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createUniformBuffer } from '../gpu/buffers.js';
-import { DEFAULT_IMPULSE_CAPACITY } from './impulses.js';
+import { substituteConstants } from '../gpu/shaders.js';
+import { DEFAULT_IMPULSE_CAPACITY, DEFAULT_IMPULSE_DURATION_SECONDS, FLOATS_PER_IMPULSE } from './impulses.js';
 import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
 
-// Matches IMPULSE_CAPACITY in warpgrid.wgsl.
 export const WARP_IMPULSE_CAPACITY = DEFAULT_IMPULSE_CAPACITY;
+// Substituted into warpgrid.wgsl, so the shader's impulse array and lifetime follow ImpulseSet.
+export const WARP_SHADER_CONSTANTS = Object.freeze({
+  IMPULSE_CAPACITY: WARP_IMPULSE_CAPACITY,
+  IMPULSE_DURATION_SECONDS: DEFAULT_IMPULSE_DURATION_SECONDS,
+});
 const WARP_VIEW_HEADER_BYTES = 48;
 const IMPULSE_BYTES = 16;
 export const WARP_VIEW_BYTES = WARP_VIEW_HEADER_BYTES + WARP_IMPULSE_CAPACITY * IMPULSE_BYTES;
-const NO_IMPULSES = new Float32Array(WARP_IMPULSE_CAPACITY * 4);
+const NO_IMPULSES = new Float32Array(WARP_IMPULSE_CAPACITY * FLOATS_PER_IMPULSE);
 const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 
 // Horizontal lines: rows + 1 lines of columns segments; vertical lines: columns + 1 lines of rows segments.
@@ -34,16 +39,25 @@ export function warpGridLatticePoint(vertexIndex, columns, rows) {
   return { column: Math.floor(vertical / rows), row: (vertical % rows) + end };
 }
 
+// The bytes of one WarpView and float and word views over them, for packWarpView to fill.
+export function createWarpViewData() {
+  const bytes = new ArrayBuffer(WARP_VIEW_BYTES);
+  return { bytes, floats: new Float32Array(bytes), words: new Uint32Array(bytes) };
+}
+
 // Matches the WarpView table in warpgrid.wgsl. impulses: WARP_IMPULSE_CAPACITY * 4 floats of
-// [x, y, age, strength] (ImpulseSet.toUniformArray), none when omitted.
-export function packWarpView({ viewport, columns, rows, densityWeight, threatWeight, time, impulses = NO_IMPULSES }) {
+// [x, y, age, strength] (ImpulseSet.toUniformArray), none when omitted. Fills target (a
+// createWarpViewData, a new one by default) and returns its bytes.
+export function packWarpView(
+  { viewport, columns, rows, densityWeight, threatWeight, time, impulses = NO_IMPULSES },
+  target = createWarpViewData(),
+) {
   const origin = viewport.worldToClip(0, 0);
   const unit = viewport.worldToClip(1, 1);
-  const bytes = new ArrayBuffer(WARP_VIEW_BYTES);
-  new Float32Array(bytes, 0, 8).set([unit.x - origin.x, unit.y - origin.y, origin.x, origin.y, densityWeight, threatWeight, time, 0]);
-  new Uint32Array(bytes, 32, 4).set([columns, rows, 0, 0]);
-  new Float32Array(bytes, WARP_VIEW_HEADER_BYTES, WARP_IMPULSE_CAPACITY * 4).set(impulses);
-  return bytes;
+  target.floats.set([unit.x - origin.x, unit.y - origin.y, origin.x, origin.y, densityWeight, threatWeight, time, 0]);
+  target.words.set([columns, rows, 0, 0], 8);
+  target.floats.set(impulses, WARP_VIEW_HEADER_BYTES / Float32Array.BYTES_PER_ELEMENT);
+  return target.bytes;
 }
 
 export class WarpGrid {
@@ -55,6 +69,7 @@ export class WarpGrid {
     this.common = common;
     this.pipeline = null;
     this.viewBuffer = createUniformBuffer(this.device, WARP_VIEW_BYTES, 'warp-view');
+    this.viewData = createWarpViewData();
     this.bindGroupCache = new BindGroupCache((buffers) => this.device.createBindGroup({
       label: 'warp-grid-bindings',
       layout: this.pipeline.getBindGroupLayout(0),
@@ -63,7 +78,8 @@ export class WarpGrid {
   }
 
   async initialize() {
-    const module = this.device.createShaderModule({ label: 'warp-grid', code: await loadRenderShader('warpgrid', this.common) });
+    const code = substituteConstants(await loadRenderShader('warpgrid', this.common), WARP_SHADER_CONSTANTS);
+    const module = this.device.createShaderModule({ label: 'warp-grid', code });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'warp-grid',
       layout: 'auto',
@@ -80,7 +96,8 @@ export class WarpGrid {
   // Draws into an open render pass whose color target is the grid layer.
   encode(pass, fieldBuffer, time, { densityWeight, threatWeight, impulses }) {
     const { columns, rows, viewport } = this;
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packWarpView({ viewport, columns, rows, densityWeight, threatWeight, time, impulses }));
+    const view = packWarpView({ viewport, columns, rows, densityWeight, threatWeight, time, impulses }, this.viewData);
+    this.device.queue.writeBuffer(this.viewBuffer, 0, view);
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, fieldBuffer]));
     pass.draw(2 * warpGridSegmentCount(columns, rows));

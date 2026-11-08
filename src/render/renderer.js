@@ -21,7 +21,7 @@ import { FrameCapture } from './capture.js';
 import { GateRenderer } from './gates.js';
 import { CompositePass } from './composite.js';
 import { GlyphPass } from './glyphs.js';
-import { ImpulseSet, bloomBoostFactor } from './impulses.js';
+import { FLOATS_PER_IMPULSE, ImpulseSet, bloomBoostFactor } from './impulses.js';
 import { ParticleRenderer } from './particles.js';
 import { PickupRenderer } from './pickups.js';
 import { ProjectileRenderer } from './projectiles.js';
@@ -87,6 +87,8 @@ export class Renderer {
     this.composite = new CompositePass(gpu, { fullscreenHeader });
     this.frameCapture = new FrameCapture(this.device, gpu.format);
     this.impulses = new ImpulseSet();
+    // Refilled by toUniformArray every frame.
+    this.impulseUniform = new Float32Array(this.impulses.capacity * FLOATS_PER_IMPULSE);
     this.bloomBoostTime = -Infinity;
     this.sceneTextures = [];
     this.gridTexture = null;
@@ -151,7 +153,7 @@ export class Renderer {
     this.warpGrid.encode(gridPass, simulation.fieldBuffer, time, {
       densityWeight: settings.warpDensityWeight,
       threatWeight: settings.warpThreatWeight,
-      impulses: this.impulses.toUniformArray(time),
+      impulses: this.impulses.toUniformArray(time, this.impulseUniform),
     });
     gridPass.end();
     const scenePass = encoder.beginRenderPass({

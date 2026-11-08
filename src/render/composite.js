@@ -5,13 +5,19 @@ import { createUniformBuffer } from '../gpu/buffers.js';
 import { createFullscreenPipeline, loadRenderShader } from './render-shaders.js';
 
 const COMPOSITE_UNIFORM_BYTES = 32;
+const COMPOSITE_UNIFORM_FLOATS = COMPOSITE_UNIFORM_BYTES / Float32Array.BYTES_PER_ELEMENT;
 // The shipped scene radiance scale ahead of the tonemap; the renderer's exposure setting (1 by
 // default, the lab slider) multiplies it.
 export const BASE_EXPOSURE = 0.15;
 
-export function packCompositeUniform({ arenaRect, bloomStrength, exposure = 1, timeWarp = 0 }) {
+// Fills target (a new array by default) and returns it.
+export function packCompositeUniform(
+  { arenaRect, bloomStrength, exposure = 1, timeWarp = 0 },
+  target = new Float32Array(COMPOSITE_UNIFORM_FLOATS),
+) {
   const warp = Math.min(1, Math.max(0, timeWarp));
-  return new Float32Array([arenaRect.x, arenaRect.y, arenaRect.width, arenaRect.height, bloomStrength, BASE_EXPOSURE * exposure, warp, 0]);
+  target.set([arenaRect.x, arenaRect.y, arenaRect.width, arenaRect.height, bloomStrength, BASE_EXPOSURE * exposure, warp, 0]);
+  return target;
 }
 
 export class CompositePass {
@@ -22,6 +28,7 @@ export class CompositePass {
     this.pipeline = null;
     this.sampler = this.device.createSampler({ label: 'composite-linear', magFilter: 'linear', minFilter: 'linear' });
     this.uniformBuffer = createUniformBuffer(this.device, COMPOSITE_UNIFORM_BYTES, 'composite');
+    this.uniformFloats = new Float32Array(COMPOSITE_UNIFORM_FLOATS);
     this.bindGroups = [];
   }
 
@@ -48,7 +55,8 @@ export class CompositePass {
   }
 
   encode(encoder, targetView, sceneIndex, { arenaRect, bloomStrength, exposure = 1, timeWarp = 0 }) {
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, packCompositeUniform({ arenaRect, bloomStrength, exposure, timeWarp }));
+    const uniform = packCompositeUniform({ arenaRect, bloomStrength, exposure, timeWarp }, this.uniformFloats);
+    this.device.queue.writeBuffer(this.uniformBuffer, 0, uniform);
     const pass = encoder.beginRenderPass({
       label: 'composite',
       colorAttachments: [{ view: targetView, loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }],

@@ -3,7 +3,7 @@
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { PICKUP_HUES, PICKUP_SHAPE_CLOCK, WEAPON_HUES } from '../game/weaponTypes.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
-import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
+import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
 export const MAXIMUM_PICKUPS = 32;
 const FLOATS_PER_PICKUP = 4;
@@ -11,9 +11,9 @@ const VIEW_FLOATS = WORLD_VIEW_FLOATS + MAXIMUM_PICKUPS * FLOATS_PER_PICKUP;
 export const PICKUP_VIEW_BYTES = VIEW_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 const VERTICES_PER_QUAD = 4;
 
-// Matches the PickupView table in pickups.wgsl; returns the packed floats and the pickup count.
-export function packPickupView({ viewport, time, pickups }) {
-  const floats = new Float32Array(VIEW_FLOATS);
+// Matches the PickupView table in pickups.wgsl; fills floats (a new array by default) and returns
+// it with the pickup count. Slots past the count keep their old values.
+export function packPickupView({ viewport, time, pickups }, floats = new Float32Array(VIEW_FLOATS)) {
   packWorldView(viewport, time, floats);
   const count = Math.min(pickups.length, MAXIMUM_PICKUPS);
   for (let index = 0; index < count; index += 1) {
@@ -32,10 +32,11 @@ export class PickupRenderer {
     this.pipeline = null;
     this.bindGroup = null;
     this.viewBuffer = createUniformBuffer(this.device, PICKUP_VIEW_BYTES, 'pickup-view');
+    this.viewFloats = new Float32Array(VIEW_FLOATS);
   }
 
   async initialize() {
-    const module = this.device.createShaderModule({ label: 'pickups', code: await loadRenderShader('pickups', this.common) });
+    const module = this.device.createShaderModule({ label: 'pickups', code: await loadQuadShader('pickups', this.common) });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'pickups',
       layout: 'auto',
@@ -52,7 +53,7 @@ export class PickupRenderer {
 
   // pickups: [{ x, y, type, fade }]. Draws into an open render pass whose target is a scene texture.
   encode(pass, pickups, time) {
-    const { floats, count } = packPickupView({ viewport: this.viewport, time, pickups });
+    const { floats, count } = packPickupView({ viewport: this.viewport, time, pickups }, this.viewFloats);
     if (count === 0) return;
     this.device.queue.writeBuffer(this.viewBuffer, 0, floats);
     pass.setPipeline(this.pipeline);

@@ -1,8 +1,8 @@
 // Spawn gates: one instanced quad per gate (at most 4, drawn as the instance count), read from a
 // small uniform array. A soft ring at the gate radius with GATE_DASHES rotating dashes in the
 // favored species' hue, a faint inner haze, all scaled by the open amount; the telegraph (the next
-// wave's gate) and emission brighten it and emission adds a pulsing core. Common header prepended
-// (hsvToRgb).
+// wave's gate) and emission brighten it and emission adds a pulsing core. Common and
+// quad headers prepended (hsvToRgb, quadCorner).
 
 // Uniform layout, total 160 bytes; GateRenderer in gates.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
@@ -41,7 +41,7 @@ fn gateVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) 
   var output: GateVaryings;
   let shape = view.gates[instanceIndex * 2u];
   let state = view.gates[instanceIndex * 2u + 1u];
-  let corner = vec2f(f32(vertexIndex & 1u), f32(vertexIndex >> 1u)) * 2.0 - vec2f(1.0);
+  let corner = quadCorner(vertexIndex);
   output.offset = corner * shape.z * QUAD_REACH;
   let world = shape.xy + output.offset;
   output.position = vec4f(world * view.worldToClipScale + view.worldToClipOffset, 0.0, 1.0);

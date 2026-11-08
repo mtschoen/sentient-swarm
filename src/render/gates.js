@@ -6,7 +6,7 @@
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { MAXIMUM_SPAWN_GATES } from '../sim/spawn-director.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
-import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
+import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
 const FLOATS_PER_GATE = 8;
 const VIEW_FLOATS = WORLD_VIEW_FLOATS + MAXIMUM_SPAWN_GATES * FLOATS_PER_GATE;
@@ -15,9 +15,9 @@ const VERTICES_PER_QUAD = 4;
 
 // Matches the GateView table in gates.wgsl. spawnGates: { gates: [{ x, y, radius, species, open,
 // emit, telegraph }] } or null; species: the species rows (for the hue). Returns the packed floats
-// and the gate count.
-export function packGateView({ viewport, time, spawnGates, species }) {
-  const floats = new Float32Array(VIEW_FLOATS);
+// and the gate count. Fills floats (a new array by default); slots past the count keep their old
+// values.
+export function packGateView({ viewport, time, spawnGates, species }, floats = new Float32Array(VIEW_FLOATS)) {
   packWorldView(viewport, time, floats);
   const gates = (spawnGates?.gates ?? []).slice(0, MAXIMUM_SPAWN_GATES);
   gates.forEach((gate, index) => {
@@ -35,10 +35,11 @@ export class GateRenderer {
     this.pipeline = null;
     this.bindGroup = null;
     this.viewBuffer = createUniformBuffer(this.device, GATE_VIEW_BYTES, 'gate-view');
+    this.viewFloats = new Float32Array(VIEW_FLOATS);
   }
 
   async initialize() {
-    const module = this.device.createShaderModule({ label: 'gates', code: await loadRenderShader('gates', this.common) });
+    const module = this.device.createShaderModule({ label: 'gates', code: await loadQuadShader('gates', this.common) });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'gates',
       layout: 'auto',
@@ -55,7 +56,8 @@ export class GateRenderer {
 
   // Draws into an open render pass whose target is a scene texture.
   encode(pass, simulation, time) {
-    const { floats, count } = packGateView({ viewport: this.viewport, time, spawnGates: simulation.spawnGates, species: simulation.species });
+    const { spawnGates, species } = simulation;
+    const { floats, count } = packGateView({ viewport: this.viewport, time, spawnGates, species }, this.viewFloats);
     if (count === 0) return;
     this.device.queue.writeBuffer(this.viewBuffer, 0, floats);
     pass.setPipeline(this.pipeline);

@@ -1,4 +1,4 @@
-// Ship silhouettes for the glyph pass, prepended to glyphs.wgsl after common.wgsl (see glyphs.js).
+// Ship silhouettes for the glyph pass, prepended to glyphs.wgsl after common.wgsl and quad.wgsl (see glyphs.js).
 // Signed distance fields built from Inigo Quilez's 2D primitives
 // (https://iquilezles.org/articles/distfunctions2d): negative inside, positive outside, in local
 // glyph units where +x is the nose, the body lies inside [-1, 1] and the glow reaches glowScale.
@@ -7,13 +7,6 @@
 fn boxDistance(point: vec2f, halfExtent: vec2f) -> f32 {
   let outside = abs(point) - halfExtent;
   return length(max(outside, vec2f(0.0))) + min(max(outside.x, outside.y), 0.0);
-}
-
-fn segmentDistance(point: vec2f, start: vec2f, end: vec2f) -> f32 {
-  let along = point - start;
-  let segment = end - start;
-  let fraction = clamp(dot(along, segment) / dot(segment, segment), 0.0, 1.0);
-  return length(along - segment * fraction);
 }
 
 fn circleDistance(point: vec2f, center: vec2f, radius: f32) -> f32 {

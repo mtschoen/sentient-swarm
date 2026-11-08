@@ -5,9 +5,10 @@
 // particle buffer and cleared by Renderer.setSimulation.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createUniformBuffer } from '../gpu/buffers.js';
-import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
+import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
 export const PARTICLE_VIEW_BYTES = 32;
+const PARTICLE_VIEW_FLOATS = PARTICLE_VIEW_BYTES / Float32Array.BYTES_PER_ELEMENT;
 export const PARTICLE_DEVICE_PIXELS = 4;
 // Lab range for setParticleDevicePixels (the burst particle size, task C0b2).
 export const MINIMUM_PARTICLE_DEVICE_PIXELS = 1;
@@ -16,16 +17,21 @@ const VERTICES_PER_PARTICLE = 4;
 const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 
 // Matches the ParticleView table in particles.wgsl. Same affine world-to-clip sampling as
-// packShipView, so the inspect zoom applies; the quad size also grows with the zoom.
-export function packParticleView({ viewport, particleDevicePixels = PARTICLE_DEVICE_PIXELS, emissionScale = 1 }) {
+// packShipView, so the inspect zoom applies; the quad size also grows with the zoom. Fills target
+// (a new array by default) and returns it.
+export function packParticleView(
+  { viewport, particleDevicePixels = PARTICLE_DEVICE_PIXELS, emissionScale = 1 },
+  target = new Float32Array(PARTICLE_VIEW_FLOATS),
+) {
   const origin = viewport.worldToClip(0, 0);
   const unit = viewport.worldToClip(1, 1);
-  return new Float32Array([
+  target.set([
     unit.x - origin.x, unit.y - origin.y,
     origin.x, origin.y,
     2 / viewport.canvasWidth, 2 / viewport.canvasHeight,
     particleDevicePixels * viewport.effectiveZoom, emissionScale,
   ]);
+  return target;
 }
 
 export class ParticleRenderer {
@@ -35,6 +41,7 @@ export class ParticleRenderer {
     this.common = common;
     this.pipeline = null;
     this.viewBuffer = createUniformBuffer(this.device, PARTICLE_VIEW_BYTES, 'particle-view');
+    this.viewFloats = new Float32Array(PARTICLE_VIEW_FLOATS);
     this.particleDevicePixels = PARTICLE_DEVICE_PIXELS;
     this.bindGroupCache = new BindGroupCache((buffers) => this.device.createBindGroup({
       label: 'particle-bindings',
@@ -44,7 +51,7 @@ export class ParticleRenderer {
   }
 
   async initialize() {
-    const module = this.device.createShaderModule({ label: 'particles', code: await loadRenderShader('particles', this.common) });
+    const module = this.device.createShaderModule({ label: 'particles', code: await loadQuadShader('particles', this.common) });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'particles',
       layout: 'auto',
@@ -71,7 +78,8 @@ export class ParticleRenderer {
   // Draws into an open render pass whose color target is a scene texture; Renderer passes
   // simulation.particlePool every frame.
   encode(pass, pool, emissionScale = 1) {
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packParticleView({ viewport: this.viewport, particleDevicePixels: this.particleDevicePixels, emissionScale }));
+    const { viewport, particleDevicePixels } = this;
+    this.device.queue.writeBuffer(this.viewBuffer, 0, packParticleView({ viewport, particleDevicePixels, emissionScale }, this.viewFloats));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, pool.buffers.particles]));
     pass.draw(VERTICES_PER_PARTICLE, pool.capacity);

@@ -73,3 +73,21 @@ test('strengthMultiplier scales packed strength', () => {
   impulses.add({ x: 0, y: 0, strength: 0.4 }, 1);
   assert.equal(impulses.toUniformArray(1)[3], 1);
 });
+
+// Plan D task D2: the renderer passes one array every frame, so stale slots must be cleared.
+test('toUniformArray refills a passed array and zeroes the slots it no longer uses', () => {
+  const impulses = new ImpulseSet({ capacity: 2, durationSeconds: 1.2 });
+  const target = new Float32Array(8);
+  impulses.add({ x: 1, y: 2, strength: 1 }, 0);
+  impulses.add({ x: 3, y: 4, strength: 1 }, 1);
+  assert.equal(impulses.toUniformArray(1, target), target);
+  assert.deepEqual(Array.from(target.slice(4)), [3, 4, 0, 1]);
+  impulses.prune(1.5);
+  impulses.add({ x: 5, y: 6, strength: 0.5 }, 1.5);
+  impulses.prune(2);
+  assert.equal(impulses.count, 2);
+  impulses.prune(2.5);
+  assert.equal(impulses.count, 1);
+  impulses.toUniformArray(2.5, target);
+  assert.deepEqual(Array.from(target), [5, 6, 1, 0.5, 0, 0, 0, 0]);
+});

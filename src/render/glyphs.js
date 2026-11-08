@@ -1,14 +1,15 @@
-// Glyph pass (glyphs.wgsl, with the ship shapes of ships.wgsl prepended after common.wgsl): one
-// instanced triangle strip per agent slot, additively blended into the scene target. Bindings:
-// view uniform, SimParams uniform, agents, coarse field, species table, previous agents (4
+// Glyph pass (glyphs.wgsl, with the ship shapes of ships.wgsl prepended after common.wgsl and
+// quad.wgsl): one instanced triangle strip per agent slot, additively blended into the scene
+// target. Bindings: view uniform, SimParams uniform, agents, coarse field, species table, previous agents (4
 // storage buffers). Bind groups are cached per agent buffer pair, which ping-pongs every step.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { prependCommon } from '../gpu/shaders.js';
 import { COARSE_COLUMNS, COARSE_ROWS } from '../sim/layout.js';
-import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
+import { SCENE_FORMAT, loadQuadHeader, loadRenderShader } from './render-shaders.js';
 
 export const GLYPH_VIEW_BYTES = 64;
+const GLYPH_VIEW_FLOATS = GLYPH_VIEW_BYTES / Float32Array.BYTES_PER_ELEMENT;
 const VERTICES_PER_GLYPH = 4;
 const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 
@@ -45,12 +46,16 @@ export function shipCoverageScale(viewport, shipPixels) {
 // Matches the GlyphView table in glyphs.wgsl. World to clip is affine, so two worldToClip samples
 // give its scale and offset (inspectZoom included); the ship size comes from shipDevicePixels.
 // emissionScale comes from trailFrameFactors; interpolate (half simulation rate) blends from the
-// previous step's position to the newest by alpha instead of extrapolating by velocity.
-export function packShipView({ viewport, settings, alpha, time, emissionScale = 1, interpolate = false }) {
+// previous step's position to the newest by alpha instead of extrapolating by velocity. Fills
+// target (a new array by default) and returns it.
+export function packShipView(
+  { viewport, settings, alpha, time, emissionScale = 1, interpolate = false },
+  target = new Float32Array(GLYPH_VIEW_FLOATS),
+) {
   const origin = viewport.worldToClip(0, 0);
   const unit = viewport.worldToClip(1, 1);
   const shipPixels = shipDevicePixels(viewport, settings.shipArenaFraction);
-  return new Float32Array([
+  target.set([
     unit.x - origin.x, unit.y - origin.y,
     origin.x, origin.y,
     2 / viewport.canvasWidth, 2 / viewport.canvasHeight,
@@ -59,6 +64,7 @@ export function packShipView({ viewport, settings, alpha, time, emissionScale = 
     shipCoverageScale(viewport, shipPixels), emissionScale,
     interpolate ? 1 : 0, 0, 0, 0,
   ]);
+  return target;
 }
 
 export class GlyphPass {
@@ -67,6 +73,7 @@ export class GlyphPass {
     this.common = common;
     this.pipeline = null;
     this.viewBuffer = createUniformBuffer(this.device, GLYPH_VIEW_BYTES, 'glyph-view');
+    this.viewFloats = new Float32Array(GLYPH_VIEW_FLOATS);
     this.bindGroupCache = new BindGroupCache((buffers) => this.device.createBindGroup({
       label: 'glyph-bindings',
       layout: this.pipeline.getBindGroupLayout(0),
@@ -75,7 +82,7 @@ export class GlyphPass {
   }
 
   async initialize() {
-    const header = prependCommon(await loadRenderShader('ships'), this.common);
+    const header = prependCommon(await loadRenderShader('ships'), await loadQuadHeader(this.common));
     const module = this.device.createShaderModule({ label: 'glyphs', code: await loadRenderShader('glyphs', header) });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'glyphs',
@@ -92,7 +99,8 @@ export class GlyphPass {
 
   // Draws into an open render pass whose color target is a scene texture.
   draw(pass, { simulation, viewport, settings, alpha, time, emissionScale, interpolate = false }) {
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packShipView({ viewport, settings, alpha, time, emissionScale, interpolate }));
+    const view = packShipView({ viewport, settings, alpha, time, emissionScale, interpolate }, this.viewFloats);
+    this.device.queue.writeBuffer(this.viewBuffer, 0, view);
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([
       this.viewBuffer, simulation.paramsBuffer, simulation.agentsBuffer, simulation.fieldBuffer, simulation.speciesTableBuffer,

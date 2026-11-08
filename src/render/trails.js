@@ -29,6 +29,7 @@ export class TrailDecayPass {
     this.fullscreenHeader = fullscreenHeader;
     this.pipeline = null;
     this.decayBuffer = createUniformBuffer(this.device, DECAY_UNIFORM_BYTES, 'trail-decay');
+    this.decayFloats = new Float32Array(DECAY_UNIFORM_BYTES / Float32Array.BYTES_PER_ELEMENT);
     this.bindGroups = [];
   }
 
@@ -51,7 +52,8 @@ export class TrailDecayPass {
 
   // decay is this frame's factor (trailFrameFactors), not the per-1/60-second setting.
   draw(pass, previousIndex, decay) {
-    this.device.queue.writeBuffer(this.decayBuffer, 0, new Float32Array([decay, 0, 0, 0]));
+    this.decayFloats[0] = decay;
+    this.device.queue.writeBuffer(this.decayBuffer, 0, this.decayFloats);
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroups[previousIndex]);
     pass.draw(3);

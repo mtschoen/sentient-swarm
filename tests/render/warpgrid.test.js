@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WARP_IMPULSE_CAPACITY, WARP_VIEW_BYTES, packWarpView, warpGridLatticePoint, warpGridSegmentCount } from '../../src/render/warpgrid.js';
+import { readFileSync } from 'node:fs';
+import {
+  WARP_IMPULSE_CAPACITY, WARP_SHADER_CONSTANTS, WARP_VIEW_BYTES, createWarpViewData, packWarpView, warpGridLatticePoint, warpGridSegmentCount,
+} from '../../src/render/warpgrid.js';
+import { DEFAULT_IMPULSE_CAPACITY, DEFAULT_IMPULSE_DURATION_SECONDS } from '../../src/render/impulses.js';
+import { substituteConstants } from '../../src/gpu/shaders.js';
 import { Viewport } from '../../src/render/viewport.js';
 
 test('warpGridSegmentCount counts horizontal and vertical segments', () => {
@@ -44,4 +49,32 @@ test('packWarpView fills the WarpView layout, impulses included, and matches vie
     assert.ok(Math.abs(floats[0] * x + floats[2] - expected.x) < 1e-5);
     assert.ok(Math.abs(floats[1] * y + floats[3] - expected.y) < 1e-5);
   }
+});
+
+// Plan D task D2: the impulse capacity and lifetime have one source (impulses.js), substituted
+// into warpgrid.wgsl, instead of two literals kept in sync by a comment.
+test('warpgrid.wgsl takes the impulse capacity and lifetime from impulses.js', () => {
+  const source = readFileSync(new URL('../../src/render/shaders/warpgrid.wgsl', import.meta.url), 'utf8');
+  assert.match(source, /const IMPULSE_CAPACITY: u32 = __IMPULSE_CAPACITY__;/);
+  assert.match(source, /const IMPULSE_DURATION_SECONDS: f32 = __IMPULSE_DURATION_SECONDS__;/);
+  assert.deepEqual(WARP_SHADER_CONSTANTS, {
+    IMPULSE_CAPACITY: DEFAULT_IMPULSE_CAPACITY,
+    IMPULSE_DURATION_SECONDS: DEFAULT_IMPULSE_DURATION_SECONDS,
+  });
+  const substituted = substituteConstants(source, WARP_SHADER_CONSTANTS);
+  assert.match(substituted, new RegExp(`const IMPULSE_CAPACITY: u32 = ${DEFAULT_IMPULSE_CAPACITY};`));
+  assert.match(substituted, new RegExp(`const IMPULSE_DURATION_SECONDS: f32 = ${DEFAULT_IMPULSE_DURATION_SECONDS};`));
+});
+
+test('packWarpView refills a passed view and returns its bytes', () => {
+  const viewport = new Viewport();
+  viewport.setCanvasSize(1600, 900);
+  const target = createWarpViewData();
+  const options = { viewport, columns: 96, rows: 54, densityWeight: 0.15, threatWeight: 0.6, time: 1 };
+  const impulses = new Float32Array(WARP_IMPULSE_CAPACITY * 4).fill(3);
+  assert.equal(packWarpView({ ...options, impulses }, target), target.bytes);
+  packWarpView({ ...options, time: 2 }, target);
+  assert.equal(target.floats[6], 2);
+  assert.deepEqual(Array.from(target.words.slice(8, 10)), [96, 54]);
+  assert.ok(target.floats.slice(12).every((value) => value === 0), 'omitted impulses clear the old ones');
 });

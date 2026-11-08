@@ -4,7 +4,8 @@
 // over white; plus a thin world-aligned ring (radius RING_RADIUS) whose arc length is the charge,
 // hidden on the base gun; plus one short rail-hue tick per rail turret (owner ruling R29) crossing the
 // ring at the turret's direction (drawn facing plus its offset), shown with or without the ring.
-// Common header prepended (hsvToRgb); ShipRenderer substitutes the rail constants (SHIP_SHADER_CONSTANTS).
+// Common and quad headers prepended (hsvToRgb, quadCorner, worldFeather); ShipRenderer substitutes
+// the rail constants (SHIP_SHADER_CONSTANTS).
 // Local coordinates: +x is the nose, +y is to the ship's right (world y grows downward).
 
 // Uniform layout, total 80 bytes; ShipRenderer in ship.js writes it.
@@ -38,7 +39,6 @@ const RING_RADIUS: f32 = 0.3;
 const RING_HALF_WIDTH: f32 = 0.012;
 const TWO_PI: f32 = 6.28318530718;
 const SATURATION: f32 = 0.8;
-const PIXEL_FEATHER: f32 = 0.75;
 // Engine flame geometry in world units: it starts at the tail (FLAME_ROOT behind the centre), and its
 // length and half width ease from the idle value to the thrust value with the thrust input.
 const FLAME_ROOT: f32 = 0.17;
@@ -64,7 +64,7 @@ struct ShipVaryings {
 @vertex
 fn shipVertex(@builtin(vertex_index) vertexIndex: u32) -> ShipVaryings {
   var output: ShipVaryings;
-  let corner = vec2f(f32(vertexIndex & 1u), f32(vertexIndex >> 1u)) * 2.0 - vec2f(1.0);
+  let corner = quadCorner(vertexIndex);
   output.offset = corner * HALF_EXTENT;
   let world = view.position + output.offset;
   output.position = vec4f(world * view.worldToClipScale + view.worldToClipOffset, 0.0, 1.0);
@@ -100,7 +100,7 @@ fn hullDistance(point: vec2f) -> f32 {
 
 @fragment
 fn shipFragment(input: ShipVaryings) -> @location(0) vec4f {
-  let feather = max(abs(view.devicePixelToClip.x / view.worldToClipScale.x), 1e-5) * PIXEL_FEATHER;
+  let feather = worldFeather(view.devicePixelToClip, view.worldToClipScale);
   let forward = vec2f(cos(view.facing), sin(view.facing));
   let side = vec2f(-forward.y, forward.x);
   let local = vec2f(dot(input.offset, forward), dot(input.offset, side));

@@ -157,3 +157,30 @@ test('render writes the exposure setting into the composite uniform every frame'
   renderer.render(createFakeEncoder(), { alpha: 0, time: 0 });
   assert.deepEqual(writes.map((floats) => floats[5]), [Math.fround(0.15), Math.fround(0.3)]);
 });
+
+// Plan D task D2: every pass keeps one view array and refills it, so a frame allocates no typed
+// array for its uniforms.
+test('render refills the same view array per uniform buffer every frame', () => {
+  const { renderer } = createRenderer(createFakeSimulation('first', 0));
+  const pipeline = { getBindGroupLayout: () => ({}) };
+  for (const pass of [renderer.projectileRenderer, renderer.pickupRenderer, renderer.ship]) pass.pipeline = pipeline;
+  renderer.pickupRenderer.bindGroup = {};
+  renderer.ship.bindGroup = {};
+  const scene = {
+    projectiles: { buffer: { label: 'projectiles' }, capacity: 8 },
+    pickups: [{ x: 3, y: 4, type: 'scatter', fade: 1 }],
+    ship: { x: 8, y: 4.5, facing: 0, charge: 0.5, armed: 'pulse', invulnerable: false },
+  };
+  const frames = [new Map(), new Map()];
+  let frame = 0;
+  renderer.device.queue.writeBuffer = (buffer, offset, data) => { frames[frame].set(buffer.label, data); };
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 1, scene, impulses: [{ x: 1, y: 1, strength: 1, time: 1 }] });
+  frame = 1;
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 2, scene });
+  const labels = ['warp-view', 'trail-decay', 'glyph-view', 'projectile-view', 'pickup-view', 'particle-view', 'ship-view', 'composite'];
+  for (const label of labels) {
+    assert.ok(frames[0].has(label) && frames[1].has(label), `${label} written in both frames`);
+    assert.equal(frames[1].get(label), frames[0].get(label), `${label} reuses its array`);
+  }
+  assert.equal(renderer.impulses.toUniformArray(2, renderer.impulseUniform), renderer.impulseUniform);
+});

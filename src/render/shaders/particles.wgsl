@@ -4,7 +4,7 @@
 // round falloff. Chunky bursts (owner ruling R21, task C0b2): sparks and fragments start
 // EARLY_SIZE_MULTIPLE times larger and EARLY_BRIGHTNESS_MULTIPLE times brighter and shrink back
 // over EARLY_SECONDS; the death flash (size FLASH_MINIMUM_SIZE and up) keeps its size.
-// Common header prepended.
+// Common and quad headers prepended.
 
 // Uniform layout (byte offsets), total 32 bytes; packParticleView in particles.js writes it.
 //   0 worldToClipScale       vec2f
@@ -54,7 +54,7 @@ fn particleVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_ind
     output.color = vec3f(0.0);
     return output;
   }
-  let corner = vec2f(f32(vertexIndex & 1u), f32(vertexIndex >> 1u)) * 2.0 - vec2f(1.0);
+  let corner = quadCorner(vertexIndex);
   let center = particle.position * view.worldToClipScale + view.worldToClipOffset;
   let early = 1.0 - smoothstep(0.0, EARLY_SECONDS, particle.age);
   let size = max(particle.size, 1.0);

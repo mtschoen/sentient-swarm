@@ -1,5 +1,5 @@
 // Agent ships: one instance per agent slot, a 4-vertex triangle strip pulled from the agent
-// buffer. Dead agents collapse to a degenerate quad. common.wgsl and ships.wgsl are prepended.
+// buffer. Dead agents collapse to a degenerate quad. common.wgsl, quad.wgsl and ships.wgsl are prepended.
 // The quad is shipDevicePixels * glowScale device pixels wide, rotated so local +x is the heading;
 // the ship body lies inside radius 1 and the glow and engine plume reach out to radius glowScale.
 // Heading: the velocity direction, blended toward the player at low speed (agents carry no
@@ -113,7 +113,7 @@ fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
     output.engine = vec3f(0.0);
     return output;
   }
-  let corner = vec2f(f32(vertexIndex & 1u), f32(vertexIndex >> 1u)) * 2.0 - vec2f(1.0);
+  let corner = quadCorner(vertexIndex);
   var position = clampToArena(agent.position + agent.velocity * view.alpha * params.dt);
   if (view.interpolation > 0.5) {
     // A slot dead in the previous step has no earlier position; it starts where it is.

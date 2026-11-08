@@ -1,6 +1,6 @@
 // Projectiles: one instance per projectile slot (4-vertex triangle strip) pulled straight from the
 // projectile storage buffer, max-blended (see MAX_BLEND). Dead slots collapse to a degenerate quad. Common
-// header prepended (Projectile, PROJECTILE_KIND_*, ARENA_*, hsvToRgb).
+// and quad headers prepended (Projectile, PROJECTILE_KIND_*, ARENA_*, hsvToRgb, segmentDistance).
 // All geometry is in world units in a frame whose +x is the projectile's heading (origin at its
 // position), so a quad is a centre, a heading and a half extent; each kind has its own silhouette in the fragment shader:
 //   bullet     energy ball: white core, hued body, halo        scatter  smaller flickering orange ball
@@ -45,7 +45,6 @@ const BEAM_GLOW_MARGIN: f32 = 0.1;
 const RING_LIFETIME: f32 = 0.5;
 const SCATTER_FADE_SECONDS: f32 = 0.12;
 const GLOW_SATURATION: f32 = 0.85;
-const PIXEL_FEATHER: f32 = 0.75;
 // Sweeps narrower than this (radians) draw as the plain beam quad.
 const BEAM_MINIMUM_SWEEP: f32 = 0.002;
 // The fan's brightness at the previous aim and at the current one (times the body brightness).
@@ -164,7 +163,7 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
       fade = length;
     }
   }
-  let corner = vec2f(f32(vertexIndex & 1u), f32(vertexIndex >> 1u)) * 2.0 - vec2f(1.0);
+  let corner = quadCorner(vertexIndex);
   let local = corner * halfExtent;
   let quadDirection = select(direction, vec2f(1.0, 0.0), axisAligned);
   let quadSide = vec2f(-quadDirection.y, quadDirection.x);
@@ -237,13 +236,6 @@ fn beamSweepBounds(origin: vec2f, previous: vec2f, current: vec2f, limit: f32, m
   return vec4f(low - vec2f(margin), high + vec2f(margin));
 }
 
-fn segmentDistance(point: vec2f, start: vec2f, end: vec2f) -> f32 {
-  let along = point - start;
-  let segment = end - start;
-  let fraction = clamp(dot(along, segment) / dot(segment, segment), 0.0, 1.0);
-  return length(along - segment * fraction);
-}
-
 // A bright body of the given half thickness around a distance, plus an exponential glow; returns
 // (body, glow). feather is the antialiasing width in world units.
 fn bodyAndGlow(distance: f32, thickness: f32, feather: f32, glowFalloff: f32) -> vec2f {
@@ -267,7 +259,7 @@ fn neon(hue: f32, saturation: f32) -> vec3f {
 
 @fragment
 fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
-  let feather = max(abs(view.devicePixelToClip.x / view.worldToClipScale.x), 1e-5) * PIXEL_FEATHER;
+  let feather = worldFeather(view.devicePixelToClip, view.worldToClipScale);
   let local = input.local;
   let radius = input.shape.x;
   let halfLength = input.shape.y;

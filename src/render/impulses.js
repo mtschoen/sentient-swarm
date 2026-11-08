@@ -3,11 +3,11 @@
 // a dead slot first, else replaces the oldest. toUniformArray packs [x, y, age, strength] per slot
 // for the WarpView uniform (warpgrid.wgsl), with strength 0 for dead or unused slots.
 
+// The single source of both: WarpGrid substitutes them into warpgrid.wgsl (WARP_SHADER_CONSTANTS).
 export const DEFAULT_IMPULSE_CAPACITY = 8;
-// Matches IMPULSE_DURATION_SECONDS in warpgrid.wgsl.
 export const DEFAULT_IMPULSE_DURATION_SECONDS = 1.2;
 export const BLOOM_BOOST_SECONDS = 0.3;
-const FLOATS_PER_IMPULSE = 4;
+export const FLOATS_PER_IMPULSE = 4;
 
 export class ImpulseSet {
   constructor({ capacity = DEFAULT_IMPULSE_CAPACITY, durationSeconds = DEFAULT_IMPULSE_DURATION_SECONDS } = {}) {
@@ -45,8 +45,10 @@ export class ImpulseSet {
     this.impulses = this.impulses.filter((impulse) => time - impulse.time < this.durationSeconds);
   }
 
-  toUniformArray(time) {
-    const packed = new Float32Array(this.capacity * FLOATS_PER_IMPULSE);
+  // Fills target (capacity * 4 floats, a new array by default) and returns it; the renderer passes
+  // the same array every frame.
+  toUniformArray(time, target = new Float32Array(this.capacity * FLOATS_PER_IMPULSE)) {
+    const packed = target.fill(0);
     this.impulses.forEach((impulse, slot) => {
       const strength = this.isAlive(impulse, time) ? impulse.strength * this.strengthMultiplier : 0;
       packed.set([impulse.x, impulse.y, time - impulse.time, strength], slot * FLOATS_PER_IMPULSE);

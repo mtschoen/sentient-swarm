@@ -2,7 +2,7 @@
 // read from a small uniform array. A slowly rotating hexagon outline in the weapon's hue with a
 // soft pulse and a glowing core, alpha times the pickup's fade. A hue of 1 or more is the time warp
 // (PICKUP_SHAPE_CLOCK added in pickups.js): a paler ring with a sweeping hand and a brighter core,
-// a clock. Common header prepended (hsvToRgb).
+// a clock. Common and quad headers prepended (hsvToRgb, segmentDistance).
 
 // Uniform layout, total 544 bytes; PickupRenderer in pickups.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
@@ -24,7 +24,6 @@ const OUTLINE_HALF_WIDTH: f32 = 0.028;
 const ROTATION_RATE: f32 = 1.2;
 const PULSE_RATE: f32 = 3.0;
 const SATURATION: f32 = 0.85;
-const PIXEL_FEATHER: f32 = 0.75;
 // The time warp clock: hand sweep in radians per second, hand length as a share of the ring,
 // a whiter tint and a brighter core than the weapons.
 const CLOCK_HAND_RATE: f32 = 2.5;
@@ -45,7 +44,7 @@ struct PickupVaryings {
 fn pickupVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> PickupVaryings {
   var output: PickupVaryings;
   let pickup = view.pickups[instanceIndex];
-  let corner = vec2f(f32(vertexIndex & 1u), f32(vertexIndex >> 1u)) * 2.0 - vec2f(1.0);
+  let corner = quadCorner(vertexIndex);
   output.offset = corner * HALF_EXTENT;
   let world = pickup.xy + output.offset;
   output.position = vec4f(world * view.worldToClipScale + view.worldToClipOffset, 0.0, 1.0);
@@ -64,15 +63,9 @@ fn hexagonDistance(point: vec2f, radius: f32) -> f32 {
   return length(folded) * sign(folded.y);
 }
 
-// Distance from point to the segment from the origin to end.
-fn segmentDistance(point: vec2f, end: vec2f) -> f32 {
-  let along = clamp(dot(point, end) / dot(end, end), 0.0, 1.0);
-  return length(point - end * along);
-}
-
 @fragment
 fn pickupFragment(input: PickupVaryings) -> @location(0) vec4f {
-  let feather = max(abs(view.devicePixelToClip.x / view.worldToClipScale.x), 1e-5) * PIXEL_FEATHER;
+  let feather = worldFeather(view.devicePixelToClip, view.worldToClipScale);
   let angle = view.time * ROTATION_RATE + input.phase;
   let cosine = cos(angle);
   let sine = sin(angle);
@@ -83,7 +76,7 @@ fn pickupFragment(input: PickupVaryings) -> @location(0) vec4f {
   if (clock) {
     let handAngle = view.time * CLOCK_HAND_RATE + input.phase;
     let hand = vec2f(sin(handAngle), cos(handAngle)) * HEXAGON_RADIUS * CLOCK_HAND_SHARE;
-    outline = min(abs(length(input.offset) - HEXAGON_RADIUS * pulse), segmentDistance(input.offset, hand));
+    outline = min(abs(length(input.offset) - HEXAGON_RADIUS * pulse), segmentDistance(input.offset, vec2f(0.0), hand));
   }
   let band = 1.0 - smoothstep(OUTLINE_HALF_WIDTH, OUTLINE_HALF_WIDTH + feather * 2.0, outline);
   let glow = exp(-max(outline - OUTLINE_HALF_WIDTH, 0.0) * 16.0) * 0.6;

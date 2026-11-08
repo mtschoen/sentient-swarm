@@ -6,7 +6,7 @@ import { createUniformBuffer } from '../gpu/buffers.js';
 import { substituteConstants } from '../gpu/shaders.js';
 import { MAXIMUM_RAIL_TURRETS, RAIL_TURRET_SPACING_RADIANS, WEAPON_HUES } from '../game/weaponTypes.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
-import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
+import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
 export const SHIP_VIEW_BYTES = 80;
 // Substituted into ship.wgsl, so the tick angles follow the same spacing rule as the turrets.
@@ -36,9 +36,13 @@ export function easeAngle(current, target, maximumStep) {
   return current + Math.sign(difference) * maximumStep;
 }
 
-// Matches the ShipView table in ship.wgsl.
-export function packShipView({ viewport, time, x, y, facing, charge, armed, invulnerable, thrust = 0, railTurrets = 0 }) {
-  const floats = new Float32Array(SHIP_VIEW_BYTES / Float32Array.BYTES_PER_ELEMENT);
+const SHIP_VIEW_FLOATS = SHIP_VIEW_BYTES / Float32Array.BYTES_PER_ELEMENT;
+
+// Matches the ShipView table in ship.wgsl. Fills floats (a new array by default) and returns it.
+export function packShipView(
+  { viewport, time, x, y, facing, charge, armed, invulnerable, thrust = 0, railTurrets = 0 },
+  floats = new Float32Array(SHIP_VIEW_FLOATS),
+) {
   packWorldView(viewport, time, floats);
   const blinkOn = (time * BLINK_HERTZ) % 1 < 0.5;
   floats.set([
@@ -59,13 +63,14 @@ export class ShipRenderer {
     this.pipeline = null;
     this.bindGroup = null;
     this.viewBuffer = createUniformBuffer(this.device, SHIP_VIEW_BYTES, 'ship-view');
+    this.viewFloats = new Float32Array(SHIP_VIEW_FLOATS);
     this.renderedFacing = null;
     this.lastTime = null;
     this.thrust = 0;
   }
 
   async initialize() {
-    const code = substituteConstants(await loadRenderShader('ship', this.common), SHIP_SHADER_CONSTANTS);
+    const code = substituteConstants(await loadQuadShader('ship', this.common), SHIP_SHADER_CONSTANTS);
     const module = this.device.createShaderModule({ label: 'ship', code });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'ship',
@@ -110,7 +115,7 @@ export class ShipRenderer {
     const thrust = this.easedThrust(velocityX, velocityY, previousTime === null ? 0 : Math.min(MAXIMUM_EASE_SECONDS, Math.max(0, time - previousTime)));
     this.device.queue.writeBuffer(this.viewBuffer, 0, packShipView({
       viewport: this.viewport, time, x, y, facing: renderedFacing, charge, armed, invulnerable, thrust, railTurrets,
-    }));
+    }, this.viewFloats));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroup);
     pass.draw(VERTICES_PER_QUAD, 1);

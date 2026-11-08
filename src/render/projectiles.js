@@ -6,9 +6,10 @@ import { createUniformBuffer } from '../gpu/buffers.js';
 import { PROJECTILE_STRIDE_BYTES } from '../game/projectiles.js';
 import { PROJECTILE_KINDS, WEAPON_HUES } from '../game/weaponTypes.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
-import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
+import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
 export const PROJECTILE_VIEW_BYTES = 64;
+const PROJECTILE_VIEW_FLOATS = PROJECTILE_VIEW_BYTES / Float32Array.BYTES_PER_ELEMENT;
 const VERTICES_PER_QUAD = 4;
 
 // The weapon whose palette entry colors each projectile kind.
@@ -23,8 +24,8 @@ const KIND_WEAPONS = Object.freeze({
 });
 
 // Matches the ProjectileView table in projectiles.wgsl: the world view, then one hue per kind.
-export function packProjectileView({ viewport, time }) {
-  const floats = new Float32Array(PROJECTILE_VIEW_BYTES / Float32Array.BYTES_PER_ELEMENT);
+// Fills floats (a new array by default) and returns it.
+export function packProjectileView({ viewport, time }, floats = new Float32Array(PROJECTILE_VIEW_FLOATS)) {
   packWorldView(viewport, time, floats);
   Object.entries(KIND_WEAPONS).forEach(([kind, weapon]) => {
     floats[WORLD_VIEW_FLOATS + Number(kind)] = WEAPON_HUES[weapon];
@@ -41,6 +42,7 @@ export class ProjectileRenderer {
     this.common = common;
     this.pipeline = null;
     this.viewBuffer = createUniformBuffer(this.device, PROJECTILE_VIEW_BYTES, 'projectile-view');
+    this.viewFloats = new Float32Array(PROJECTILE_VIEW_FLOATS);
     this.bindGroupCache = new BindGroupCache((buffers) => this.device.createBindGroup({
       label: 'projectile-bindings',
       layout: this.pipeline.getBindGroupLayout(0),
@@ -49,7 +51,7 @@ export class ProjectileRenderer {
   }
 
   async initialize() {
-    const module = this.device.createShaderModule({ label: 'projectiles', code: await loadRenderShader('projectiles', this.common) });
+    const module = this.device.createShaderModule({ label: 'projectiles', code: await loadQuadShader('projectiles', this.common) });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'projectiles',
       layout: 'auto',
@@ -62,7 +64,7 @@ export class ProjectileRenderer {
   // Draws into an open render pass whose color target is a scene texture.
   encode(pass, time, projectiles = this.projectiles) {
     if (projectiles === null) return;
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packProjectileView({ viewport: this.viewport, time }));
+    this.device.queue.writeBuffer(this.viewBuffer, 0, packProjectileView({ viewport: this.viewport, time }, this.viewFloats));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, projectiles.buffer]));
     pass.draw(VERTICES_PER_QUAD, projectiles.capacity);
