@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { BUNDLED_MIXES, RULE_FIELDS, RULE_RANGES, SAVED_MIXES_KEY, decodeMix, encodeMix, listMixes, saveMix } from '../../src/ui/labPresets.js';
-import { defaultMatrix, defaultSpecies } from '../../src/sim/species.js';
+import { DEFAULT_SHARES, defaultMatrix, defaultSpecies } from '../../src/sim/species.js';
 
 function fakeStorage(initial = {}) {
   const map = new Map(Object.entries(initial));
@@ -33,7 +33,8 @@ test('the default mix equals the shipped species table', () => {
     assert.equal(mix.rules[index][0], row.seek);
     assert.equal(mix.rules[index][3], row.separation);
   });
-  assert.deepEqual(mix.shares, [0.2, 0.2, 0.2, 0.2, 0.2]);
+  assert.deepEqual(mix.shares, Array.from(DEFAULT_SHARES));
+  assert.deepEqual(BUNDLED_MIXES.equalFive.shares, [0.2, 0.2, 0.2, 0.2, 0.2]);
 });
 
 test('knobs round-trip', () => {

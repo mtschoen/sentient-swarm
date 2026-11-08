@@ -20,7 +20,7 @@
 //          renderer values instead.
 // The encoded text is the compact JSON as URL-safe base64 without padding.
 import { SPECIES_COUNT } from '../sim/layout.js';
-import { defaultMatrix, defaultSpecies } from '../sim/species.js';
+import { DEFAULT_SHARES, defaultMatrix, defaultSpecies } from '../sim/species.js';
 
 export const MIX_VERSION = 1;
 export const SAVED_MIXES_KEY = 'murmuration.mixes.v1';
@@ -123,7 +123,8 @@ export const BUNDLED_MIXES = Object.freeze({
   mixedFive: mixFrom([0.3, 0.2, 0.2, 0.2, 0.1]),
   predatorsVsPrey: mixFrom([0.35, 0, 0.35, 0.1, 0.2]),
   latticeStorm: mixFrom([0.1, 0.05, 0.05, 0.75, 0.05]),
-  default: mixFrom([0.2, 0.2, 0.2, 0.2, 0.2]),
+  equalFive: mixFrom([0.2, 0.2, 0.2, 0.2, 0.2]),
+  default: mixFrom(DEFAULT_SHARES),
 });
 
 function loadSaved(store) {
