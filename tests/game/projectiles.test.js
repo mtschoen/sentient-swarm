@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BEAM_SLOT, BeamTracker, PROJECTILE_STRIDE_BYTES, ProjectileSlots, beamReachScale, beamSpawn, contiguousRuns, packProjectile,
+  BEAM_SLOT, BeamTracker, PROJECTILE_STRIDE_BYTES, ProjectileSlots, Projectiles, beamReachScale, beamSpawn, contiguousRuns, packProjectile,
   validatedBaseKillBudget, validatedBeamSweepThreshold, withKillBudget,
 } from '../../src/game/projectiles.js';
+import { BindGroupCache } from '../../src/gpu/bind-group-cache.js';
 import {
   BEAM_SWEEP_MINIMUM_REACH_SCALE, MAXIMUM_BASE_KILL_BUDGET, MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES, PROJECTILE_KINDS,
 } from '../../src/game/weaponTypes.js';
@@ -166,4 +167,19 @@ test('kill budget and sweep threshold validators reject out-of-range values', ()
   assert.equal(validatedBeamSweepThreshold(MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES), MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES);
   assert.throws(() => validatedBeamSweepThreshold(91), RangeError);
   assert.throws(() => validatedBeamSweepThreshold(Number.NaN), RangeError);
+});
+
+test('clearBindGroupCaches empties both bind group caches so a replaced simulation leaves no stale entries', () => {
+  // The constructor allocates GPU buffers, so build the instance without it and give it the two caches.
+  const projectiles = Object.create(Projectiles.prototype);
+  projectiles.stepBindGroupCache = new BindGroupCache(() => ({}));
+  projectiles.collideBindGroupCache = new BindGroupCache(() => ({}));
+  const buffer = {};
+  projectiles.stepBindGroupCache.get([buffer]);
+  projectiles.collideBindGroupCache.get([buffer]);
+  projectiles.clearBindGroupCaches();
+  assert.equal(projectiles.stepBindGroupCache.entries.size, 0);
+  assert.equal(projectiles.collideBindGroupCache.entries.size, 0);
+  projectiles.stepBindGroupCache.get([buffer]);
+  assert.equal(projectiles.stepBindGroupCache.creationCount, 2);
 });

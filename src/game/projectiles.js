@@ -265,6 +265,13 @@ export class Projectiles {
     this.beamWritten = false;
   }
 
+  // Drops every cached bind group; a capacity swap installs a new Simulation whose buffers differ, and
+  // the old simulation's destroyed buffers must not keep their bind groups alive.
+  clearBindGroupCaches() {
+    this.stepBindGroupCache.clear();
+    this.collideBindGroupCache.clear();
+  }
+
   writePending() {
     const runs = contiguousRuns(this.pending.map((entry) => entry.slot));
     for (const run of runs) {

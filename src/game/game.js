@@ -170,6 +170,7 @@ export class Game {
       discard: (prepared) => this.simulation.discardCapacity(prepared),
       install: (next) => {
         this.simulation = next;
+        this.projectiles.clearBindGroupCaches();
         this.renderer.setSimulation(next);
         this.spawnPressure.setCapacity(next.capacity);
         this.watchPressure?.setCapacity(next.capacity);

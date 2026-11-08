@@ -90,6 +90,8 @@ function createFakeProjectiles() {
     queueSpawn(spawn) { this.spawns.push(spawn); return this.spawns.length; },
     setBeam(beam) { this.beams.push(beam); },
     clear() { this.clears += 1; },
+    cacheClears: 0,
+    clearBindGroupCaches() { this.cacheClears += 1; },
     encode() {},
   };
 }
@@ -759,6 +761,7 @@ test('the old simulation keeps stepping while a capacity change is prepared, the
   assert.equal(await request, true);
   assert.equal(game.simulation, next);
   assert.equal(installed, next);
+  assert.equal(game.projectiles.cacheClears, 1, 'the projectile bind group caches are cleared on install');
   assert.equal(game.spawnPressure.capacity, CAPACITY * 4);
   assert.equal(game.score.capacity, CAPACITY * 4);
   assert.equal(game.acceptsProbeFrames, true);
