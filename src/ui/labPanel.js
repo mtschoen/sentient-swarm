@@ -90,7 +90,18 @@ export function createLabPanel({
     syncs.push(sync);
     return labeled(spec.label, input, output);
   };
-  const knobSlider = (spec) => slider(spec, () => readKnob(lab.context, spec), (value) => writeKnob(lab.context, spec, value));
+  // A 0 or 1 knob as a checkbox bound to read() and write(value).
+  const toggle = (spec, read, write) => {
+    const input = make('input', { type: 'checkbox' });
+    input.dataset.knob = spec.key;
+    syncs.push(() => { input.checked = read() >= 0.5; });
+    input.addEventListener('change', () => {
+      guarded(() => write(input.checked ? 1 : 0));
+      input.blur();
+    });
+    return labeled(spec.label, input);
+  };
+  const knobSlider = (spec) => (spec.toggle ? toggle : slider)(spec, () => readKnob(lab.context, spec), (value) => writeKnob(lab.context, spec, value));
 
   // Header: mode, hide and leave.
   const watchButton = make('button', { type: 'button', className: 'lab-mode lab-watch', textContent: 'Watch' });

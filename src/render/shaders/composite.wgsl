@@ -1,4 +1,4 @@
-// Composite: scene plus the warp grid layer plus bloom times bloomStrength, times EXPOSURE, an
+// Composite: scene plus the warp grid layer plus bloom times bloomStrength, times exposure, an
 // ACES-fitted tonemap of the luminance (load-bearing: additive glyphs pile up in dense regions),
 // gamma encode for the non-sRGB swapchain, and black letterbox bands outside the arena rect.
 // Prepended with fullscreen.wgsl.
@@ -10,7 +10,9 @@
 struct CompositeUniform {
   arenaRect: vec4f,
   bloomStrength: f32,
-  padding0: f32,
+  // Scene radiance scale ahead of the tonemap (composite.js BASE_EXPOSURE times the renderer's
+  // exposure setting): trails at decay 0.9 hold about ten frames of glyphs.
+  exposure: f32,
   padding1: f32,
   padding2: f32,
 }
@@ -21,8 +23,6 @@ struct CompositeUniform {
 @group(0) @binding(3) var linearSampler: sampler;
 @group(0) @binding(4) var grid: texture_2d<f32>;
 
-// Scene radiance scale ahead of the tonemap: trails at decay 0.9 hold about ten frames of glyphs.
-const EXPOSURE: f32 = 0.15;
 const LUMINANCE_WEIGHTS: vec3f = vec3f(0.2126, 0.7152, 0.0722);
 const MINIMUM_LUMINANCE: f32 = 0.000001;
 
@@ -49,7 +49,7 @@ fn compositeFragment(input: FullscreenOutput) -> @location(0) vec4f {
   let inside = all(pixel >= rect.xy) && all(pixel < rect.xy + rect.zw);
   let sceneColor = textureLoad(scene, vec2i(pixel), 0).rgb + textureLoad(grid, vec2i(pixel), 0).rgb;
   let bloomColor = textureSampleLevel(bloom, linearSampler, input.uv, 0.0).rgb;
-  let mapped = tonemapLuminance(max((sceneColor + bloomColor * composite.bloomStrength) * EXPOSURE, vec3f(0.0)));
+  let mapped = tonemapLuminance(max((sceneColor + bloomColor * composite.bloomStrength) * composite.exposure, vec3f(0.0)));
   let encoded = pow(mapped, vec3f(1.0 / 2.2));
   return vec4f(select(vec3f(0.0), encoded, inside), 1.0);
 }

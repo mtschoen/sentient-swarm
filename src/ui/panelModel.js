@@ -46,15 +46,23 @@ export const RENDER_SLIDERS = [
   // Ship (glyph) size as a fraction of the arena height; the glyph pass never draws a ship under
   // MINIMUM_SHIP_DEVICE_PIXELS, and the slider floor keeps ships readable (owner ruling R3).
   { key: 'shipArenaFraction', label: 'ship size', minimum: 0.012, maximum: 0.04, step: 0.001 },
+  // Multiplier on the composite's shipped exposure (1).
+  { key: 'exposure', label: 'exposure', minimum: 0.25, maximum: 4, step: 0.05 },
 ];
 
 // The lab's tuning knobs (task C6b), in panel groups. Each is part of a shared mix's knobs map
 // (labPresets.js KNOB_RANGES holds the same names); lab.js binds each key to its live setter.
-// integer: the value is rounded. The ramp ranges are the controller brief's (C0); the gate count
+// integer: the value is rounded; toggle: a 0 or 1 value the panel shows as a checkbox. The ramp ranges are the controller brief's (C0); the gate count
 // floor is 2 because one gate inside the aim lane stalls waves for about 3 s (C0b2).
 export const LAB_KNOB_GROUPS = [
   { title: 'Watch', knobs: [
     { key: 'watchAliveFraction', label: 'alive target', minimum: 0, maximum: 1, step: 0.01 },
+  ] },
+  { title: 'Steering and walls', knobs: [
+    { key: 'wallMargin', label: 'wall margin', minimum: 0, maximum: 2, step: 0.05 },
+    { key: 'wallStiffness', label: 'wall push', minimum: 0, maximum: 160, step: 1 },
+    { key: 'comfortRadius', label: 'comfort radius', minimum: 0, maximum: 4, step: 0.05 },
+    { key: 'coarseFieldPressure', label: 'coarse-field pressure', minimum: 0, maximum: 1, step: 1, integer: true, toggle: true },
   ] },
   { title: 'Spawn ramp', knobs: [
     { key: 'floorFraction', label: 'floor', minimum: 0, maximum: 0.1, step: 0.001 },

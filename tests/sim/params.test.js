@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS,
-  MAXIMUM_DEATH_FLOOD_PARTICLES, MAXIMUM_KILL_BURST_PARTICLES, MAXIMUM_KILL_FRAGMENT_PARTICLES, SIM_PARAMS_BYTES, packSimParams,
-  validatedDeathFloodParticles, validatedKillBurstParticles, validatedKillFragmentParticles, validatedSpawnBandWidth,
-  validatedSpawnDensityBias,
+  DEFAULT_COMFORT_RADIUS, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH,
+  DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, MAXIMUM_COMFORT_RADIUS, MAXIMUM_DEATH_FLOOD_PARTICLES,
+  MAXIMUM_KILL_BURST_PARTICLES, MAXIMUM_KILL_FRAGMENT_PARTICLES, MAXIMUM_WALL_MARGIN, MAXIMUM_WALL_STIFFNESS, SIM_PARAMS_BYTES,
+  packSimParams, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles, validatedKillFragmentParticles,
+  validatedSpawnBandWidth, validatedSpawnDensityBias, validatedWallMargin, validatedWallStiffness,
 } from '../../src/sim/params.js';
 
-test('packSimParams produces the 224-byte uniform layout', () => {
+test('packSimParams produces the 240-byte uniform layout', () => {
   const buffer = packSimParams({
     dt: 0.5,
     gridColumns: 160,
@@ -17,7 +18,8 @@ test('packSimParams produces the 224-byte uniform layout', () => {
     playerPosition: [3, 4],
     spawnPerSpecies: [1, 2, 3, 4, 5],
   });
-  assert.equal(SIM_PARAMS_BYTES, 224);
+  assert.equal(SIM_PARAMS_BYTES, 240);
+  assert.equal(SIM_PARAMS_BYTES % 16, 0);
   assert.equal(buffer.byteLength, SIM_PARAMS_BYTES);
   const view = new DataView(buffer);
   assert.equal(view.getFloat32(0, true), 0.5);
@@ -41,6 +43,10 @@ test('packSimParams defaults missing fields to zero', () => {
     else if (offset === 116) assert.equal(view.getFloat32(offset, true), Math.fround(DEFAULT_SPAWN_BAND_WIDTH));
     else if (offset === 120) assert.equal(view.getFloat32(offset, true), Math.fround(DEFAULT_SPAWN_DENSITY_BIAS));
     else if (offset === 124) assert.equal(view.getUint32(offset, true), DEFAULT_KILL_FRAGMENT_PARTICLES);
+    else if (offset === 220) assert.equal(view.getFloat32(offset, true), DEFAULT_WALL_MARGIN);
+    else if (offset === 224) assert.equal(view.getFloat32(offset, true), DEFAULT_WALL_STIFFNESS);
+    else if (offset === 228) assert.equal(view.getFloat32(offset, true), DEFAULT_COMFORT_RADIUS);
+    else if (offset === 232) assert.equal(view.getUint32(offset, true), 1);
     else assert.equal(view.getUint32(offset, true), offset === 88 ? 1 : 0);
   }
 });
@@ -91,7 +97,34 @@ test('packSimParams writes killFragmentParticles at 124 and deathFloodParticles 
   const view = new DataView(packSimParams({ killFragmentParticles: 5, deathFloodParticles: 300 }));
   assert.equal(view.getUint32(124, true), 5);
   assert.equal(view.getUint32(216, true), 300);
-  assert.equal(view.getUint32(220, true), 0);
+  assert.equal(view.getUint32(236, true), 0);
+});
+
+test('the wall, comfort and coarse-field defaults are the shader constants they replaced', () => {
+  // integrate.wgsl WALL_MARGIN 0.5 and WALL_STIFFNESS 40, steer.wgsl COMFORT_RADIUS 1, and the
+  // pressure term always on.
+  assert.equal(DEFAULT_WALL_MARGIN, 0.5);
+  assert.equal(DEFAULT_WALL_STIFFNESS, 40);
+  assert.equal(DEFAULT_COMFORT_RADIUS, 1);
+  assert.equal(new DataView(packSimParams({})).getUint32(232, true), 1);
+});
+
+test('packSimParams writes wallMargin, wallStiffness, comfortRadius (f32) and coarseFieldPressure (u32) from 220', () => {
+  const view = new DataView(packSimParams({ wallMargin: 1.25, wallStiffness: 80, comfortRadius: 2.5, coarseFieldPressure: 0 }));
+  assert.equal(view.getFloat32(220, true), 1.25);
+  assert.equal(view.getFloat32(224, true), 80);
+  assert.equal(view.getFloat32(228, true), 2.5);
+  assert.equal(view.getUint32(232, true), 0);
+  assert.equal(new DataView(packSimParams({ wallMargin: 0, comfortRadius: 0 })).getFloat32(220, true), 0);
+});
+
+test('the wall and comfort setters accept their ranges and reject the rest', () => {
+  for (const [validate, maximum] of [[validatedWallMargin, MAXIMUM_WALL_MARGIN], [validatedWallStiffness, MAXIMUM_WALL_STIFFNESS], [validatedComfortRadius, MAXIMUM_COMFORT_RADIUS]]) {
+    assert.equal(validate(0), 0);
+    assert.equal(validate(maximum), maximum);
+    for (const bad of [-0.01, maximum + 0.01, Number.NaN]) assert.throws(() => validate(bad), RangeError);
+  }
+  assert.deepEqual([MAXIMUM_WALL_MARGIN, MAXIMUM_COMFORT_RADIUS], [2, 4]);
 });
 
 test('packSimParams writes the gate table: rows from 128, species from 192, count at 208, bias at 212', () => {

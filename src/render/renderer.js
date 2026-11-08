@@ -39,6 +39,8 @@ export const DEFAULT_RENDER_SETTINGS = {
   bloomStrength: 0.8,
   warpDensityWeight: 0.15,
   warpThreatWeight: 0.6,
+  // Multiplier on the composite's BASE_EXPOSURE (composite.js); 1 is the shipped exposure.
+  exposure: 1,
 };
 
 export class Renderer {
@@ -168,6 +170,7 @@ export class Renderer {
     this.composite.encode(encoder, swapchainTexture.createView(), currentIndex, {
       arenaRect: viewport.arenaRectDevicePixels,
       bloomStrength: settings.bloomStrength * bloomBoostFactor(time - this.bloomBoostTime),
+      exposure: settings.exposure,
     });
     this.frameCapture.encode(encoder, swapchainTexture, { arenaRect: { ...viewport.arenaRectDevicePixels } });
     this.currentIndex = currentIndex;

@@ -7,8 +7,22 @@
 // lab, and a malformed hash opens it with the shipped defaults and a status line, never an error.
 // Mixes (labPresets.js): captureMix reads the live state, applyMix writes it back. Every knob is
 // bound by name in LAB_KNOB_BINDINGS to a setter that reaches the current simulation, so a value
-// survives a capacity swap (Simulation.carryStateInto carries its own setters' values).
+// survives a capacity swap (Simulation.carryStateInto carries its own setters' values). A mix
+// applies every knob it leaves out at its shipped default (LAB_KNOB_DEFAULTS), so a bundled mix
+// (no knobs map) plays the same however the knobs were set before. Leaving the lab restores the
+// state captured on entering it (captureLabState), so a run from the title plays the shipped game;
+// inside the lab, Play keeps the lab mix.
+import { DEFAULT_PICKUP_BLAST_RADIUS } from '../game/game.js';
+import { DEFAULT_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES } from '../game/weaponTypes.js';
+import { PARTICLE_DEVICE_PIXELS } from '../render/particles.js';
+import { DEFAULT_RENDER_SETTINGS } from '../render/renderer.js';
 import { SPECIES_COUNT } from '../sim/layout.js';
+import {
+  DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES,
+  DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS,
+} from '../sim/params.js';
+import { DEFAULT_GATE_SCHEDULE } from '../sim/spawn-director.js';
+import { DEFAULT_RAMP } from '../sim/spawner.js';
 import { MIX_VERSION, RULE_FIELDS, RULE_RANGES, decodeMix } from './labPresets.js';
 import { LAB_KNOBS, RENDER_SLIDERS, clampToSpec } from './panelModel.js';
 
@@ -69,6 +83,13 @@ export const LAB_KNOB_BINDINGS = {
   killBurstParticles: simulationValue('killBurstParticles', 'setKillBurstParticles'),
   killFragmentParticles: simulationValue('killFragmentParticles', 'setKillFragmentParticles'),
   deathFloodParticles: simulationValue('deathFloodParticles', 'setDeathFloodParticles'),
+  wallMargin: simulationValue('wallMargin', 'setWallMargin'),
+  wallStiffness: simulationValue('wallStiffness', 'setWallStiffness'),
+  comfortRadius: simulationValue('comfortRadius', 'setComfortRadius'),
+  coarseFieldPressure: {
+    read: ({ game }) => (game.simulation.coarseFieldPressure ? 1 : 0),
+    write: ({ game }, value) => game.simulation.setCoarseFieldPressure(value >= 0.5),
+  },
   particleDevicePixels: {
     read: ({ renderer }) => renderer.particles.particleDevicePixels,
     write: ({ renderer }, value) => renderer.particles.setParticleDevicePixels(value),
@@ -90,6 +111,28 @@ export const LAB_KNOB_BINDINGS = {
 
 // Every slider spec a mix's knobs map carries (the lab knobs and the renderer sliders).
 export const MIX_KNOB_SPECS = [...LAB_KNOBS, ...RENDER_SLIDERS];
+
+// The shipped value of every mix knob (and same-species cohesion, on).
+export const LAB_KNOB_DEFAULTS = Object.freeze({
+  watchAliveFraction: DEFAULT_WATCH_ALIVE_FRACTION,
+  wallMargin: DEFAULT_WALL_MARGIN,
+  wallStiffness: DEFAULT_WALL_STIFFNESS,
+  comfortRadius: DEFAULT_COMFORT_RADIUS,
+  coarseFieldPressure: 1,
+  ...DEFAULT_RAMP,
+  ...DEFAULT_GATE_SCHEDULE,
+  spawnBandWidth: DEFAULT_SPAWN_BAND_WIDTH,
+  spawnDensityBias: DEFAULT_SPAWN_DENSITY_BIAS,
+  killBurstParticles: DEFAULT_KILL_BURST_PARTICLES,
+  killFragmentParticles: DEFAULT_KILL_FRAGMENT_PARTICLES,
+  deathFloodParticles: DEFAULT_DEATH_FLOOD_PARTICLES,
+  particleDevicePixels: PARTICLE_DEVICE_PIXELS,
+  pickupBlastRadius: DEFAULT_PICKUP_BLAST_RADIUS,
+  baseKillBudget: DEFAULT_BASE_KILL_BUDGET,
+  beamSweepThresholdDegrees: DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES,
+  ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, DEFAULT_RENDER_SETTINGS[spec.key]])),
+  sameSpeciesCohesion: 1,
+});
 
 export function readKnob(context, spec) {
   return clampToSpec(spec, LAB_KNOB_BINDINGS[spec.key].read(context));
@@ -120,8 +163,8 @@ export function captureMix(context) {
   };
 }
 
-// Writes a valid mix into the live state. Knobs missing from the mix keep their values; knob
-// values are clamped to the lab's slider ranges. A different neighbor radius needs a capacity swap
+// Writes a valid mix into the live state. Knobs missing from the mix (all of them without a knobs
+// map) take their shipped defaults; knob values are clamped to the lab's slider ranges. A different neighbor radius needs a capacity swap
 // (the grid is rebuilt): the returned promise is that swap's (resolved at once when none is needed).
 export function applyMix(context, mix) {
   const { game } = context;
@@ -132,13 +175,49 @@ export function applyMix(context, mix) {
     : row));
   simulation.setSpecies(rows, Float32Array.from(mix.matrix));
   game.setSimulationRate(mix.simulationRate);
-  const knobs = mix.knobs ?? {};
-  for (const spec of MIX_KNOB_SPECS) {
-    if (knobs[spec.key] !== undefined) writeKnob(context, spec, knobs[spec.key]);
-  }
-  if (knobs.sameSpeciesCohesion !== undefined) simulation.setSameSpeciesCohesion(knobs.sameSpeciesCohesion >= 0.5);
-  if (Math.abs(mix.neighborRadius - simulation.neighborRadius) <= NEIGHBOR_RADIUS_EPSILON) return Promise.resolve(false);
-  return game.setCapacity(simulation.capacity, { neighborRadius: mix.neighborRadius });
+  const knobs = { ...LAB_KNOB_DEFAULTS, ...mix.knobs };
+  for (const spec of MIX_KNOB_SPECS) writeKnob(context, spec, knobs[spec.key]);
+  simulation.setSameSpeciesCohesion(knobs.sameSpeciesCohesion >= 0.5);
+  return setNeighborRadius(game, mix.neighborRadius);
+}
+
+// A different neighbor radius needs a capacity swap at the current capacity (the grid is rebuilt).
+function setNeighborRadius(game, neighborRadius) {
+  const simulation = game.simulation;
+  if (Math.abs(neighborRadius - simulation.neighborRadius) <= NEIGHBOR_RADIUS_EPSILON) return Promise.resolve(false);
+  return game.setCapacity(simulation.capacity, { neighborRadius });
+}
+
+// Everything the lab can change, unclamped (so a restore gives back exactly what was there): the
+// species rows, matrix, shares, neighbor radius, rate, same-species cohesion, every knob and the
+// renderer settings. The capacity is not part of it.
+export function captureLabState(context) {
+  const { game, renderer } = context;
+  const simulation = game.simulation;
+  return {
+    species: simulation.species.map((row) => ({ ...row })),
+    matrix: Float32Array.from(simulation.matrix),
+    shares: Array.from(simulation.shares, Number),
+    neighborRadius: simulation.neighborRadius,
+    simulationRate: game.simulationRate,
+    sameSpeciesCohesion: simulation.sameSpeciesCohesion,
+    knobs: Object.fromEntries(MIX_KNOB_SPECS.map((spec) => [spec.key, LAB_KNOB_BINDINGS[spec.key].read(context)])),
+    renderSettings: { ...renderer.settings },
+  };
+}
+
+// Writes a captureLabState result back; returns the neighbor radius swap's promise (resolved at
+// once when the radius is unchanged).
+export function restoreLabState(context, state) {
+  const { game, renderer } = context;
+  const simulation = game.simulation;
+  simulation.setShares(state.shares);
+  simulation.setSpecies(state.species.map((row) => ({ ...row })), Float32Array.from(state.matrix));
+  game.setSimulationRate(state.simulationRate);
+  simulation.setSameSpeciesCohesion(state.sameSpeciesCohesion);
+  for (const spec of MIX_KNOB_SPECS) LAB_KNOB_BINDINGS[spec.key].write(context, state.knobs[spec.key]);
+  Object.assign(renderer.settings, state.renderSettings);
+  return setNeighborRadius(game, state.neighborRadius);
 }
 
 // { present: false } without a #mix= hash; else { present: true, mix } with mix null when malformed.
@@ -164,6 +243,8 @@ export class LabMode {
     this.panel = null;
     this.active = false;
     this.mode = 'watch';
+    // captureLabState on entering, restored on leaving.
+    this.enteredState = null;
   }
 
   attachPanel(panel) {
@@ -173,6 +254,7 @@ export class LabMode {
   enter() {
     if (!this.active) {
       this.active = true;
+      this.enteredState = captureLabState(this.context);
       this.menu.hide();
       this.viewport.setInspectZoomEnabled(true);
     }
@@ -181,11 +263,15 @@ export class LabMode {
     this.panel?.refresh();
   }
 
-  // Back to the title: the run resets as on Quit to title.
+  // Back to the title: the state from entering comes back (the capacity stays) and the run resets
+  // as on Quit to title. A failed neighbor radius swap keeps the previous simulation running with
+  // the lab's radius (the panel is closed; the next lab visit shows the radius in effect).
   leave() {
     if (!this.active) return;
     this.active = false;
     this.game.setWatch(null);
+    restoreLabState(this.context, this.enteredState).catch(() => {});
+    this.enteredState = null;
     this.game.quitToTitle();
     this.viewport.setInspectZoomEnabled(false);
     this.panel?.close();

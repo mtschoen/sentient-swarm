@@ -12,9 +12,12 @@
 //   knobs (optional): map of lab slider values; only the names in KNOB_RANGES, each a finite number
 //          inside its range; the lab (lab.js LAB_KNOB_BINDINGS) applies them, clamped to its slider
 //          ranges (panelModel.js LAB_KNOBS), through SpawnPressure.setRamp, SpawnDirector.setSchedule,
-//          the Simulation setters, the projectile budgets, the pickup blast, the watch alive target,
-//          same-species cohesion (0 or 1) and the renderer settings. effects, shake and trails
-//          (settings panel percents) are accepted but the lab sets the raw renderer values instead.
+//          the Simulation setters (spawn, particles, walls, comfort radius, coarse-field pressure 0
+//          or 1), the projectile budgets, the pickup blast, the watch alive target, same-species
+//          cohesion (0 or 1) and the renderer settings (exposure included). A knob the map leaves
+//          out (every knob, for a mix without the map) is applied at its shipped default. effects,
+//          shake and trails (settings panel percents) are accepted but the lab sets the raw
+//          renderer values instead.
 // The encoded text is the compact JSON as URL-safe base64 without padding.
 import { SPECIES_COUNT } from '../sim/layout.js';
 import { defaultMatrix, defaultSpecies } from '../sim/species.js';
@@ -42,6 +45,7 @@ export const KNOB_RANGES = {
   pickupBlastRadius: [0, 4], baseKillBudget: [0, 64], beamSweepThresholdDegrees: [0, 90],
   trailDecay: [0, 0.99], bloomStrength: [0, 3], warpDensityWeight: [0, 1], warpThreatWeight: [0, 2],
   shipArenaFraction: [0.012, 0.04],
+  wallMargin: [0, 2], wallStiffness: [0, 160], comfortRadius: [0, 4], coarseFieldPressure: [0, 1], exposure: [0.25, 4],
 };
 const TOP_LEVEL_KEYS = ['version', 'shares', 'rules', 'matrix', 'neighborRadius', 'simulationRate', 'knobs'];
 

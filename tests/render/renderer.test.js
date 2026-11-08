@@ -147,3 +147,13 @@ test('destroy destroys every texture and the pass uniform buffers', () => {
     assert.ok(log.buffers.filter((buffer) => buffer.label === label).every((buffer) => buffer.destroyed), label);
   }
 });
+
+test('render writes the exposure setting into the composite uniform every frame', () => {
+  const { renderer } = createRenderer(createFakeSimulation('first', 0));
+  const writes = [];
+  renderer.device.queue.writeBuffer = (buffer, offset, data) => { if (buffer === renderer.composite.uniformBuffer) writes.push(Array.from(data)); };
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 0 });
+  renderer.settings.exposure = 2;
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 0 });
+  assert.deepEqual(writes.map((floats) => floats[5]), [Math.fround(0.15), Math.fround(0.3)]);
+});

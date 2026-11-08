@@ -44,7 +44,7 @@ struct Agent {
   hueJitter: f32,
 }
 
-// Uniform layout (byte offsets), total 224 bytes:
+// Uniform layout (byte offsets), total 240 bytes:
 //   0 dt                 f32
 //   4 time               f32
 //   8 playerPosition     vec2f
@@ -74,7 +74,11 @@ struct Agent {
 // 208 spawnGateCount     u32 (rows in use; 0 spawns in the wall band)
 // 212 spawnGateSpeciesBias f32 (0 to 1: how strongly a gate keeps to its favored species)
 // 216 deathFloodParticles u32 (player death flood size, nonzero only in the death clear's step)
-// 220 paramsPadding      u32
+// 220 wallMargin         f32 (depth of the wall band where integrate pushes inward)
+// 224 wallStiffness      f32 (velocity change per second per world unit of penetration)
+// 228 comfortRadius      f32 (straight seek fades to zero inside it; 0 turns the fade off)
+// 232 coarseFieldPressure u32 (1: steer applies the coarse-field pressure term, 0: it does not)
+// 236 paramsPadding      u32
 struct SimParams {
   dt: f32,
   time: f32,
@@ -105,6 +109,10 @@ struct SimParams {
   spawnGateCount: u32,
   spawnGateSpeciesBias: f32,
   deathFloodParticles: u32,
+  wallMargin: f32,
+  wallStiffness: f32,
+  comfortRadius: f32,
+  coarseFieldPressure: u32,
   paramsPadding: u32,
 }
 

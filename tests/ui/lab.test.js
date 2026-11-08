@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_WATCH_ALIVE_FRACTION, LAB_KNOB_BINDINGS, LabMode, MIX_KNOB_SPECS, applyMix, captureMix, hashForMix, mixFromHash, readKnob, writeKnob,
+  DEFAULT_WATCH_ALIVE_FRACTION, LAB_KNOB_BINDINGS, LAB_KNOB_DEFAULTS, LabMode, MIX_KNOB_SPECS, applyMix, captureLabState, captureMix,
+  hashForMix, mixFromHash, readKnob, restoreLabState, writeKnob,
 } from '../../src/ui/lab.js';
-import { KNOB_RANGES, decodeMix, encodeMix, isValidMix } from '../../src/ui/labPresets.js';
+import { BUNDLED_MIXES, KNOB_RANGES, decodeMix, encodeMix, isValidMix } from '../../src/ui/labPresets.js';
 import { SpawnPressure } from '../../src/sim/spawner.js';
 import { SpawnDirector } from '../../src/sim/spawn-director.js';
 import { defaultMatrix, defaultSpecies, normalizeShares } from '../../src/sim/species.js';
@@ -34,6 +35,14 @@ function createContext() {
     setKillBurstParticles(value) { this.killBurstParticles = value; },
     setKillFragmentParticles(value) { this.killFragmentParticles = value; },
     setDeathFloodParticles(value) { this.deathFloodParticles = value; },
+    wallMargin: 0.5,
+    wallStiffness: 40,
+    comfortRadius: 1,
+    coarseFieldPressure: true,
+    setWallMargin(value) { this.wallMargin = value; },
+    setWallStiffness(value) { this.wallStiffness = value; },
+    setComfortRadius(value) { this.comfortRadius = value; },
+    setCoarseFieldPressure(enabled) { this.coarseFieldPressure = enabled; },
   };
   const game = {
     simulation,
@@ -199,4 +208,92 @@ test('LabMode.loadFromHash applies a valid mix', async () => {
   const { lab, game } = createLab();
   lab.loadFromHash(hashForMix(encodeMix(captureMix(source))));
   assert.equal(game.projectiles.beamSweepThresholdDegrees, 20);
+});
+
+test('every mix knob has a shipped default inside its slider range; the new knobs default to the old constants', () => {
+  for (const spec of MIX_KNOB_SPECS) {
+    const value = LAB_KNOB_DEFAULTS[spec.key];
+    assert.ok(value >= spec.minimum && value <= spec.maximum, `${spec.key} ${value}`);
+  }
+  assert.deepEqual(
+    ['wallMargin', 'wallStiffness', 'comfortRadius', 'coarseFieldPressure', 'exposure'].map((key) => LAB_KNOB_DEFAULTS[key]),
+    [0.5, 40, 1, 1, 1],
+  );
+  // The fake context holds the shipped values, so its knobs read as the defaults.
+  const context = createContext();
+  for (const spec of MIX_KNOB_SPECS) assert.equal(LAB_KNOB_BINDINGS[spec.key].read(context), LAB_KNOB_DEFAULTS[spec.key], spec.key);
+});
+
+test('the wall, comfort, coarse-field and exposure knobs round-trip through a shared mix', () => {
+  const source = createContext();
+  writeKnob(source, specFor('wallMargin'), 1.5);
+  writeKnob(source, specFor('wallStiffness'), 90);
+  writeKnob(source, specFor('comfortRadius'), 2.25);
+  writeKnob(source, specFor('coarseFieldPressure'), 0);
+  writeKnob(source, specFor('exposure'), 2);
+  const target = createContext();
+  applyMix(target, decodeMix(encodeMix(captureMix(source))));
+  const simulation = target.game.simulation;
+  assert.deepEqual([simulation.wallMargin, simulation.wallStiffness, simulation.comfortRadius, simulation.coarseFieldPressure], [1.5, 90, 2.25, false]);
+  assert.equal(target.renderer.settings.exposure, 2);
+});
+
+test('applying a mix without a knobs map (a bundled mix) resets every knob to its default first', () => {
+  const context = createContext();
+  writeKnob(context, specFor('baseKillBudget'), 9);
+  writeKnob(context, specFor('wallMargin'), 1.75);
+  writeKnob(context, specFor('trailDecay'), 0.2);
+  writeKnob(context, specFor('rampSeconds'), 30);
+  writeKnob(context, specFor('coarseFieldPressure'), 0);
+  context.game.simulation.setSameSpeciesCohesion(false);
+  applyMix(context, BUNDLED_MIXES.allChasers);
+  for (const spec of MIX_KNOB_SPECS) assert.equal(readKnob(context, spec), clampedDefault(spec), spec.key);
+  assert.equal(context.game.simulation.sameSpeciesCohesion, true);
+  assert.equal(context.game.simulation.shares[0], 1);
+});
+
+function clampedDefault(spec) {
+  return Math.min(spec.maximum, Math.max(spec.minimum, LAB_KNOB_DEFAULTS[spec.key]));
+}
+
+test('restoreLabState gives back exactly what captureLabState read, unclamped', async () => {
+  const context = createContext();
+  const state = captureLabState(context);
+  writeKnob(context, specFor('comfortRadius'), 3);
+  context.game.simulation.species[0].seek = 1.9;
+  context.game.simulation.matrix[1] = 2;
+  context.game.simulation.setShares([0, 1, 0, 0, 0]);
+  context.renderer.settings.glowScale = 3;
+  await restoreLabState(context, state);
+  assert.deepEqual(captureLabState(context), state);
+  assert.equal(context.game.capacityRequests.length, 0);
+});
+
+test('LabMode: leaving restores the state from entering, Play inside the lab keeps the lab mix', async () => {
+  const { lab, game } = createLab();
+  const renderer = lab.context.renderer;
+  const before = captureLabState(lab.context);
+  lab.enter();
+  writeKnob(lab.context, specFor('baseKillBudget'), 4);
+  writeKnob(lab.context, specFor('wallMargin'), 1.25);
+  writeKnob(lab.context, specFor('exposure'), 3);
+  writeKnob(lab.context, specFor('floorFraction'), 0.05);
+  game.simulation.species[1].maximumSpeed = 7;
+  game.simulation.setSameSpeciesCohesion(false);
+  game.setSimulationRate('half');
+  game.simulation.neighborRadius = 0.2;
+  lab.setMode('play');
+  assert.equal(game.projectiles.baseKillBudget, 4, 'Play keeps the lab mix');
+  lab.leave();
+  assert.equal(game.projectiles.baseKillBudget, 0);
+  assert.equal(game.simulation.wallMargin, 0.5);
+  assert.equal(renderer.settings.exposure, 1);
+  assert.equal(game.spawnPressure.ramp.floorFraction, before.knobs.floorFraction);
+  assert.equal(game.simulation.species[1].maximumSpeed, before.species[1].maximumSpeed);
+  assert.equal(game.simulation.sameSpeciesCohesion, true);
+  assert.equal(game.simulationRate, 'full');
+  // The neighbor radius comes back through a swap at the current capacity.
+  assert.deepEqual(game.capacityRequests, [{ capacity: CAPACITY, neighborRadius: 0.1 }]);
+  game.simulation.neighborRadius = 0.1;
+  assert.deepEqual(captureLabState(lab.context), before);
 });

@@ -13,7 +13,8 @@
 //   where density is the total at the agent's cell; the matrix row along the signed sum of the
 //   other species' gradients; flee down the threat gradient; pressure down the total-density
 //   gradient with weight min(pressure * (density - targetDensity), PRESSURE_MAXIMUM_MULTIPLE) once
-//   density exceeds targetDensity. The clamp is one-sided: negative pressure is not valid (species
+//   density exceeds targetDensity (only while params.coarseFieldPressure is 1, the default; the
+//   lab's coarse-field toggle turns it off). The clamp is one-sided: negative pressure is not valid (species
 //   defaults are non-negative). Like the other field terms its direction saturates
 //   (saturatedDirection), so float noise in a flat over-dense interior pushes weakly instead of at
 //   full strength in a random direction.
@@ -44,9 +45,9 @@ const ORBIT_TANGENT_BAND: f32 = 0.2;
 // Fraction of the time-optimal stopping speed that straight seek allows, leaving acceleration
 // headroom for the other terms that share the maximumTurn budget. The lab may expose it.
 const ARRIVAL_BRAKING: f32 = 0.7;
-// Straight seek fades to zero inside this distance from the player (smoothstep), so seekers hover
-// at a standoff instead of piling onto the player.
-const COMFORT_RADIUS: f32 = 1.0;
+// Straight seek fades to zero inside params.comfortRadius (1 by default) from the player
+// (smoothstep), so seekers hover at a standoff instead of piling onto the player; 0 turns the
+// fade off.
 // The pressure term is at most this multiple of maximumSpeed, so a dense cell cannot demand a
 // desired velocity the turn clamp has to absorb.
 const PRESSURE_MAXIMUM_MULTIPLE: f32 = 2.0;
@@ -97,7 +98,7 @@ fn saturatedDirection(gradient: vec2f) -> vec2f {
 // the circle of that radius around the player (inward when outside it, outward when inside),
 // except within ORBIT_TANGENT_BAND * orbitRadius of the circle, where the agent follows the
 // counterclockwise tangent so every orbiter circles with the same handedness. Orbits never brake.
-// Straight seek (orbitRadius 0) also fades by smoothstep over COMFORT_RADIUS around the player;
+// Straight seek (orbitRadius 0) also fades by smoothstep over params.comfortRadius around the player;
 // orbit seek is unchanged.
 fn seekVelocity(position: vec2f, orbitRadius: f32, maximumSpeed: f32, maximumAcceleration: f32) -> vec2f {
   let toPlayer = params.playerPosition - position;
@@ -108,7 +109,9 @@ fn seekVelocity(position: vec2f, orbitRadius: f32, maximumSpeed: f32, maximumAcc
   let radial = toPlayer / distance;
   if (orbitRadius <= 0.0) {
     let brakingSpeed = ARRIVAL_BRAKING * sqrt(2.0 * maximumAcceleration * distance);
-    return radial * min(maximumSpeed, brakingSpeed) * smoothstep(0.0, COMFORT_RADIUS, distance);
+    // smoothstep with equal edges is undefined, so a zero radius skips the fade.
+    let comfort = select(smoothstep(0.0, params.comfortRadius, distance), 1.0, params.comfortRadius <= 0.0);
+    return radial * min(maximumSpeed, brakingSpeed) * comfort;
   }
   if (abs(distance - orbitRadius) <= ORBIT_TANGENT_BAND * orbitRadius) {
     return vec2f(-radial.y, radial.x) * maximumSpeed;
@@ -240,7 +243,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   let threatGradient = vec2f(channelOf(gradientX, THREAT_CHANNEL), channelOf(gradientY, THREAT_CHANNEL));
   desired = desired - saturatedDirection(threatGradient) * speciesField(species, FIELD_FLEE) * maximumSpeed;
 
-  if (density > targetDensity) {
+  if (params.coarseFieldPressure != 0u && density > targetDensity) {
     let totalGradient = vec2f(totalDensity(gradientX), totalDensity(gradientY));
     desired = desired - saturatedDirection(totalGradient) * min(speciesField(species, FIELD_PRESSURE) * (density - targetDensity), PRESSURE_MAXIMUM_MULTIPLE) * maximumSpeed;
   }

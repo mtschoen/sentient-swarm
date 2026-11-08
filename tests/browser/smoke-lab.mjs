@@ -31,6 +31,7 @@ const MOBILE_USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/
 const MINIMUM_TOUCH_ROW_PIXELS = 30;
 const KILL_BUDGET = 5;
 const CHASER_SHARE = 0.9;
+const COMFORT_RADIUS = 2.5;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 // base64url of {"version":1}: decodes as JSON, fails the mix schema.
 const WRONG_SHAPE = Buffer.from(JSON.stringify({ version: 1 })).toString('base64url');
@@ -103,6 +104,8 @@ const readLab = (page) => page.evaluate(() => {
     phase: game.run.phase,
     zoomEnabled: lab.viewport.inspectZoomEnabled,
     killBudget: game.projectiles.baseKillBudget,
+    comfortRadius: game.simulation.comfortRadius,
+    coarseFieldPressure: game.simulation.coarseFieldPressure,
     shares: Array.from(game.simulation.shares),
     mix: lab.capture(),
     player: game.player.position,
@@ -139,11 +142,15 @@ async function checkDesktop(baseUrl) {
 
     await setSlider(page, 'baseKillBudget', KILL_BUDGET);
     await setSlider(page, 'Chaser', CHASER_SHARE);
+    await setSlider(page, 'comfortRadius', COMFORT_RADIUS);
+    await page.evaluate(() => document.querySelector('.lab-panel input[data-knob="coarseFieldPressure"]').click());
     await page.click('.lab-panel .lab-share');
     sharedUrl = await page.evaluate(() => location.href);
     expect(sharedUrl.includes('#mix='), `Share should write #mix= into the URL, got ${sharedUrl}`);
     source = await readLab(page);
     expect(source.killBudget === KILL_BUDGET, `the kill budget slider should set ${KILL_BUDGET}, got ${source.killBudget}`);
+    expect(source.comfortRadius === COMFORT_RADIUS && source.coarseFieldPressure === false,
+      `the comfort radius slider and coarse-field toggle should set ${COMFORT_RADIUS} and off, got ${source.comfortRadius} and ${source.coarseFieldPressure}`);
     await savePng('lab-panel-1280x720.png', await page.screenshot());
 
     await page.click('.lab-panel .lab-leave');
@@ -151,6 +158,8 @@ async function checkDesktop(baseUrl) {
     state = await readLab(page);
     expect(!state.active && !state.zoomEnabled && state.phase === 'ready', `Title should leave the lab, got ${JSON.stringify({ ...state, mix: undefined })}`);
     expect(await isShown(page, '.menu-title-screen'), 'the title menu should show after leaving the lab');
+    expect(state.killBudget === 0 && state.comfortRadius === 1 && state.coarseFieldPressure === true,
+      `leaving should restore the shipped knobs, got kill budget ${state.killBudget}, comfort radius ${state.comfortRadius}, coarse field ${state.coarseFieldPressure}`);
     expectNoErrors(page, 'desktop lab');
   } finally {
     await browser.close();
@@ -162,10 +171,12 @@ async function checkDesktop(baseUrl) {
     const state = await readLab(reopened.page);
     expect(state.active, 'the shared link should open the lab');
     expect(state.killBudget === KILL_BUDGET, `the shared kill budget should be ${KILL_BUDGET}, got ${state.killBudget}`);
+    expect(state.comfortRadius === COMFORT_RADIUS && state.coarseFieldPressure === false,
+      `the shared comfort radius and coarse-field toggle should be ${COMFORT_RADIUS} and off, got ${state.comfortRadius} and ${state.coarseFieldPressure}`);
     expect(state.shares.every((share, index) => Math.abs(share - source.shares[index]) < 1e-6), `shares should round-trip: ${source.shares} -> ${state.shares}`);
     expect(JSON.stringify(state.mix) === JSON.stringify(source.mix), 'the whole mix should round-trip through the shared link');
     expectNoErrors(reopened.page, 'shared link');
-    console.log(`smoke-lab: desktop Watch, Play, Share and the shared link round trip ok (kill budget ${state.killBudget}, Chaser share ${state.shares[0].toFixed(3)})`);
+    console.log(`smoke-lab: desktop Watch, Play, Share and the shared link round trip ok (kill budget ${state.killBudget}, comfort radius ${state.comfortRadius}, coarse field ${state.coarseFieldPressure ? 'on' : 'off'}, Chaser share ${state.shares[0].toFixed(3)})`);
   } finally {
     await reopened.browser.close();
   }

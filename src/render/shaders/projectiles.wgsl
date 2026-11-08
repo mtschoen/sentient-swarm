@@ -7,7 +7,10 @@
 //   rail       very long hair-thin needle, sharp white core    orb      pulsing glow disc
 //   ring       thick expanding wave front over a faint disc    sidewinder  missile body with a weaving exhaust ribbon
 //   beam       the fat laser from the ship to the arena edge, white core inside a coloured body,
-//              plus a fan over the sector swept since the previous step, fading toward the previous aim
+//              plus a fan over the sector swept since the previous step, fading toward the previous aim;
+//              a beam slot lifetime under 1 (the lab's beam sweep budget, its kill reach scale) cuts
+//              the laser and the fan at that fraction of the current ray's length, as the collide
+//              pass cuts the kill sector
 // Slot 0 is the beam; the CPU rewrites it every frame while firing, with the previous step's unit
 // direction in seed and extra (projectiles_collide.wgsl kills the same sector).
 
@@ -50,6 +53,8 @@ const BEAM_FAN_TAIL: f32 = 0.35;
 const BEAM_FAN_HEAD: f32 = 1.0;
 // White added to the fan at the current aim (cubic falloff toward the previous aim).
 const BEAM_FAN_HEAT: f32 = 0.6;
+// Longer than any ray in the arena: the draw limit of a beam at full reach (lifetime 1).
+const BEAM_UNLIMITED_REACH: f32 = 1e9;
 
 struct ProjectileVaryings {
   @builtin(position) position: vec4f,
@@ -60,8 +65,9 @@ struct ProjectileVaryings {
   @location(3) @interpolate(flat) shape: vec4f,
   // Beam only: xy the current unit direction, zw the previous one (equal for no sweep).
   @location(4) @interpolate(flat) beamDirections: vec4f,
-  // Beam only: the ship position the beam starts from.
-  @location(5) @interpolate(flat) beamOrigin: vec2f,
+  // Beam only: xy the ship position the beam starts from, z the distance past which nothing is
+  // drawn (BEAM_UNLIMITED_REACH at full reach), w unused.
+  @location(5) @interpolate(flat) beamOrigin: vec4f,
 }
 
 fn kindHue(kind: u32) -> f32 {
@@ -98,7 +104,7 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
   output.kind = 0u;
   output.shape = vec4f(0.0);
   output.beamDirections = vec4f(0.0);
-  output.beamOrigin = vec2f(0.0);
+  output.beamOrigin = vec4f(0.0);
   let projectile = projectiles[instanceIndex];
   if ((projectile.flags & PROJECTILE_FLAG_ALIVE) == 0u) {
     return output;
@@ -138,16 +144,18 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
       center = projectile.position - direction * (SIDEWINDER_TAIL * 0.5 - 0.06);
     }
     default: {
-      // Beam: from the ship (position) along the unit direction to the arena edge.
-      let length = distanceToArenaEdge(projectile.position, direction);
+      // Beam: from the ship (position) along the unit direction to the arena edge, or to the reach
+      // limit (beamReachLimit) when the slot's lifetime scales the reach down.
+      let limit = beamReachLimit(projectile, direction);
+      let length = min(distanceToArenaEdge(projectile.position, direction), limit);
       let glowWidth = projectile.radius * BEAM_GLOW_FACTOR + BEAM_GLOW_MARGIN;
       halfExtent = vec2f(length * 0.5 + 0.05, glowWidth);
       center = projectile.position + direction * (length * 0.5);
       let previous = beamPreviousDirection(projectile, direction);
       output.beamDirections = vec4f(direction, previous);
-      output.beamOrigin = projectile.position;
+      output.beamOrigin = vec4f(projectile.position, limit, 0.0);
       if (sweptAngle(previous, direction) > BEAM_MINIMUM_SWEEP) {
-        let bounds = beamSweepBounds(projectile.position, previous, direction, glowWidth + 0.05);
+        let bounds = beamSweepBounds(projectile.position, previous, direction, limit, glowWidth + 0.05);
         center = (bounds.xy + bounds.zw) * 0.5;
         halfExtent = (bounds.zw - bounds.xy) * 0.5;
         axisAligned = true;
@@ -182,6 +190,15 @@ fn beamPreviousDirection(projectile: Projectile, current: vec2f) -> vec2f {
   return select(current, normalize(previous), dot(previous, previous) > 0.25);
 }
 
+// The beam's draw limit: lifetime (its kill reach scale) times the current ray's length to the
+// edge when below 1, as beamSector in projectiles_collide.wgsl, else BEAM_UNLIMITED_REACH.
+fn beamReachLimit(projectile: Projectile, current: vec2f) -> f32 {
+  if (projectile.lifetime < 1.0) {
+    return max(projectile.lifetime, 0.0) * distanceToArenaEdge(projectile.position, current);
+  }
+  return BEAM_UNLIMITED_REACH;
+}
+
 fn sweptAngle(previous: vec2f, current: vec2f) -> f32 {
   return acos(clamp(dot(previous, current), -1.0, 1.0));
 }
@@ -195,21 +212,27 @@ fn angleFromPrevious(previous: vec2f, current: vec2f, offset: vec2f) -> f32 {
 }
 
 // The world-axis box (minimum xy, maximum xy) around the sector swept from previous to current,
-// clipped by the arena: the origin, both edge ray ends and the arena corners inside the arc,
-// widened by margin.
-fn beamSweepBounds(origin: vec2f, previous: vec2f, current: vec2f, margin: f32) -> vec4f {
-  let previousEnd = origin + previous * distanceToArenaEdge(origin, previous);
-  let currentEnd = origin + current * distanceToArenaEdge(origin, current);
+// clipped by the arena and the reach limit: the origin, both edge ray ends and the arena corners
+// inside the arc and the limit, widened by margin. A limited sector's arc can bulge past its ray
+// ends, so the box then also takes in the limit circle's box (clipped by the arena).
+fn beamSweepBounds(origin: vec2f, previous: vec2f, current: vec2f, limit: f32, margin: f32) -> vec4f {
+  let previousEnd = origin + previous * min(distanceToArenaEdge(origin, previous), limit);
+  let currentEnd = origin + current * min(distanceToArenaEdge(origin, current), limit);
   var low = min(origin, min(previousEnd, currentEnd));
   var high = max(origin, max(previousEnd, currentEnd));
   let sweep = sweptAngle(previous, current);
   for (var index = 0u; index < 4u; index = index + 1u) {
     let corner = vec2f(f32(index & 1u) * ARENA_WIDTH, f32(index >> 1u) * ARENA_HEIGHT);
     let angle = angleFromPrevious(previous, current, corner - origin);
-    if (angle >= 0.0 && angle <= sweep) {
+    if (angle >= 0.0 && angle <= sweep && length(corner - origin) <= limit) {
       low = min(low, corner);
       high = max(high, corner);
     }
+  }
+  if (limit < BEAM_UNLIMITED_REACH) {
+    let arena = vec2f(ARENA_WIDTH, ARENA_HEIGHT);
+    low = min(low, max(origin - vec2f(limit), vec2f(0.0)));
+    high = max(high, min(origin + vec2f(limit), arena));
   }
   return vec4f(low - vec2f(margin), high + vec2f(margin));
 }
@@ -314,7 +337,8 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
       // Beam: local is the world offset from the ship, shape.w the beam length, radius the half width.
       let current = input.beamDirections.xy;
       let previous = input.beamDirections.zw;
-      let origin = input.beamOrigin;
+      let origin = input.beamOrigin.xy;
+      let limit = input.beamOrigin.z;
       let beamLength = fade;
       let along = dot(local, current);
       let across = abs(crossProduct(current, local));
@@ -331,10 +355,11 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
         // The swept fan: the kill sector padded by the half width, brightening toward the current aim.
         let angle = angleFromPrevious(previous, current, local);
         let inside = angle >= 0.0 && angle <= sweep;
-        let previousEnd = previous * distanceToArenaEdge(origin, previous);
-        let currentEnd = current * distanceToArenaEdge(origin, current);
+        let previousEnd = previous * min(distanceToArenaEdge(origin, previous), limit);
+        let currentEnd = current * min(distanceToArenaEdge(origin, current), limit);
         let edgeDistance = min(segmentDistance(local, vec2f(0.0), previousEnd), segmentDistance(local, vec2f(0.0), currentEnd));
-        let sectorDistance = select(edgeDistance, 0.0, inside);
+        // Inside the arc, past the reach limit the nearest sector point lies on the limit's arc.
+        let sectorDistance = select(edgeDistance, max(length(local) - limit, 0.0), inside);
         let fanBody = 1.0 - smoothstep(radius * 0.85 - feather, radius + feather, sectorDistance);
         let fanGlow = pow(clamp(1.0 - max(sectorDistance - radius, 0.0) / glowExtent, 0.0, 1.0), 2.5);
         let progress = clamp(angle / sweep, 0.0, 1.0);

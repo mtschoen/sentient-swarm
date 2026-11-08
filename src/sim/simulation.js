@@ -1,3 +1,4 @@
+// Over 500 lines: one facade owns every pass and its knobs; the frame contract below binds them.
 // Simulation facade: owns the agent ping-pong buffers, the species table, the SimParams uniform,
 // the stats buffer and its staging ring, and runs every compute pass in frame order.
 //
@@ -43,9 +44,11 @@ import { DebugKillPass, KillAllPass, PlayerContactPass } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
 import {
-  DEFAULT_DEATH_FLOOD_PARTICLES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH,
-  DEFAULT_SPAWN_DENSITY_BIAS, SIM_PARAMS_BYTES, packSimParams, validatedDeathFloodParticles, validatedKillBurstParticles,
-  validatedKillFragmentParticles, validatedSpawnBandWidth, validatedSpawnDensityBias,
+  DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES,
+  DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, SIM_PARAMS_BYTES,
+  packSimParams, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles,
+  validatedKillFragmentParticles, validatedSpawnBandWidth, validatedSpawnDensityBias, validatedWallMargin,
+  validatedWallStiffness,
 } from './params.js';
 import { Spawner } from './spawn.js';
 import { defaultMatrix, defaultSpecies, normalizeShares, packSpeciesTable } from './species.js';
@@ -143,6 +146,11 @@ export class Simulation {
     // Task C0b2: heavy fragments per kill and the player death flood size.
     this.killFragmentParticles = DEFAULT_KILL_FRAGMENT_PARTICLES;
     this.deathFloodParticles = DEFAULT_DEATH_FLOOD_PARTICLES;
+    // Task C6b lab knobs: the wall band and push, the seek comfort radius, the pressure term.
+    this.wallMargin = DEFAULT_WALL_MARGIN;
+    this.wallStiffness = DEFAULT_WALL_STIFFNESS;
+    this.comfortRadius = DEFAULT_COMFORT_RADIUS;
+    this.coarseFieldPressure = true;
     // The last step's gate table ({ gates, speciesBias } from SpawnDirector.spawnGates, or null for
     // wall band spawns); the gate renderer draws it.
     this.spawnGatesValue = null;
@@ -272,6 +280,26 @@ export class Simulation {
     this.deathFloodParticles = validatedDeathFloodParticles(count);
   }
 
+  // Wall band depth in [0, MAXIMUM_WALL_MARGIN], push stiffness in [0, MAXIMUM_WALL_STIFFNESS]
+  // and the seek comfort radius in [0, MAXIMUM_COMFORT_RADIUS] (params.js), from the next step on.
+  // Each throws RangeError and changes nothing when out of range.
+  setWallMargin(margin) {
+    this.wallMargin = validatedWallMargin(margin);
+  }
+
+  setWallStiffness(stiffness) {
+    this.wallStiffness = validatedWallStiffness(stiffness);
+  }
+
+  setComfortRadius(radius) {
+    this.comfortRadius = validatedComfortRadius(radius);
+  }
+
+  // false leaves the coarse-field pressure term (push toward lower density) out of steering.
+  setCoarseFieldPressure(enabled) {
+    this.coarseFieldPressure = Boolean(enabled);
+  }
+
   // spawnPerSpecies: SPECIES_COUNT counts for this frame, usually from SpawnPressure.update.
   // spawnGates (optional, SpawnDirector.spawnGates): this step's gate table; null spawns in the
   // wall band.
@@ -351,6 +379,10 @@ export class Simulation {
       spawnGates: this.spawnGatesValue,
       spawnBandWidth: this.spawnBandWidth,
       spawnDensityBias: this.spawnDensityBias,
+      wallMargin: this.wallMargin,
+      wallStiffness: this.wallStiffness,
+      comfortRadius: this.comfortRadius,
+      coarseFieldPressure: this.coarseFieldPressure ? 1 : 0,
       playerRadius: this.playerContact?.radius ?? 0,
       playerInvulnerable: this.playerContact?.invulnerable ? 1 : 0,
       acknowledgedHitSequence: this.acknowledgedHitSequence,
@@ -482,6 +514,10 @@ export class Simulation {
     next.setSpawnDensityBias(this.spawnDensityBias);
     next.setKillFragmentParticles(this.killFragmentParticles);
     next.setDeathFloodParticles(this.deathFloodParticles);
+    next.setWallMargin(this.wallMargin);
+    next.setWallStiffness(this.wallStiffness);
+    next.setComfortRadius(this.comfortRadius);
+    next.setCoarseFieldPressure(this.coarseFieldPressure);
     next.spawnGatesValue = this.spawnGatesValue;
     next.densityReadback.adopt(this.densityReadback);
     next.registeredPasses = this.registeredPasses;

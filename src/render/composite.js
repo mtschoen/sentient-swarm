@@ -4,9 +4,12 @@ import { createUniformBuffer } from '../gpu/buffers.js';
 import { createFullscreenPipeline, loadRenderShader } from './render-shaders.js';
 
 const COMPOSITE_UNIFORM_BYTES = 32;
+// The shipped scene radiance scale ahead of the tonemap; the renderer's exposure setting (1 by
+// default, the lab slider) multiplies it.
+export const BASE_EXPOSURE = 0.15;
 
-export function packCompositeUniform({ arenaRect, bloomStrength }) {
-  return new Float32Array([arenaRect.x, arenaRect.y, arenaRect.width, arenaRect.height, bloomStrength, 0, 0, 0]);
+export function packCompositeUniform({ arenaRect, bloomStrength, exposure = 1 }) {
+  return new Float32Array([arenaRect.x, arenaRect.y, arenaRect.width, arenaRect.height, bloomStrength, BASE_EXPOSURE * exposure, 0, 0]);
 }
 
 export class CompositePass {
@@ -42,8 +45,8 @@ export class CompositePass {
     }));
   }
 
-  encode(encoder, targetView, sceneIndex, { arenaRect, bloomStrength }) {
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, packCompositeUniform({ arenaRect, bloomStrength }));
+  encode(encoder, targetView, sceneIndex, { arenaRect, bloomStrength, exposure = 1 }) {
+    this.device.queue.writeBuffer(this.uniformBuffer, 0, packCompositeUniform({ arenaRect, bloomStrength, exposure }));
     const pass = encoder.beginRenderPass({
       label: 'composite',
       colorAttachments: [{ view: targetView, loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 } }],
