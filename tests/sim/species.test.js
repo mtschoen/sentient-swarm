@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/simulation.js';
 import { AgentCompaction } from '../../src/sim/compact.js';
 import { PRESETS } from '../../src/settings/presets.js';
-import { SPECIES_FIELDS, SPECIES_NAMES, defaultSpecies, defaultMatrix, packSpeciesTable, normalizeShares, DENSITY_REFERENCE_CAPACITY, densityScaleFor } from '../../src/sim/species.js';
+import { SPECIES_FIELDS, SPECIES_NAMES, defaultSpecies, defaultMatrix, packSpeciesTable, normalizeShares, DEFAULT_SHARES, DENSITY_REFERENCE_CAPACITY, densityScaleFor } from '../../src/sim/species.js';
 
 test('packSpeciesTable is 92 floats with the matrix after the rows', () => {
   const table = packSpeciesTable(defaultSpecies(), defaultMatrix());
@@ -155,4 +155,20 @@ test('the capacity swap carries the density scaling choice into the next simulat
   const unscaled = await createOptionsOfPrepare(false);
   assert.equal(unscaled.scaleDensityToCapacity, false);
   assert.equal(unscaled.capacity, 8192);
+});
+
+test('DEFAULT_SHARES is the chaser-dominant shipped mix without Lattice', () => {
+  assert.equal(DEFAULT_SHARES.length, 5);
+  assert.ok(Math.abs(DEFAULT_SHARES.reduce((sum, share) => sum + share, 0) - 1) < 1e-6);
+  assert.ok(DEFAULT_SHARES[0] >= 0.9);
+  assert.equal(SPECIES_NAMES.indexOf('Lattice'), 3);
+  assert.equal(DEFAULT_SHARES[3], 0);
+});
+
+// Simulation.create loads shaders and initializes every pass, so it cannot run without a GPU;
+// its destructuring default is checked by fixed spelling.
+test('Simulation.create defaults shares to the normalized DEFAULT_SHARES', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const source = await readFile(new URL('../../src/sim/simulation.js', import.meta.url), 'utf8');
+  assert.match(source, /^\s*shares = normalizeShares\(DEFAULT_SHARES\),$/m);
 });
