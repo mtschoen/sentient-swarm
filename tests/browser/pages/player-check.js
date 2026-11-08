@@ -7,7 +7,12 @@
 // (b) the latch: for LATCH_FRAMES unacknowledged frames, with alive agents overlapping the player,
 //     playerHitSequence stays at the first hit and hitLatch reads 1; after acknowledgeHit and 3
 //     more frames a second hit arrives whose sequence is past the acknowledging frame;
-// (c) invulnerable, with the second hit acknowledged: no hit for 60 frames while agents overlap;
+// (c) invulnerable, with the second hit acknowledged: no hit for 60 frames while agents overlap.
+//     The ring's chasers drift in and out of reach (the per-frame overlap floor flaked, 44 to 60
+//     of 60 on real hardware), so case (c) also holds one extra agent on the player, rewritten
+//     each frame before the step: overlap then holds on every frame and the floor is exact. The
+//     check still fails if invulnerability breaks, since that held agent (and the ring) would
+//     contact-kill and raise playerHitSequence in the first frame, failing the hit verdict;
 // (d) requestKillAll in a step that also spawns (so spawn-in agents exist when kill-all runs):
 //     aliveTotal 0, killsUnscored > 0, killsSinceLastRead 0; the next frame killsUnscored is back to 0
 //     while playerHitSequence persists across the per-step clear;
@@ -92,6 +97,18 @@ class Harness {
     const stats = this.collected.get(sequence);
     if (stats === undefined) throw new Error(`no stats for frame ${sequence}`);
     return stats;
+  }
+
+  // Writes one alive agent on the player in a slot past the seeded ring, so case (c) overlap does
+  // not depend on the chasers' drift. Called before each step.
+  holdAgentOnPlayer() {
+    const bytes = new ArrayBuffer(AGENT_STRIDE_BYTES);
+    const view = new DataView(bytes);
+    view.setFloat32(AGENT_OFFSETS.position, CENTER[0], true);
+    view.setFloat32(AGENT_OFFSETS.position + 4, CENTER[1], true);
+    view.setUint32(AGENT_OFFSETS.species, 0, true);
+    view.setUint32(AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
+    this.device.queue.writeBuffer(this.simulation.agentsBuffer, AGENT_COUNT * AGENT_STRIDE_BYTES, bytes);
   }
 
   // Alive agents within contact reach of the player in the newest agents buffer.
@@ -271,6 +288,7 @@ async function runCheck() {
   let hitWhileInvulnerable = false;
   const overlapInvulnerable = new OverlapTally(INVULNERABLE_FRAMES);
   for (let frame = 0; frame < INVULNERABLE_FRAMES; frame += 1) {
+    harness.holdAgentOnPlayer();
     stats = await harness.step();
     if (stats.playerHitSequence !== secondHit) hitWhileInvulnerable = true;
     overlapInvulnerable.record(await harness.overlapping());
