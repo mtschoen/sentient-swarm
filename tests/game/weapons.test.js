@@ -170,7 +170,7 @@ const EXPECTED_TABLES = {
       { projectilesPerShot: 1, spreadRadians: 0 },
       { projectilesPerShot: 2, spreadRadians: 0.3 },
       { projectilesPerShot: 3, spreadRadians: 0.5 },
-    ].map((own) => ({ ...TIER_DEFAULTS, fireInterval: 0.5, speed: 6, radius: 0.12, lifetime: 1, chargeSeconds: 8, extra: 40, ...own })),
+    ].map((own) => ({ ...TIER_DEFAULTS, fireInterval: 0.3, speed: 6, radius: 0.12, lifetime: 1, chargeSeconds: 8, extra: 40, ...own })),
   },
   sidewinders: {
     kind: PROJECTILE_KINDS.sidewinder,

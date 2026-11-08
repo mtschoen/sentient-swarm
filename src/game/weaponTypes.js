@@ -85,10 +85,11 @@ export const WEAPON_TYPES = Object.freeze({
       [{ projectilesPerShot: 1 }, { projectilesPerShot: 2 }, { projectilesPerShot: 3 }],
     ),
   }),
+  // Pulse fires at 0.3 s (owner ruling R32: at 0.5 s it could not keep up late in a run).
   pulse: Object.freeze({
     kind: PROJECTILE_KINDS.pulseOrb,
     tiers: tiers(
-      { fireInterval: 0.5, speed: 6, radius: 0.12, lifetime: 1, chargeSeconds: 8, extra: 40 },
+      { fireInterval: 0.3, speed: 6, radius: 0.12, lifetime: 1, chargeSeconds: 8, extra: 40 },
       [
         { projectilesPerShot: 1 },
         { projectilesPerShot: 2, spreadRadians: 0.3 },
