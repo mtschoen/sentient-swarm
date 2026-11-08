@@ -8,8 +8,9 @@
 // The first step sits one lookahead after the first update, so it is never already late. Tempo
 // changes take effect at the next bar start (the first one applies at once), so a tempo that moves
 // every frame does not smear the groove; setTempo(bpm, { quantumSteps: 4 }) lands on the next beat
-// instead (the time warp's slowdown), and a pending change keeps the shortest quantum asked for. Step times come from an anchor (index, time) that moves
-// only when the tempo changes, so they sit exactly on the grid without accumulating rounding error.
+// instead (the time warp's slowdown), and a pending change keeps the shortest quantum asked for.
+// Step times come from an anchor (index, time) that moves only when the tempo changes, so they sit
+// exactly on the grid without accumulating rounding error.
 export class StepSequencer {
   constructor({ stepsPerBar = 16, lookaheadSeconds = 0.1, scheduleIntervalSeconds = 0.025 } = {}) {
     this.stepsPerBar = stepsPerBar;

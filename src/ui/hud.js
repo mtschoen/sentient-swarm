@@ -32,6 +32,9 @@ export function bandFontSizes(bandWidth) {
   return sizes;
 }
 
+// Offer labels that are not just the type name in capitals.
+const OFFER_LABELS = Object.freeze({ timewarp: 'TIME WARP' });
+
 const groupDigits = (value) => Math.round(value).toLocaleString('en-US');
 
 function weaponText(armed, tier) {
@@ -158,7 +161,8 @@ export function createHud(rootElement, {
       warpFill.style.width = `${Math.round(warpLeft * 100)}%`;
       setText(lives, LIFE_ICON.repeat(Math.max(0, state.lives ?? 0)));
       setText(bombs, BOMB_ICON.repeat(Math.max(0, state.bombs ?? 0)));
-      setText(offer, state.offeredType ? `NEXT ${String(state.offeredType).toUpperCase()}` : '');
+      const offered = state.offeredType;
+      setText(offer, offered ? `NEXT ${OFFER_LABELS[offered] ?? String(offered).toUpperCase()}` : '');
       const armedNow = state.armed && state.armed !== 'base';
       charge.style.visibility = armedNow ? 'visible' : 'hidden';
       chargeFill.style.width = `${Math.round(Math.min(1, Math.max(0, state.charge ?? 0)) * 100)}%`;

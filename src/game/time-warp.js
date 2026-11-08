@@ -1,6 +1,7 @@
 // Time warp (owner ruling R31): a pickup that slows the swarm. start() begins a warp of
 // durationSeconds of real time, or extends a running one by another full duration (the HUD bar
-// refills; no new ramp in). update(realDeltaSeconds) counts real time. scale is the simulation's
+// refills; an extension inside the ramp-out ramps back in from the current scale, so it never
+// snaps). update(realDeltaSeconds) counts real time. scale is the simulation's
 // speed: it eases from 1 to targetScale over rampSeconds (smoothstep) after the start and back to 1
 // over the last rampSeconds, so there is no jolt; strength is the same ease from 0 to 1, for the
 // tint and the music. end() stops a warp at once (death, a new run, quit to title).
@@ -11,6 +12,11 @@ export const TIME_WARP_RAMP_SECONDS = 0.35;
 function smoothstep(edge, value) {
   const fraction = Math.min(1, Math.max(0, value / edge));
   return fraction * fraction * (3 - 2 * fraction);
+}
+
+// The fraction in [0, 1] whose smoothstep is value (the closed-form inverse of the cubic).
+function inverseSmoothstep(value) {
+  return 0.5 - Math.sin(Math.asin(1 - 2 * Math.min(1, Math.max(0, value))) / 3);
 }
 
 export class TimeWarp {
@@ -34,7 +40,8 @@ export class TimeWarp {
   }
 
   start() {
-    if (!this.active) this.elapsedSeconds = 0;
+    // Place the ramp in where the current strength is (0 when idle, the plateau gives rampSeconds).
+    this.elapsedSeconds = inverseSmoothstep(this.strength) * this.rampSeconds;
     this.remainingSeconds += this.durationSeconds;
     this.totalSeconds = this.remainingSeconds;
   }

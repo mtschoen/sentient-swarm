@@ -31,11 +31,14 @@ const PRESENCE_DECIBELS = 3;
 const DUCK_CLOSED_HERTZ = 500;
 const DUCK_CLOSED_GAIN = 0.4;
 const DUCK_TIME_CONSTANT_SECONDS = 0.05;
-// Time warp (owner ruling R31): the tempo falls by the warp's scale (the change lands on the next
-// beat) and the duck lowpass closes partway, log-interpolated from open toward WARP_FLOOR_HERTZ by
+// Time warp (owner ruling R31): the tempo falls by the warp's scale, floored at
+// TIME_WARP_MUSIC_TEMPO_FLOOR (the change lands on the next beat) and the duck lowpass closes partway, log-interpolated from open toward WARP_FLOOR_HERTZ by
 // 1 - scale (about 2.2 kHz at scale 0.3). The game ramps the scale itself; the filter glides with a
 // third of the warp ramp as its time constant. Scale changes below WARP_SCALE_EPSILON are skipped.
 const WARP_FLOOR_HERTZ = 800;
+// Orchestrator ruling O1: the tempo follows the warp scale only down to half time (about 62 bpm),
+// while the swarm still runs at the full warp scale; the lowpass follows the full scale.
+export const TIME_WARP_MUSIC_TEMPO_FLOOR = 0.5;
 const WARP_TIME_CONSTANT_SECONDS = 0.35 / 3;
 const WARP_SCALE_EPSILON = 0.002;
 const BEAT_STEPS = 4;
@@ -135,7 +138,8 @@ export class ProceduralMusic {
   }
 
   applyTempo(quantumSteps = STEPS_PER_BAR) {
-    const tempo = Math.round((124 + 10 * this.intensity) * this.timeScale * 100) / 100;
+    const tempoScale = Math.max(TIME_WARP_MUSIC_TEMPO_FLOOR, this.timeScale);
+    const tempo = Math.round((124 + 10 * this.intensity) * tempoScale * 100) / 100;
     this.sequencer.setTempo(tempo, { quantumSteps });
   }
 

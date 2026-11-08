@@ -186,3 +186,16 @@ test('the rotation offers the weapons in their order, then timewarp, one slot in
   director.update(STEP, { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: true, phasePlaying: true });
   assert.equal(director.pickups.at(-1).type, 'timewarp', 'a time warp slot spawns a time warp pickup');
 });
+
+// Review fix round 1: the recovery guard always offers a weapon; the rotation is unchanged.
+test('a pity spawn on the time warp slot offers the next weapon instead; a milestone still offers the time warp', () => {
+  const director = makeDirector();
+  run(director, 5 * 20 + 0.1, { onBaseGun: false });
+  assert.equal(director.offeredType, 'timewarp');
+  run(director, 10, { onBaseGun: true });
+  assert.equal(director.pickups.length, 1);
+  assert.equal(director.pickups[0].type, 'beam', 'the pity spawn skips the time warp slot');
+  assert.equal(director.offeredType, 'timewarp', 'the rotation index is unchanged');
+  director.update(STEP, { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: true, phasePlaying: true });
+  assert.equal(director.pickups.at(-1).type, 'timewarp');
+});

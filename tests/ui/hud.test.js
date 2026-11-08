@@ -220,3 +220,9 @@ test('the warp bar sits under the turret readout, drains with the warp and hides
   hud.update({ ...STATE });
   assert.equal(warp.style.visibility, 'hidden');
 });
+
+test('the time warp offer reads NEXT TIME WARP', () => {
+  const { hud, root } = setup();
+  hud.update({ ...STATE, offeredType: 'timewarp' });
+  assert.equal(find(root, 'hud-offer').textContent, 'NEXT TIME WARP');
+});

@@ -77,3 +77,19 @@ test('duration and scale are settable within range, and out-of-range values thro
   assert.throws(() => warp.setScale(0), RangeError);
   assert.throws(() => warp.setScale(1.5), RangeError);
 });
+
+// Review fix round 1: an extension inside the ramp-out ramps back in from the current scale.
+test('an extension inside the ramp-out continues from the current scale and eases back to the plateau', () => {
+  const warp = new TimeWarp();
+  warp.start();
+  advance(warp, 5.8);
+  const before = warp.scale;
+  assert.ok(before > TIME_WARP_SCALE && before < 1, `in the ramp-out: ${before}`);
+  warp.start();
+  assert.ok(Math.abs(warp.scale - before) < 1e-9, `no snap: ${warp.scale} after ${before}`);
+  warp.update(STEP);
+  assert.ok(warp.scale < before, 'heading back toward the plateau');
+  assert.ok(before - warp.scale < 0.1, `no jolt in one step: ${before - warp.scale}`);
+  advance(warp, TIME_WARP_RAMP_SECONDS);
+  assert.equal(warp.scale, TIME_WARP_SCALE);
+});

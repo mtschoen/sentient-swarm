@@ -62,7 +62,7 @@ export class PickupDirector {
     }
 
     if (milestone || (onBaseGun && this.pityTimer >= this.pitySeconds - TIME_EPSILON)) {
-      this.spawn(playerX, playerY, densityAt);
+      this.spawn(playerX, playerY, densityAt, { pity: !milestone });
       this.pityTimer = 0;
     }
   }
@@ -70,7 +70,9 @@ export class PickupDirector {
   // Rejection-samples points on the placement annulus (16 attempts). Without densityAt the first
   // in-arena point wins; with densityAt(x, y) the lowest-density of the first 8 in-arena points wins
   // (ties go to the earlier one). Clamps only if every attempt lands outside the arena.
-  spawn(playerX, playerY, densityAt = null) {
+  // A pity spawn (the base-gun recovery guard) always offers a weapon: on the time warp slot it
+  // takes the next slot's type instead, leaving the rotation where it is.
+  spawn(playerX, playerY, densityAt = null, { pity = false } = {}) {
     const wanted = densityAt === null ? 1 : DENSITY_CANDIDATES;
     const candidates = [];
     let x = playerX;
@@ -100,7 +102,10 @@ export class PickupDirector {
       x: Math.min(this.arenaWidth, Math.max(0, x)),
       y: Math.min(this.arenaHeight, Math.max(0, y)),
     };
-    this.pickups.push({ x: placed.x, y: placed.y, type: this.offeredType, age: 0, fade: 1 });
+    const type = pity && this.offeredType === 'timewarp'
+      ? PICKUP_TYPE_NAMES[(this.rotationIndex + 1) % PICKUP_TYPE_NAMES.length]
+      : this.offeredType;
+    this.pickups.push({ x: placed.x, y: placed.y, type, age: 0, fade: 1 });
   }
 
   collect(playerX, playerY, radius = 0.35) {

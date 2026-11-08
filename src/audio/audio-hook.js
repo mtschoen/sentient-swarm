@@ -130,8 +130,9 @@ export function installAudio({ windowObject = window, documentObject = document,
   };
 
   // Called every fixed update with the game's phase, multiplier and time scale (the time warp's
-  // simulation speed, 1 without one). freshStats is the stats read back this update, or null. A run starting (Ready or GameOver to Playing) restarts the build;
-  // kills while Playing play the kill splash and a melodic hit.
+  // simulation speed, 1 without one). freshStats is the stats read back this update, or null. A
+  // run starting (Ready or GameOver to Playing) restarts the build; kills while Playing play the
+  // kill splash and a melodic hit.
   let previousPhase = null;
   const update = ({ fixedStep, freshStats, capacity, phase = 'playing', multiplier = 1, timeScale = 1 }) => {
     music.setTimeScale(timeScale);
