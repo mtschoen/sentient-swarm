@@ -4,8 +4,8 @@
 // All geometry is in world units in a frame whose +x is the projectile's heading (origin at its
 // position), so a quad is a centre, a heading and a half extent; each kind has its own silhouette in the fragment shader:
 //   bullet     energy ball: white core, hued body, halo        scatter  smaller flickering orange ball
-//   rail       very long thin streak, white head, fading tail  orb      pulsing glow disc
-//   ring       thin expanding circle                           sidewinder  weaving short trail
+//   rail       very long hair-thin needle, sharp white core    orb      pulsing glow disc
+//   ring       thick expanding wave front over a faint disc    sidewinder  missile body with a weaving exhaust ribbon
 //   beam       the fat laser from the ship to the arena edge, white core inside a coloured body,
 //              plus a fan over the sector swept since the previous step, fading toward the previous aim
 // Slot 0 is the beam; the CPU rewrites it every frame while firing, with the previous step's unit
@@ -32,11 +32,11 @@ struct ProjectileView {
 // kills; the quad adds BALL_QUAD_MARGIN for the feather. The trail decay draws the streak.
 const BALL_HALO_FACTOR: f32 = 1.5;
 const BALL_QUAD_MARGIN: f32 = 0.02;
-const RAIL_SECONDS_OF_TRAVEL: f32 = 0.05;
+const RAIL_SECONDS_OF_TRAVEL: f32 = 0.07;
 const RAIL_MINIMUM_LENGTH: f32 = 0.6;
 const SIDEWINDER_TAIL: f32 = 0.7;
 const ORB_GLOW_RADIUS_FACTOR: f32 = 3.5;
-const RING_GLOW_MARGIN: f32 = 0.2;
+const RING_GLOW_MARGIN: f32 = 0.35;
 const BEAM_GLOW_FACTOR: f32 = 2.2;
 const BEAM_GLOW_MARGIN: f32 = 0.1;
 const RING_LIFETIME: f32 = 0.5;
@@ -134,7 +134,7 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
       fade = clamp(projectile.lifetime / RING_LIFETIME, 0.0, 1.0);
     }
     case PROJECTILE_KIND_SIDEWINDER: {
-      halfExtent = vec2f(SIDEWINDER_TAIL * 0.5 + 0.1, 0.2);
+      halfExtent = vec2f(SIDEWINDER_TAIL * 0.5 + 0.1, 0.3);
       center = projectile.position - direction * (SIDEWINDER_TAIL * 0.5 - 0.06);
     }
     default: {
@@ -264,11 +264,13 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
       color = (vec3f(1.0, 0.95, 0.8) * ball.x * 1.2 + neon(input.hue, 1.0) * (ball.y * 0.8 + ball.z * 0.6)) * flicker * fade;
     }
     case PROJECTILE_KIND_RAIL: {
+      // A needle: a hair-thin white core with a hard edge, a tight glow hugging it, a long fading
+      // tail and a sharp spark at the head; the glow is narrow across and long along, never a disc.
       let tail = 0.05 - (halfLength - 0.12) * 2.0;
-      let along = pow(smoothstep(tail, 0.05, local.x), 0.8);
-      let shape = bodyAndGlow(segmentDistance(local, vec2f(tail, 0.0), vec2f(0.05, 0.0)), 0.02, feather, 30.0);
-      let flare = exp(-length(local - vec2f(0.05, 0.0)) * 22.0);
-      color = (vec3f(2.2) * shape.x + neon(input.hue, 0.6) * shape.y * 1.2) * along + vec3f(0.8, 0.95, 1.0) * flare;
+      let along = pow(smoothstep(tail, 0.05, local.x), 0.7);
+      let shape = bodyAndGlow(segmentDistance(local, vec2f(tail, 0.0), vec2f(0.05, 0.0)), max(0.012, feather * 1.3), feather, 40.0);
+      let spark = exp(-abs(local.y) * 70.0) * exp(-abs(local.x - 0.05) * 9.0);
+      color = (vec3f(3.5) * shape.x + neon(input.hue, 0.8) * shape.y * 1.8) * along + vec3f(0.85, 0.95, 1.0) * spark * 1.2;
     }
     case PROJECTILE_KIND_PULSE_ORB: {
       let pulse = 0.85 + 0.15 * sin(time * 14.0 + seed * 6.28);
@@ -279,16 +281,34 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
       color = (neon(input.hue, GLOW_SATURATION) * (body * 0.9 + halo) + vec3f(hot * 1.2)) * pulse;
     }
     case PROJECTILE_KIND_PULSE_RING: {
-      let shape = bodyAndGlow(abs(length(local) - radius), 0.022, feather, 16.0);
-      color = (neon(input.hue, GLOW_SATURATION) * shape.x * 1.4 + vec3f(shape.x * 0.5) + neon(input.hue, GLOW_SATURATION) * shape.y * 0.6) * fade;
+      // A thick bright wave front with a white edge and a faint filled disc behind it; the fade
+      // eases off so the ring stays readable while it expands.
+      let ringDistance = length(local);
+      let shape = bodyAndGlow(abs(ringDistance - radius), 0.04, feather, 11.0);
+      let disc = (1.0 - smoothstep(radius - 0.05, radius, ringDistance)) * 0.14;
+      let visibility = pow(fade, 0.6);
+      color = (neon(input.hue, GLOW_SATURATION) * (shape.x * 1.6 + shape.y * 0.8 + disc) + vec3f(shape.x * 0.8)) * visibility;
     }
     case PROJECTILE_KIND_SIDEWINDER: {
-      let tail = 0.06 - SIDEWINDER_TAIL;
-      let progress = clamp((local.x - tail) / (0.06 - tail), 0.0, 1.0);
-      let wobble = 0.07 * (1.0 - progress) * sin(local.x * 20.0 - time * 34.0 + seed * 6.28);
-      let trail = bodyAndGlow(abs(local.y - wobble), 0.02, feather, 24.0);
-      let head = exp(-length(local - vec2f(0.06, 0.0)) * 26.0);
-      color = (vec3f(1.0, 0.9, 1.0) * trail.x + neon(input.hue, 1.0) * trail.y * 0.9) * pow(progress, 1.3) + neon(input.hue, 0.5) * head * 1.4;
+      // A missile: a white dart body with a pointed nose and two small fins, a hot exhaust flare at
+      // its tail and a weaving exhaust ribbon that fades behind it.
+      let bodyTail = -0.2;
+      let nose = 0.06;
+      let bodyFraction = clamp((local.x - bodyTail) / (nose - bodyTail), 0.0, 1.0);
+      let bodyThickness = 0.042 * (1.0 - pow(bodyFraction, 4.0)) + 0.004;
+      let bodyDistance = segmentDistance(local, vec2f(bodyTail, 0.0), vec2f(nose, 0.0));
+      let bodyMask = (1.0 - smoothstep(bodyThickness - feather, bodyThickness + feather, abs(local.y))) * step(bodyTail, local.x) * step(local.x, nose + 0.01);
+      let finOffset = 0.09 * (1.0 - clamp((local.x - bodyTail) / 0.1, 0.0, 1.0));
+      let finMask = (1.0 - smoothstep(0.0, feather * 2.0, abs(abs(local.y) - finOffset) - 0.012)) * step(bodyTail, local.x) * step(local.x, bodyTail + 0.1);
+      let bodyGlow = exp(-bodyDistance * 22.0);
+      let flare = exp(-length((local - vec2f(bodyTail, 0.0)) * vec2f(0.8, 2.0)) * 20.0) * (0.8 + 0.2 * sin(time * 80.0 + seed * 40.0));
+      let ribbonTail = bodyTail - (SIDEWINDER_TAIL - 0.26);
+      let progress = clamp((local.x - ribbonTail) / (bodyTail - ribbonTail), 0.0, 1.0);
+      let wobble = 0.09 * (1.0 - progress) * sin(local.x * 16.0 - time * 30.0 + seed * 6.28);
+      let ribbon = bodyAndGlow(abs(local.y - wobble), 0.024, feather, 20.0);
+      let ribbonMask = pow(progress, 1.1) * step(local.x, bodyTail + 0.02);
+      color = vec3f(1.2, 1.1, 1.3) * (bodyMask + finMask * 0.8) + neon(input.hue, 1.0) * (bodyGlow * 0.7 + flare * 1.4)
+        + (vec3f(0.9, 0.7, 1.0) * ribbon.x + neon(input.hue, 1.0) * ribbon.y * 1.0) * ribbonMask;
     }
     default: {
       // Beam: local is the world offset from the ship, shape.w the beam length, radius the half width.

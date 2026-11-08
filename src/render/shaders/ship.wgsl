@@ -1,6 +1,6 @@
 // The player ship: one instanced quad (single instance), max-blended (see MAX_BLEND) and drawn after the
 // particles. A spaceship silhouette with its nose along the facing: a pointed fuselage, two swept
-// wings, a cockpit, wingtip lights and a flickering engine flame, all in the armed weapon's hue
+// wings, a cockpit, wingtip lights and a flickering engine flame that grows with thrust, all in the armed weapon's hue
 // over white; plus a thin world-aligned ring (radius RING_RADIUS) whose arc length is the charge,
 // hidden on the base gun. Common header prepended (hsvToRgb).
 // Local coordinates: +x is the nose, +y is to the ship's right (world y grows downward).
@@ -8,7 +8,7 @@
 // Uniform layout, total 64 bytes; ShipRenderer in ship.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
 //  28 header padding f32, 32 position vec2f, 40 facing f32 (radians), 44 charge f32 (0..1),
-//  48 hue f32, 52 ringShown f32 (0 or 1), 56 brightness f32 (blink), 60 padding
+//  48 hue f32, 52 ringShown f32 (0 or 1), 56 brightness f32 (blink), 60 thrust f32 (0..1)
 struct ShipView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
@@ -21,17 +21,24 @@ struct ShipView {
   hue: f32,
   ringShown: f32,
   brightness: f32,
-  padding: f32,
+  thrust: f32,
 }
 
 @group(0) @binding(0) var<uniform> view: ShipView;
 
-const HALF_EXTENT: f32 = 0.55;
+const HALF_EXTENT: f32 = 0.8;
 const RING_RADIUS: f32 = 0.3;
 const RING_HALF_WIDTH: f32 = 0.012;
 const TWO_PI: f32 = 6.28318530718;
 const SATURATION: f32 = 0.8;
 const PIXEL_FEATHER: f32 = 0.75;
+// Engine flame geometry in world units: it starts at the tail (FLAME_ROOT behind the centre), and its
+// length and half width ease from the idle value to the thrust value with the thrust input.
+const FLAME_ROOT: f32 = 0.17;
+const FLAME_IDLE_LENGTH: f32 = 0.24;
+const FLAME_THRUST_LENGTH: f32 = 0.46;
+const FLAME_IDLE_WIDTH: f32 = 0.08;
+const FLAME_THRUST_WIDTH: f32 = 0.11;
 
 struct ShipVaryings {
   @builtin(position) position: vec4f,
@@ -97,13 +104,22 @@ fn shipFragment(input: ShipVaryings) -> @location(0) vec4f {
   let wingtip = exp(-length(vec2f(local.x + 0.22, abs(local.y) - 0.26)) * 38.0);
   color += tint * wingtip * 1.6;
 
-  // Engine flame behind the tail, flickering.
-  let flicker = 0.75 + 0.25 * sin(view.time * 63.0) + 0.1 * sin(view.time * 31.0);
-  let flameLength = 0.16 * flicker;
-  let behind = -local.x - 0.17;
-  let flameWidth = 0.05 * clamp(1.0 - behind / max(flameLength, 0.001), 0.0, 1.0);
-  let flame = step(0.0, behind) * (1.0 - smoothstep(flameWidth * 0.5, flameWidth + feather, abs(local.y))) * clamp(1.0 - behind / max(flameLength, 0.001), 0.0, 1.0);
-  color += (tint * 1.3 + vec3f(0.6)) * flame;
+  // Engine flame behind the tail: a bright teardrop that is always lit and grows with thrust, with a
+  // white-hot core, a hue-coloured body and a flickering length and edge.
+  let thrust = clamp(view.thrust, 0.0, 1.0);
+  let flicker = 0.8 + 0.2 * sin(view.time * 63.0) + 0.1 * sin(view.time * 31.0) + 0.08 * sin(view.time * 97.0);
+  let flameLength = mix(FLAME_IDLE_LENGTH, FLAME_THRUST_LENGTH, thrust) * flicker;
+  let flameHalfWidth = mix(FLAME_IDLE_WIDTH, FLAME_THRUST_WIDTH, thrust);
+  let behind = -local.x - FLAME_ROOT;
+  let flameFraction = clamp(behind / max(flameLength, 0.001), 0.0, 1.0);
+  let taper = pow(1.0 - flameFraction, 0.7);
+  let edge = flameHalfWidth * taper * (1.0 + 0.12 * sin(local.x * 70.0 - view.time * 55.0));
+  let inside = step(0.0, behind) * step(behind, flameLength);
+  let across = abs(local.y);
+  let flameBody = inside * (1.0 - smoothstep(edge * 0.6, edge + feather, across));
+  let flameCore = inside * (1.0 - smoothstep(edge * 0.15, edge * 0.55 + feather, across)) * (1.0 - flameFraction * 0.6);
+  let flameGlow = exp(-max(behind, 0.0) * 9.0) * exp(-across * across * 220.0) * step(-0.05, behind) * 0.5 * (0.6 + 0.6 * thrust);
+  color += (tint * 1.6 + vec3f(0.5)) * flameBody * (1.0 - flameFraction * 0.5) + vec3f(1.8) * flameCore + tint * flameGlow;
 
   // Charge ring: a faint full track, with the bright arc covering the charge fraction clockwise
   // from the top (world y grows downward, so atan2 grows clockwise on screen).

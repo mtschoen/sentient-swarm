@@ -9,7 +9,7 @@
 // only), moves by velocity * dt and loses dt of lifetime.
 //
 // Sidewinders turn toward the gradient of total species density in the blurred coarse field,
-// at most extra radians per second, keeping their speed.
+// at most extra radians per second, keeping their speed, and weave (see weave).
 // A pulseOrb detonates after moving when its lifetime ran out, it left the arena (clamped back
 // to the edge), or the total density at its coarse cell exceeds extra: it becomes a pulseRing
 // at that point with zero velocity, radius RING_START_RADIUS, lifetime RING_LIFETIME and
@@ -30,6 +30,9 @@ const RING_LIFETIME: f32 = 0.5;
 // World units per second.
 const RING_GROWTH_SPEED: f32 = 6.0;
 const MINIMUM_LENGTH: f32 = 0.000001;
+// Sidewinder weave: radians per second and radians per second of lifetime.
+const WEAVE_TURN_RATE: f32 = 3.0;
+const WEAVE_FREQUENCY: f32 = 10.0;
 
 // Species densities are channels 0..4 (SPECIES_COUNT): the low vector plus the high vector's x.
 fn totalDensity(coordinate: vec2i) -> f32 {
@@ -62,6 +65,15 @@ fn steerTowardDensity(position: vec2f, velocity: vec2f, maximumTurn: f32) -> vec
   let cosine = cos(turn);
   let sine = sin(turn);
   return vec2f(heading.x * cosine - heading.y * sine, heading.x * sine + heading.y * cosine) * speed;
+}
+
+// A sinusoidal turn added to the steering so the flight path visibly weaves (about 0.3 radians of
+// heading swing), out of phase per projectile through its seed.
+fn weave(velocity: vec2f, lifetime: f32, seed: f32, dt: f32) -> vec2f {
+  let turn = WEAVE_TURN_RATE * sin(lifetime * WEAVE_FREQUENCY + seed * 6.2831853) * dt;
+  let cosine = cos(turn);
+  let sine = sin(turn);
+  return vec2f(velocity.x * cosine - velocity.y * sine, velocity.x * sine + velocity.y * cosine);
 }
 
 fn detonate(orb: Projectile) -> Projectile {
@@ -104,6 +116,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   }
   if (projectile.kind == PROJECTILE_KIND_SIDEWINDER) {
     projectile.velocity = steerTowardDensity(projectile.position, projectile.velocity, projectile.extra * dt);
+    projectile.velocity = weave(projectile.velocity, projectile.lifetime, projectile.seed, dt);
   }
   projectile.previousPosition = projectile.position;
   projectile.position = projectile.position + projectile.velocity * dt;
