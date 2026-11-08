@@ -52,7 +52,7 @@
 // (m) sidewinder blast (task R33): a sidewinder whose segment reaches an agent kills exactly that
 //     one, then its slot becomes a pulse ring carrying the missile flag, counted once in stats
 //     ringsThisFrame at the missile's position; the ring grows past the base radius, kills an
-//     agent 0.8 away and spares one 3 away. A sidewinder that hits nothing stays a sidewinder.
+//     agent 0.8 away and spares one 3 away (m1). A sidewinder that hits nothing stays a sidewinder (m2).
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
@@ -395,12 +395,12 @@ async function runMissileBlastCase(harness) {
   const alive = await harness.aliveFlags();
   const grown = await harness.projectileSlot(slot);
   return verdictLine([
-    [firstKills === 1, `(m) the missile kills ${firstKills} agent in its first step (need 1)`],
-    [blast.alive && blast.kind === PROJECTILE_KINDS.pulseRing && blast.missileRing, `(m) slot became a missile ring (kind ${blast.kind}, missile flag ${blast.missileRing})`],
-    [Math.abs(blast.radius - MISSILE_RING_START_RADIUS) < 1e-6 && blast.velocity[0] === 0, `(m) ring starts at radius ${blast.radius.toFixed(3)} with zero velocity`],
-    [blastStats.ringsThisFrame === 1 && Math.abs(blastStats.lastRingX - blast.position[0]) < 1e-5, `(m) stats ringsThisFrame ${blastStats.ringsThisFrame} at x ${blastStats.lastRingX.toFixed(3)} (need 1, at the ring)`],
-    [!alive[0] && !alive[1] && alive[2] && alive[3], `(m) alive flags ${alive.slice(0, 4).join(',')} (need false,false,true,true)`],
-    [!grown.alive || grown.radius > MISSILE_RING_START_RADIUS, `(m) ring grew or expired (radius ${grown.radius.toFixed(3)})`],
+    [firstKills === 1, `(m1) the missile kills ${firstKills} agent in its first step (need 1)`],
+    [blast.alive && blast.kind === PROJECTILE_KINDS.pulseRing && blast.missileRing, `(m1) slot became a missile ring (kind ${blast.kind}, missile flag ${blast.missileRing})`],
+    [Math.abs(blast.radius - MISSILE_RING_START_RADIUS) < 1e-6 && blast.velocity[0] === 0, `(m1) ring starts at radius ${blast.radius.toFixed(3)} with zero velocity`],
+    [blastStats.ringsThisFrame === 1 && Math.abs(blastStats.lastRingX - blast.position[0]) < 1e-5, `(m1) stats ringsThisFrame ${blastStats.ringsThisFrame} at x ${blastStats.lastRingX.toFixed(3)} (need 1, at the ring)`],
+    [!alive[0] && !alive[1] && alive[2] && alive[3], `(m1) alive flags ${alive.slice(0, 4).join(',')} (need false,false,true,true)`],
+    [!grown.alive || grown.radius > MISSILE_RING_START_RADIUS, `(m1) ring grew or expired (radius ${grown.radius.toFixed(3)})`],
   ]);
 }
 
@@ -410,7 +410,7 @@ async function runMissileMissCase(harness) {
   const kills = await harness.steps(SIDEWINDER_FRAMES);
   const missile = await harness.projectileSlot(slot);
   return verdictLine([
-    [kills === 0 && missile.alive && missile.kind === PROJECTILE_KINDS.sidewinder && !missile.missileRing, `(m) a missile that hits nothing stays a sidewinder (kills ${kills}, kind ${missile.kind})`],
+    [kills === 0 && missile.alive && missile.kind === PROJECTILE_KINDS.sidewinder && !missile.missileRing, `(m2) a missile that hits nothing stays a sidewinder (kills ${kills}, kind ${missile.kind})`],
   ]);
 }
 
