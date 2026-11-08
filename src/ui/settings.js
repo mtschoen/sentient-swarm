@@ -39,7 +39,7 @@ export function bloomStrengthFor(settings) {
 }
 
 // scale: displayed units per stored unit (the dead zone and stick size are stored as fractions).
-const SLIDERS = [
+export const SETTINGS_SLIDERS = [
   { key: 'effects', label: 'Effects', minimum: 0, maximum: 300, step: 5, scale: 1 },
   { key: 'shake', label: 'Shake', minimum: 0, maximum: 300, step: 5, scale: 1 },
   { key: 'trails', label: 'Trails', minimum: 0, maximum: 300, step: 5, scale: 1 },
@@ -107,7 +107,7 @@ export function createSettingsPanel({
   labelled('Quality preset', presetSelect);
   controls.set('preset', () => { presetSelect.value = settings.preset ?? ''; });
 
-  for (const spec of SLIDERS) {
+  for (const spec of SETTINGS_SLIDERS) {
     const slider = make('input', 'settings-input');
     slider.type = 'range';
     slider.setAttribute('data-setting', spec.key);

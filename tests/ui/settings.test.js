@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createSettingsPanel, killBurstParticlesFor, shakeMultiplierFor, trailDecayFor, bloomStrengthFor,
+  SETTINGS_SLIDERS, createSettingsPanel, killBurstParticlesFor, shakeMultiplierFor, trailDecayFor, bloomStrengthFor,
 } from '../../src/ui/settings.js';
-import { DEFAULT_SETTINGS } from '../../src/settings/storage.js';
+import { DEFAULT_SETTINGS, SETTING_RANGES } from '../../src/settings/storage.js';
 import { PRESETS, PRESET_ORDER } from '../../src/settings/presets.js';
 
 function createFakeDocument() {
@@ -171,4 +171,12 @@ test('arrow keys on a focused slider keep its focus; a pointer-driven change rel
   slider.fire('input');
   slider.fire('change');
   assert.equal(slider.blurs, 1, 'the next keyboard step keeps focus again');
+});
+
+test('SETTING_RANGES matches the slider ranges in stored units and every ranged setting has a slider', () => {
+  const sliderKeys = SETTINGS_SLIDERS.map((slider) => slider.key).sort();
+  assert.deepEqual(sliderKeys, Object.keys(SETTING_RANGES).sort());
+  for (const slider of SETTINGS_SLIDERS) {
+    assert.deepEqual(SETTING_RANGES[slider.key], [slider.minimum / slider.scale, slider.maximum / slider.scale], slider.key);
+  }
 });
