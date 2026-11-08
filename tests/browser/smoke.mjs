@@ -41,6 +41,7 @@ const SMOKE_DEADLINE_MILLISECONDS = 150_000;
 const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
 const EXIT_NO_ADAPTER = 2;
+const DEFAULT_FRAMES = 120;
 const MINIMUM_ALIVE_TOTAL = 1000;
 // Something is drawn, and it is not a white smear.
 const MINIMUM_LUMINANCE = 0.02;
@@ -92,7 +93,7 @@ async function writeDataUrl(name, dataUrl) {
 
 function parseFrameCount(argumentList) {
   const index = argumentList.indexOf('--frames');
-  if (index === -1) return 120;
+  if (index === -1) return DEFAULT_FRAMES;
   const frames = Number.parseInt(argumentList[index + 1], 10);
   if (!Number.isInteger(frames) || frames < 0) throw new Error('--frames needs a non-negative integer');
   return frames;
@@ -392,13 +393,13 @@ async function closeResources(resources) {
   resources.browser = null;
   resources.server = null;
   if (browser) await browser.close().catch(() => {});
-  if (server) server.child.kill();
+  if (server) await server.stop();
 }
 
 async function run(resources) {
-  const frames = parseFrameCount(process.argv.slice(2));
-  const playFrames = parsePlayFrames(process.argv.slice(2));
   try {
+    const frames = parseFrameCount(process.argv.slice(2));
+    const playFrames = parsePlayFrames(process.argv.slice(2));
     let url = process.env.SMOKE_URL;
     if (!url) {
       resources.server = await startServer();
@@ -418,6 +419,11 @@ async function run(resources) {
     if (playFrames !== null || pulseMode || sweepMode || clearingMode) await page.addInitScript(installSyntheticGamepad);
 
     await page.goto(url);
+    const secureContext = await evaluateWithin(page, 'the secure context probe', () => window.isSecureContext);
+    if (!secureContext) {
+      console.error(`smoke: ${url} is not a secure context, so WebGPU cannot exist there; use localhost, 127.0.0.1 or https in SMOKE_URL`);
+      return EXIT_FAILURE;
+    }
     const adapterAvailable = await evaluateWithin(page, 'the adapter probe', async () => {
       if (!navigator.gpu) return false;
       return (await navigator.gpu.requestAdapter()) !== null;
@@ -436,7 +442,7 @@ async function run(resources) {
       );
       await page.waitForFunction(() => window.__murmuration?.stats != null, null, { timeout: READY_TIMEOUT_MILLISECONDS });
     } catch (error) {
-      console.error(`smoke: timed out waiting for ready, ${frames} frames and stats:${error.message.split('\n')[0]}`);
+      console.error(`smoke: timed out waiting for ready, ${frames} frames and stats: ${error.message.split('\n')[0]}`);
       page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
     }
@@ -515,7 +521,7 @@ async function run(resources) {
       return EXIT_FAILURE;
     }
     const capturedStats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
-    console.log(`smoke: ok (aliveTotal ${stats.aliveTotal}, aliveTotal at capture ${capturedStats.aliveTotal}, arena mean luminance ${luminance.toFixed(4)})`);
+    console.log(`smoke: ok (aliveTotal ${stats.aliveTotal}, aliveTotal after the start clear ${capturedStats.aliveTotal}, arena mean luminance ${luminance.toFixed(4)})`);
     return EXIT_OK;
   } catch (error) {
     console.error(`smoke: ${error.message}`);

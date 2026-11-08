@@ -7,6 +7,8 @@
 //   renderPlay({ intensity, seconds, kind, tier, fireInterval }): music plus a held weapon, kill
 //     splashes and melodic hits on a play-like schedule (OfflineAudioContext.suspend steps the
 //     clock the music and effects read).
+//   renderWorstCase({ intensity, seconds }): music, then a bomb, a death and a 50-kill splash in the
+//     same instant (the C5 limiter's worst case), levels over the second after the stack.
 // ?source=<path> loads the audio modules from another directory the dev server serves (an older
 // copy, for before and after measurements); the default is /src/audio.
 const SOURCE = new URLSearchParams(location.search).get('source') ?? '/src/audio';
@@ -228,5 +230,39 @@ async function renderPlay({ intensity, seconds, kind = 'base', tier = 1, fireInt
   return { intensity, levels: measure(samples, SAMPLE_RATE * 2), wav: encodeWav(samples) };
 }
 
-window.__audioRender = { renderMusic, renderEffects, renderPlay };
+const WORST_CASE_STACK_SECONDS = 4;
+const WORST_CASE_KILLS = 50;
+const WORST_CASE_TAIL_SECONDS = 1;
+
+// The loudest moment the game can make: bomb, death and a 50-kill splash at once over the music
+// at high intensity. The peak is measured from the stack to a second past it.
+async function renderWorstCase({ intensity, seconds }) {
+  const { context, engine } = createEngine(seconds);
+  const music = new ProceduralMusic(engine);
+  const effects = new EffectsSynth(engine);
+  music.setIntensity(intensity);
+  music.start();
+  music.update(0);
+  let stacked = false;
+  for (let time = SCHEDULE_TICK_SECONDS; time < seconds - 0.1; time += SCHEDULE_TICK_SECONDS) {
+    context.suspend(atQuantum(time)).then(() => {
+      try {
+        music.update(context.currentTime);
+        if (context.currentTime >= WORST_CASE_STACK_SECONDS && !stacked) {
+          stacked = true;
+          effects.bomb();
+          effects.death();
+          effects.kills(WORST_CASE_KILLS);
+        }
+      } finally {
+        context.resume();
+      }
+    });
+  }
+  const samples = (await context.startRendering()).getChannelData(0);
+  const from = Math.round(WORST_CASE_STACK_SECONDS * SAMPLE_RATE);
+  return { intensity, stacked, levels: measure(samples, from, from + Math.round(WORST_CASE_TAIL_SECONDS * SAMPLE_RATE)) };
+}
+
+window.__audioRender = { renderMusic, renderEffects, renderPlay, renderWorstCase };
 window.__audioRenderReady = true;

@@ -25,6 +25,11 @@ const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
 const EXIT_NO_ADAPTER = 2;
 const SETTLE_FRAMES = 20;
+// The probe-on Play run: frames of play with the quality probe live, and the settings key the
+// preset is stored under (SettingsStore's default key).
+const PROBE_PLAY_FRAMES = 300;
+const STORED_PRESET = 'desktop';
+const SETTINGS_STORAGE_KEY = 'murmuration.settings.v1';
 const DESKTOP_VIEWPORT = { width: 1280, height: 720 };
 const PHONE_LANDSCAPE = { width: 844, height: 390 };
 const MOBILE_USER_AGENT = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36';
@@ -182,6 +187,40 @@ async function checkDesktop(baseUrl) {
   }
 }
 
+// Plan C fix item 4: a Play run with the quality probe live (no probe=off, no capacity pin) for
+// PROBE_PLAY_FRAMES frames logs no console errors and leaves the stored preset as it was. A stored
+// preset for this adapter only ever steps down, so the run is seeded with one (STORED_PRESET) and
+// a healthy frame time must leave it alone.
+async function checkProbePlay(baseUrl) {
+  const { browser, page } = await open(baseUrl, { viewport: DESKTOP_VIEWPORT });
+  try {
+    const readPreset = () => page.evaluate((key) => {
+      const raw = localStorage.getItem(key);
+      return raw === null ? null : (JSON.parse(raw).preset ?? null);
+    }, SETTINGS_STORAGE_KEY);
+    const adapterKey = await page.evaluate(() => window.__murmuration.quality.adapterKey);
+    await page.evaluate(([key, preset, adapter]) => localStorage.setItem(key, JSON.stringify({ preset, adapterKey: adapter })), [SETTINGS_STORAGE_KEY, STORED_PRESET, adapterKey]);
+    await page.reload();
+    await page.waitForFunction(() => window.__murmuration?.ready === true && window.__murmuration.stats != null, null, { timeout: READY_TIMEOUT_MILLISECONDS });
+    const probeLive = await page.evaluate(() => window.__murmuration.quality !== undefined && !new URLSearchParams(location.search).has('probe'));
+    expect(probeLive, 'the probe-on run must not pin the probe off');
+    const before = await readPreset();
+    expect(before === STORED_PRESET, `the seeded preset should be stored, got ${before}`);
+    await page.click('.menu-title-screen .menu-item.menu-primary');
+    await waitFrames(page, SETTLE_FRAMES);
+    const phase = await page.evaluate(() => window.__murmuration.game.run.phase);
+    expect(phase === 'playing', `the Play button should start the run, got ${phase}`);
+    await waitFrames(page, PROBE_PLAY_FRAMES);
+    const after = await readPreset();
+    const inEffect = await page.evaluate(() => window.__murmuration.quality.current);
+    expect(after === before && inEffect === before, `the preset changed during the probe-on run: in effect ${before} -> ${inEffect}, stored -> ${after}`);
+    expectNoErrors(page, 'probe-on play');
+    console.log(`smoke-lab: probe-on Play ${PROBE_PLAY_FRAMES} frames ok (preset ${before} in effect and stored, unchanged, no console errors)`);
+  } finally {
+    await browser.close();
+  }
+}
+
 async function checkPhone(baseUrl) {
   const contextOptions = { viewport: PHONE_LANDSCAPE, isMobile: true, hasTouch: true, deviceScaleFactor: 2, userAgent: MOBILE_USER_AGENT };
   const { browser, page } = await open(`${baseUrl}${SEARCH}`, contextOptions);
@@ -221,6 +260,7 @@ async function run() {
     await checkBadHash(baseUrl, '#mix=%%%', '#mix=%%%');
     await checkBadHash(baseUrl, `#mix=${WRONG_SHAPE}`, '#mix=<wrong shape>');
     await checkDesktop(baseUrl);
+    await checkProbePlay(baseUrl);
     await checkPhone(baseUrl);
     console.log('smoke-lab: ok');
     return EXIT_OK;
@@ -232,7 +272,7 @@ async function run() {
     console.error(`smoke-lab: FAIL ${error.message}`);
     return EXIT_FAILURE;
   } finally {
-    if (server) server.child.kill();
+    if (server) await server.stop();
   }
 }
 

@@ -109,6 +109,27 @@ class Harness {
   }
 }
 
+// Per-frame overlap tally. Chasing agents drift in and out of the player's reach (a contact kill
+// empties it for a few frames, and the edge flickers), so a window asserts that overlap held on
+// at least MINIMUM_OVERLAP_FRACTION of its frames, counted frame by frame, rather than once at
+// the end of the window.
+const MINIMUM_OVERLAP_FRACTION = 0.75;
+
+class OverlapTally {
+  constructor(frames) {
+    this.frames = frames;
+    this.overlapping = 0;
+  }
+
+  record(count) {
+    if (count > 0) this.overlapping += 1;
+  }
+
+  get sufficient() {
+    return this.overlapping >= Math.ceil(this.frames * MINIMUM_OVERLAP_FRACTION);
+  }
+}
+
 function verdictLine(verdicts) {
   return verdicts.map(([ok, text]) => `${ok ? 'PASS' : 'FAIL'} ${text}`).join('; ');
 }
@@ -217,23 +238,25 @@ async function runCheck() {
 
   // (b) the latch holds without an acknowledgement and a stale acknowledgement does not release it.
   let latchHeld = true;
+  const overlapLatched = new OverlapTally(LATCH_FRAMES);
   for (let frame = 0; frame < LATCH_FRAMES; frame += 1) {
     stats = await harness.step();
     if (stats.playerHitSequence !== firstHit || stats.hitLatch !== 1) latchHeld = false;
+    overlapLatched.record(await harness.overlapping());
   }
-  const overlapWhileLatched = await harness.overlapping();
   verdicts.push([latchHeld, `(b) unacknowledged for ${LATCH_FRAMES} frames: hit sequence stayed ${firstHit} with the latch set (last ${stats.playerHitSequence}, latch ${stats.hitLatch})`]);
-  verdicts.push([overlapWhileLatched > 0, `(b) agents overlapping the player while latched ${overlapWhileLatched} (need > 0)`]);
+  verdicts.push([overlapLatched.sufficient, `(b) frames with an agent overlapping the player while latched ${overlapLatched.overlapping} of ${LATCH_FRAMES} (need at least ${Math.ceil(overlapLatched.frames * MINIMUM_OVERLAP_FRACTION)})`]);
 
   simulation.acknowledgeHit(firstHit - 1);
   let staleHeld = true;
+  const overlapStale = new OverlapTally(STALE_ACKNOWLEDGE_FRAMES);
   for (let frame = 0; frame < STALE_ACKNOWLEDGE_FRAMES; frame += 1) {
     stats = await harness.step();
     if (stats.playerHitSequence !== firstHit || stats.hitLatch !== 1) staleHeld = false;
+    overlapStale.record(await harness.overlapping());
   }
-  const overlapAfterStale = await harness.overlapping();
   verdicts.push([staleHeld, `(b) stale acknowledgement ${firstHit - 1} for ${STALE_ACKNOWLEDGE_FRAMES} frames: hit sequence stayed ${firstHit} with the latch set (last ${stats.playerHitSequence}, latch ${stats.hitLatch})`]);
-  verdicts.push([overlapAfterStale > 0, `(b) agents overlapping the player after the stale acknowledgement ${overlapAfterStale} (need > 0)`]);
+  verdicts.push([overlapStale.sufficient, `(b) frames with an agent overlapping the player during the stale acknowledgement ${overlapStale.overlapping} of ${STALE_ACKNOWLEDGE_FRAMES} (need at least ${Math.ceil(overlapStale.frames * MINIMUM_OVERLAP_FRACTION)})`]);
 
   simulation.acknowledgeHit(firstHit);
   const acknowledgedAt = simulation.frameSequence;
@@ -246,13 +269,14 @@ async function runCheck() {
   simulation.acknowledgeHit(secondHit);
   harness.invulnerable = true;
   let hitWhileInvulnerable = false;
+  const overlapInvulnerable = new OverlapTally(INVULNERABLE_FRAMES);
   for (let frame = 0; frame < INVULNERABLE_FRAMES; frame += 1) {
     stats = await harness.step();
     if (stats.playerHitSequence !== secondHit) hitWhileInvulnerable = true;
+    overlapInvulnerable.record(await harness.overlapping());
   }
-  const overlapWhileInvulnerable = await harness.overlapping();
   verdicts.push([!hitWhileInvulnerable && stats.hitLatch === 0, `(c) invulnerable ${INVULNERABLE_FRAMES} frames: hit sequence ${stats.playerHitSequence} (need ${secondHit}), latch ${stats.hitLatch} (need 0 after the acknowledgement)`]);
-  verdicts.push([overlapWhileInvulnerable > 0, `(c) agents overlapping the invulnerable player ${overlapWhileInvulnerable} (need > 0)`]);
+  verdicts.push([overlapInvulnerable.sufficient, `(c) frames with an agent overlapping the invulnerable player ${overlapInvulnerable.overlapping} of ${INVULNERABLE_FRAMES} (need at least ${Math.ceil(overlapInvulnerable.frames * MINIMUM_OVERLAP_FRACTION)})`]);
 
   // (d) kill-all, in a step that also spawns.
   const aliveBeforeClear = stats.aliveTotal;

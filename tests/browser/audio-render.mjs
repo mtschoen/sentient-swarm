@@ -3,7 +3,8 @@
 // writes WAVs plus a JSON summary (levels in dBFS, sections and per-phrase note counts) under
 // artifacts/audio/. The page is reloaded before every render so long renders do not pile up
 // memory in one renderer. Fails on console errors, a clipping mix (peak above 0 dBFS) or a quiet
-// one (RMS below MINIMUM_MIX_RMS_DECIBELS).
+// one (RMS below MINIMUM_MIX_RMS_DECIBELS); one worst-case render (bomb, death and 50 kills at
+// intensity 0.9) must peak at or below 0 dBFS.
 // Usage: SMOKE_PORT=5186 node tests/browser/audio-render.mjs [--seconds 120] [--label after]
 //   [--source /path/to/audio/modules] [--skip-layers]
 // (from Git Bash, set MSYS_NO_PATHCONV=1 so a --source path is not rewritten).
@@ -16,6 +17,8 @@ import { startServer } from './server.mjs';
 const INTENSITIES = [0.2, 0.5, 0.9];
 const SOLO_SECONDS = 100;
 const PLAY_SECONDS = 30;
+const WORST_CASE_INTENSITY = 0.9;
+const WORST_CASE_SECONDS = 8;
 const MINIMUM_MIX_RMS_DECIBELS = -20;
 const RENDER_TIMEOUT_MILLISECONDS = 300_000;
 const PAGE_READY_TIMEOUT_MILLISECONDS = 30_000;
@@ -56,7 +59,7 @@ async function run() {
       });
       return page.evaluate(([name, parameters]) => window.__audioRender[name](parameters), [method, options]);
     };
-    const summary = { label, seconds, source, mixes: [], layers: [], effects: [], play: null };
+    const summary = { label, seconds, source, mixes: [], layers: [], effects: [], play: null, worstCase: null };
 
     for (const intensity of INTENSITIES) {
       const result = await render('renderMusic', { intensity, seconds, withWav: true });
@@ -88,6 +91,12 @@ async function run() {
     console.log(`audio-render: play mix 0.5 (base gun, kills): ${levelText(play.levels)} -> ${playPath}`);
     if (play.levels.peakDecibels > 0) failures.push(`play mix clips (peak ${play.levels.peakDecibels} dBFS)`);
 
+    const worst = await render('renderWorstCase', { intensity: WORST_CASE_INTENSITY, seconds: WORST_CASE_SECONDS });
+    summary.worstCase = worst;
+    console.log(`audio-render: worst case (bomb, death, 50 kills at intensity ${WORST_CASE_INTENSITY}): ${levelText(worst.levels)}`);
+    if (!worst.stacked) failures.push('the worst-case render never stacked its effects');
+    if (worst.levels.peakDecibels > 0) failures.push(`worst case clips (peak ${worst.levels.peakDecibels} dBFS)`);
+
     const summaryPath = join(outputDirectory, `${label}-summary.json`);
     await writeFile(summaryPath, JSON.stringify(summary, null, 1));
     console.log(`audio-render: summary -> ${summaryPath}`);
@@ -96,7 +105,7 @@ async function run() {
     failures.push(error.message.split('\n')[0]);
   } finally {
     if (browser) await browser.close().catch(() => {});
-    if (server) server.child.kill();
+    if (server) await server.stop();
   }
   if (failures.length > 0) {
     failures.forEach((failure) => console.error(`audio-render: FAIL ${failure}`));

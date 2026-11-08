@@ -8,8 +8,9 @@ import { SIM_PARAMS_BYTES, packSimParams } from '/src/sim/params.js';
 import { SpatialGrid } from '/src/sim/grid.js';
 
 const SEEDED_CELL_COUNT = 64;
-const AGENTS_PER_CELL = 64;
-const ALIVE_COUNT = SEEDED_CELL_COUNT * AGENTS_PER_CELL;
+// Seeded cell k holds k + 1 agents (1 to 64), so every cell count differs: a scatter or scan
+// offset that is off by one cell lands agents in the wrong cell and the counts cannot match.
+const ALIVE_COUNT = (SEEDED_CELL_COUNT * (SEEDED_CELL_COUNT + 1)) / 2;
 const DEAD_COUNT = 16;
 const CAPACITY = ALIVE_COUNT + DEAD_COUNT;
 
@@ -24,11 +25,19 @@ function seedAgents(dimensions) {
   const bytes = new ArrayBuffer(CAPACITY * AGENT_STRIDE_BYTES);
   const view = new DataView(bytes);
   const expectedCellOfAgent = new Int32Array(CAPACITY).fill(-1);
+  const slotOfAlive = [];
+  const withinOfAlive = [];
+  for (let slot = 0; slot < SEEDED_CELL_COUNT; slot += 1) {
+    for (let within = 0; within <= slot; within += 1) {
+      slotOfAlive.push(slot);
+      withinOfAlive.push(within);
+    }
+  }
   for (let agent = 0; agent < CAPACITY; agent += 1) {
     const alive = agent < ALIVE_COUNT;
     // Dead agents reuse seeded cells so a missing alive check would inflate counts.
-    const cell = seededCell(agent % SEEDED_CELL_COUNT, dimensions);
-    const within = Math.floor(agent / SEEDED_CELL_COUNT) % AGENTS_PER_CELL;
+    const cell = seededCell(alive ? slotOfAlive[agent] : agent % SEEDED_CELL_COUNT, dimensions);
+    const within = alive ? withinOfAlive[agent] : 0;
     const fractionX = 0.25 + 0.5 * ((within % 8) / 8);
     const fractionY = 0.25 + 0.5 * (Math.floor(within / 8) / 8);
     const base = agent * AGENT_STRIDE_BYTES;
@@ -118,7 +127,7 @@ async function runCheck() {
   ]);
   const failure = verify(dimensions, expectedCellOfAgent, cellCounts, cellOffsets, sortedIndices);
   return failure === null
-    ? { pass: true, detail: `${ALIVE_COUNT} alive agents in ${SEEDED_CELL_COUNT} cells, ${DEAD_COUNT} dead skipped` }
+    ? { pass: true, detail: `${ALIVE_COUNT} alive agents in ${SEEDED_CELL_COUNT} cells of 1 to ${SEEDED_CELL_COUNT} agents, ${DEAD_COUNT} dead skipped` }
     : { pass: false, detail: failure };
 }
 
