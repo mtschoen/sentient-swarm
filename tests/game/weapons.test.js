@@ -158,7 +158,7 @@ const EXPECTED_TABLES = {
   },
   scatter: {
     kind: PROJECTILE_KINDS.scatter,
-    tiers: [9, 13, 17].map((projectilesPerShot) => ({ ...TIER_DEFAULTS, fireInterval: 0.2, spreadRadians: 1.2, speed: 10, radius: 0.08, lifetime: 0.5, chargeSeconds: 8, projectilesPerShot })),
+    tiers: [9, 13, 17].map((projectilesPerShot) => ({ ...TIER_DEFAULTS, fireInterval: 0.2, spreadRadians: 1.2, speed: 10, radius: 0.2, lifetime: 3, chargeSeconds: 8, projectilesPerShot })),
   },
   rail: {
     kind: PROJECTILE_KINDS.rail,

@@ -141,7 +141,7 @@ Base gun: a modest forward spread, always available, never upgraded. It is delib
 Upgrades: five types. Each has three tiers.
 
 - Beam: the big fat laser. Continuous, pierces everything along its line, the heaviest grid distortion in the game, a trench that heals behind it. Higher tiers widen it and add a secondary ripple.
-- Scatter: wide short-range arc, a shotgun wall. Shoves the grid outward in a cone. Tiers widen the arc and shorten the gaps.
+- Scatter: a wide arc of energy balls as big and long-lived as the base gun's, a shotgun wall (owner ruling R32: a pickup is never a power-down). Shoves the grid outward in a cone. Tiers add balls to the arc.
 - Rail: narrow, very fast, long range, pierces. Thin streaks on the grid. Tiers add parallel bolts.
 - Pulse: slow large orbs that detonate into expanding rings on contact or at range. Ripples on the grid. Tiers add orb count and ring radius.
 - Sidewinders: homing missiles that weave toward the densest nearby cluster (the grid count buffer tells them where). Wiggly dimples on the grid. Tiers add missile count and turn rate.

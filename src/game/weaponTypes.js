@@ -69,10 +69,12 @@ export const WEAPON_TYPES = Object.freeze({
     kind: PROJECTILE_KINDS.beam,
     tiers: tiers({ fireInterval: 0, chargeSeconds: 8 }, [{ radius: 0.12 }, { radius: 0.2 }, { radius: 0.3 }]),
   }),
+  // Scatter balls match the base gun's size and reach (owner ruling R32: a pickup is never a
+  // power-down); the fan and the count are what the weapon adds.
   scatter: Object.freeze({
     kind: PROJECTILE_KINDS.scatter,
     tiers: tiers(
-      { fireInterval: 0.2, spreadRadians: 1.2, speed: 10, radius: 0.08, lifetime: 0.5, chargeSeconds: 8 },
+      { fireInterval: 0.2, spreadRadians: 1.2, speed: 10, radius: 0.2, lifetime: 3, chargeSeconds: 8 },
       [{ projectilesPerShot: 9 }, { projectilesPerShot: 13 }, { projectilesPerShot: 17 }],
     ),
   }),
