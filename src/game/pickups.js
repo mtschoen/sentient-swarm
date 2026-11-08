@@ -3,6 +3,7 @@ import { WEAPON_TYPE_NAMES } from './weaponTypes.js';
 import { ARENA_WIDTH, ARENA_HEIGHT } from '../sim/layout.js';
 
 const PLACEMENT_ATTEMPTS = 16;
+const DENSITY_CANDIDATES = 8;
 const TIME_EPSILON = 1e-9;
 
 export class PickupDirector {
@@ -38,7 +39,7 @@ export class PickupDirector {
     return WEAPON_TYPE_NAMES[this.rotationIndex];
   }
 
-  update(deltaSeconds, { playerX, playerY, onBaseGun, milestone, phasePlaying }) {
+  update(deltaSeconds, { playerX, playerY, onBaseGun, milestone, phasePlaying, densityAt = null }) {
     if (!phasePlaying) return;
 
     this.rotationTimer += deltaSeconds;
@@ -60,28 +61,45 @@ export class PickupDirector {
     }
 
     if (milestone || (onBaseGun && this.pityTimer >= this.pitySeconds - TIME_EPSILON)) {
-      this.spawn(playerX, playerY);
+      this.spawn(playerX, playerY, densityAt);
       this.pityTimer = 0;
     }
   }
 
-  // Rejection-samples a point on the placement annulus; clamps only if every attempt lands outside the arena.
-  spawn(playerX, playerY) {
+  // Rejection-samples points on the placement annulus (16 attempts). Without densityAt the first
+  // in-arena point wins; with densityAt(x, y) the lowest-density of the first 8 in-arena points wins
+  // (ties go to the earlier one). Clamps only if every attempt lands outside the arena.
+  spawn(playerX, playerY, densityAt = null) {
+    const wanted = densityAt === null ? 1 : DENSITY_CANDIDATES;
+    const candidates = [];
     let x = playerX;
     let y = playerY;
-    let placed = false;
-    for (let attempt = 0; attempt < PLACEMENT_ATTEMPTS && !placed; attempt += 1) {
+    for (let attempt = 0; attempt < PLACEMENT_ATTEMPTS && candidates.length < wanted; attempt += 1) {
       const angle = this.random() * Math.PI * 2;
       const distance = this.minimumDistance + this.random() * (this.maximumDistance - this.minimumDistance);
       x = playerX + Math.cos(angle) * distance;
       y = playerY + Math.sin(angle) * distance;
-      placed = x >= 0 && x <= this.arenaWidth && y >= 0 && y <= this.arenaHeight;
+      if (x >= 0 && x <= this.arenaWidth && y >= 0 && y <= this.arenaHeight) candidates.push({ x, y });
     }
-    if (!placed) {
-      x = Math.min(this.arenaWidth, Math.max(0, x));
-      y = Math.min(this.arenaHeight, Math.max(0, y));
+    let chosen = null;
+    if (candidates.length > 0) {
+      chosen = candidates[0];
+      if (densityAt !== null) {
+        let lowest = densityAt(chosen.x, chosen.y);
+        for (const candidate of candidates.slice(1)) {
+          const density = densityAt(candidate.x, candidate.y);
+          if (density < lowest) {
+            lowest = density;
+            chosen = candidate;
+          }
+        }
+      }
     }
-    this.pickups.push({ x, y, type: this.offeredType, age: 0, fade: 1 });
+    const placed = chosen ?? {
+      x: Math.min(this.arenaWidth, Math.max(0, x)),
+      y: Math.min(this.arenaHeight, Math.max(0, y)),
+    };
+    this.pickups.push({ x: placed.x, y: placed.y, type: this.offeredType, age: 0, fade: 1 });
   }
 
   collect(playerX, playerY, radius = 0.35) {

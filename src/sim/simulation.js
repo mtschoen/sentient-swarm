@@ -37,6 +37,7 @@ import { StagingRing, createStorageBuffer, createUniformBuffer } from '../gpu/bu
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { AgentCompaction } from './compact.js';
 import { CoarseField } from './field.js';
+import { DensityReadback } from './density-readback.js';
 import { SpatialGrid } from './grid.js';
 import { DebugKillPass, KillAllPass, PlayerContactPass } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
@@ -80,6 +81,7 @@ export class Simulation {
     await Promise.all([
       simulation.grid.initialize(),
       simulation.field.initialize(),
+      simulation.densityReadback.initialize(),
       simulation.steering.initialize(),
       simulation.spawner.initialize(),
       simulation.statsPass.initialize(),
@@ -101,6 +103,7 @@ export class Simulation {
     this.dimensions = gridDimensions(neighborRadius);
     this.grid = new SpatialGrid(gpu, { columns: this.dimensions.columns, rows: this.dimensions.rows, capacity, common });
     this.field = new CoarseField(gpu, { grid: this.grid, common });
+    this.densityReadback = new DensityReadback(this.device);
     this.steering = new Steering(gpu, { common });
     this.spawner = new Spawner(gpu, { common });
     this.statsPass = new StatsPass(gpu, { common });
@@ -293,6 +296,7 @@ export class Simulation {
     this.spawner.encode(encoder, agentsIn, params, this.field.buffers.blurred);
     this.grid.encode(encoder, agentsIn, params);
     this.field.encode(encoder, agentsIn, this.grid.buffers, params);
+    this.densityReadback.encode(encoder, this.field.buffers.blurred);
     this.steering.encode(encoder, agentsIn, agentsOut, this.grid.buffers, this.field.buffers.blurred, this.speciesTableBufferValue, params);
     const killBuffers = {
       agentsBuffer: agentsOut,
@@ -357,6 +361,18 @@ export class Simulation {
   // Call immediately after device.queue.submit for the command buffer that holds step().
   afterSubmit() {
     this.stagingRing.markSubmitted();
+    this.densityReadback.afterSubmit();
+  }
+
+  // Synchronous: maps the density readback has finished since the last call become the newest one.
+  pollDensity() {
+    this.densityReadback.poll();
+  }
+
+  // Summed species density of the coarse field at a world position, from the newest density map
+  // (a few frames old, refreshed every 15 steps); 0 before the first map arrives.
+  densityAt(x, y) {
+    return this.densityReadback.densityAt(x, y);
   }
 
   // Synchronous: every ready frame's stats, oldest first (empty when none has mapped yet). Each
@@ -467,6 +483,7 @@ export class Simulation {
     next.setKillFragmentParticles(this.killFragmentParticles);
     next.setDeathFloodParticles(this.deathFloodParticles);
     next.spawnGatesValue = this.spawnGatesValue;
+    next.densityReadback.adopt(this.densityReadback);
     next.registeredPasses = this.registeredPasses;
     next.frameSequenceValue = this.frameSequenceValue;
     next.timeValue = this.timeValue;
@@ -506,5 +523,6 @@ export class Simulation {
     this.particlePoolValue.destroy();
     this.grid.destroy();
     this.field.destroy();
+    this.densityReadback.destroy();
   }
 }

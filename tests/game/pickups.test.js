@@ -120,3 +120,53 @@ test('reset clears pickups, timers and rotation', () => {
   run(director, 9.9);
   assert.equal(director.pickups.length, 0);
 });
+
+test('with densityAt, a spawn takes the lowest-density of up to 8 in-arena candidates', () => {
+  const sampled = [];
+  const densityAt = (x, y) => { sampled.push([x, y]); return x; };
+  const director = makeDirector();
+  director.spawn(8, 4.5, densityAt);
+  assert.equal(sampled.length, 8);
+  const [pickup] = director.pickups;
+  assert.equal(pickup.x, Math.min(...sampled.map(([x]) => x)));
+  for (const [x, y] of sampled) {
+    assert.ok(x >= 0 && x <= WIDTH && y >= 0 && y <= HEIGHT);
+  }
+});
+
+test('density placement keeps the distance band and is deterministic under the injected random', () => {
+  const place = () => {
+    const director = makeDirector();
+    director.update(STEP, { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: true, phasePlaying: true, densityAt: (x, y) => x * 3 + y });
+    return director.pickups[0];
+  };
+  const first = place();
+  assert.deepEqual(place(), first);
+  const distance = Math.hypot(first.x - 8, first.y - 4.5);
+  assert.ok(distance >= 3 - 1e-9 && distance <= 5 + 1e-9, String(distance));
+});
+
+test('density placement avoids a dense half of the arena', () => {
+  const director = makeDirector();
+  for (let index = 0; index < 20; index += 1) {
+    director.spawn(8, 4.5, (x) => (x > 8 ? 100 : 0));
+  }
+  assert.ok(director.pickups.every((pickup) => pickup.x <= 8));
+});
+
+test('densityAt falls back to the 16-attempt clamp when every candidate is outside the arena', () => {
+  const director = new PickupDirector({ arenaWidth: 1, arenaHeight: 1, minimumDistance: 50, maximumDistance: 60, random: sequenceRandom() });
+  let calls = 0;
+  director.spawn(0.5, 0.5, () => { calls += 1; return 0; });
+  assert.equal(calls, 0);
+  const [pickup] = director.pickups;
+  assert.ok(pickup.x >= 0 && pickup.x <= 1 && pickup.y >= 0 && pickup.y <= 1);
+});
+
+test('without densityAt the first valid candidate wins, as before', () => {
+  const plain = makeDirector();
+  plain.spawn(8, 4.5);
+  const withBias = makeDirector();
+  withBias.spawn(8, 4.5, () => 0);
+  assert.deepEqual(withBias.pickups[0], plain.pickups[0]);
+});

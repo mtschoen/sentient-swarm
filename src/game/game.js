@@ -226,6 +226,7 @@ export class Game {
       onBaseGun: this.weapons.isBase,
       milestone: playing && this.score.consumeMilestone(),
       phasePlaying: playing,
+      densityAt: (positionX, positionY) => this.simulation.densityAt(positionX, positionY),
     });
     if (playing) {
       const collected = this.pickups.collect(x, y);
@@ -268,6 +269,7 @@ export class Game {
       this.simulation.setSpawnDistanceFraction(this.spawnPressure.spawnDistanceFraction);
       this.stepSimulation(simulationSeconds, spawnPerSpecies, this.stepGates);
     }
+    this.simulation.pollDensity();
     const frames = this.simulation.readAllStats();
     frames.forEach((stats) => this.processStats(stats));
     if (frames.length > 0) {

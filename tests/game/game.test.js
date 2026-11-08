@@ -62,6 +62,10 @@ function createFakeSimulation() {
       this.events.push('step');
     },
     afterSubmit() {},
+    pollDensity() { this.densityPolls = (this.densityPolls ?? 0) + 1; },
+    densityAt(x, y) { this.densitySamples.push([x, y]); return this.densityFunction(x, y); },
+    densitySamples: [],
+    densityFunction: () => 0,
     readAllStats() {
       const next = this.scriptedStats.shift();
       return next === undefined ? [] : [next];
@@ -327,6 +331,17 @@ test('a pickup collection plays the pickup effect', async () => {
   game.update(STEP);
   game.update(STEP);
   assert.deepEqual(played, ['pickup']);
+});
+
+test('pickup placement samples the simulation density and polls its readback every update', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  simulation.densityFunction = (x) => x;
+  runFor(game, 10.5);
+  assert.equal(simulation.densitySamples.length, 8);
+  assert.ok(simulation.densityPolls >= 1);
+  const [pickup] = game.pickups.pickups;
+  assert.equal(pickup.x, Math.min(...simulation.densitySamples.map(([x]) => x)));
 });
 
 test('a hit whose sequence predates the respawn is ignored but still acknowledged', async () => {

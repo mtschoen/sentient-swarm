@@ -15,6 +15,9 @@
 // a change prepared (prepareCapacity, also to a new particle budget), a debug kill step is
 // submitted and committed (commitCapacity) with no readback in between; the new instance's first
 // stats report exactly the agents removed as kills;
+// (j) the density readback (task C6a): after one step over a seeded cluster the first map matches the summed
+// species channels of the coarse field (readCoarseField), the second map arrives only on the 16th step, and a
+// capacity swap keeps sampling the same map;
 // (h) main.js's cadence: one readStats per step with no await between steps, a 4-step frame every
 // CADENCE_BURST_INTERVAL frames, rAF between frames; stats then lag 2 or more steps (asserted, so
 // the check cannot fall back to the lag-1 case), and the peak alive / target ratio over the run,
@@ -24,6 +27,7 @@ import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, AREN
 import { normalizeShares } from '/src/sim/species.js';
 import { SpawnPressure } from '/src/sim/spawner.js';
 import { Simulation } from '/src/sim/simulation.js';
+import { DENSITY_READBACK_INTERVAL } from '/src/sim/density-readback.js';
 import { PARTICLE_HEADER_BYTES, PARTICLE_STRIDE_BYTES } from '/src/sim/particles.js';
 import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH } from '/src/sim/params.js';
 
@@ -272,6 +276,64 @@ async function runSwapKillCheck(gpu) {
   };
 }
 
+async function pollUntilMaps(device, simulation, count) {
+  for (let attempt = 0; attempt < READBACK_ATTEMPTS && simulation.densityReadback.mapsReceived < count; attempt += 1) {
+    await device.queue.onSubmittedWorkDone();
+    simulation.pollDensity();
+  }
+  return simulation.densityReadback.mapsReceived;
+}
+
+// (j) The density readback against the coarse field it summarizes.
+async function runDensityCheck(gpu) {
+  const { device } = gpu;
+  const zeroSpawns = () => new Uint32Array(SPECIES_COUNT);
+  let simulation = await Simulation.create(gpu, { capacity: INITIAL_CAPACITY });
+  simulation.setPlayer(PLAYER[0], PLAYER[1]);
+  const clusterCount = 600;
+  const bytes = new ArrayBuffer(clusterCount * AGENT_STRIDE_BYTES);
+  const view = new DataView(bytes);
+  for (let agent = 0; agent < clusterCount; agent += 1) {
+    const base = agent * AGENT_STRIDE_BYTES;
+    view.setFloat32(base + AGENT_OFFSETS.position, 3 + (agent % 20) * 0.02, true);
+    view.setFloat32(base + AGENT_OFFSETS.position + 4, 4 + Math.floor(agent / 20) * 0.02, true);
+    view.setUint32(base + AGENT_OFFSETS.species, agent % SPECIES_COUNT, true);
+    view.setUint32(base + AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
+  }
+  device.queue.writeBuffer(simulation.agentsBuffer, 0, bytes);
+  const beforeFirst = simulation.densityAt(3.2, 4.2);
+  await submitStep(device, simulation, zeroSpawns());
+  const field = await simulation.readCoarseField();
+  const first = await pollUntilMaps(device, simulation, 1);
+  const cellColumn = Math.floor(3.2 / ARENA_WIDTH * COARSE_COLUMNS);
+  const cellRow = Math.floor(4.2 / ARENA_HEIGHT * COARSE_ROWS);
+  const cell = cellRow * COARSE_COLUMNS + cellColumn;
+  let expectedSum = 0;
+  for (let channel = 0; channel < SPECIES_COUNT; channel += 1) expectedSum += field[cell * 8 + channel];
+  let largestError = 0;
+  for (let index = 0; index < COARSE_COLUMNS * COARSE_ROWS; index += 1) {
+    let sum = 0;
+    for (let channel = 0; channel < SPECIES_COUNT; channel += 1) sum += field[index * 8 + channel];
+    largestError = Math.max(largestError, Math.abs(sum - simulation.densityReadback.map[index]));
+  }
+  const nearCluster = simulation.densityAt(3.2, 4.2);
+  const farCorner = simulation.densityAt(15, 8.5);
+  for (let step = 0; step < DENSITY_READBACK_INTERVAL - 1; step += 1) await submitStep(device, simulation, zeroSpawns());
+  const beforeSecond = await pollUntilMaps(device, simulation, 2);
+  await submitStep(device, simulation, zeroSpawns());
+  const second = await pollUntilMaps(device, simulation, 2);
+  const beforeSwap = simulation.densityAt(3.2, 4.2);
+  simulation = await simulation.recreateWithCapacity(GROWN_CAPACITY);
+  const afterSwap = simulation.densityAt(3.2, 4.2);
+  simulation.destroy();
+  const pass = beforeFirst === 0 && first === 1 && expectedSum > 1 && largestError < 1e-3 && nearCluster > 5 * farCorner
+    && beforeSecond === 1 && second === 2 && afterSwap === beforeSwap && afterSwap > 0;
+  return {
+    pass,
+    detail: `${pass ? 'PASS' : 'FAIL'} density readback: 0 before the first map (${beforeFirst}), maps ${first} after step 1, largest per-cell error vs the coarse field ${largestError.toExponential(2)} (need < 1e-3), cluster ${nearCluster.toFixed(2)} vs far corner ${farCorner.toFixed(3)} (need 5x), maps ${beforeSecond} after step ${DENSITY_READBACK_INTERVAL} (need 1) and ${second} after step ${DENSITY_READBACK_INTERVAL + 1} (need 2), swap keeps the sample (${beforeSwap.toFixed(3)} then ${afterSwap.toFixed(3)})`,
+  };
+}
+
 function nextAnimationFrame() {
   return new Promise((resolve) => requestAnimationFrame(resolve));
 }
@@ -384,10 +446,13 @@ async function runCheck() {
   const gateResult = await runGateCheck(gpu);
   if (lostReason !== null) return { pass: false, detail: `device lost during the gate check: ${lostReason}` };
   details.push(gateResult.detail);
+  const densityResult = await runDensityCheck(gpu);
+  if (lostReason !== null) return { pass: false, detail: `device lost during the density check: ${lostReason}` };
+  details.push(densityResult.detail);
   const cadenceResult = await runCadenceCheck(gpu);
   if (lostReason !== null) return { pass: false, detail: `device lost during the cadence check: ${lostReason}` };
   details.push(cadenceResult.detail);
-  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass && swapKillResult.pass && gateResult.pass && cadenceResult.pass;
+  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass && swapKillResult.pass && gateResult.pass && densityResult.pass && cadenceResult.pass;
   return { pass, detail: details.join('; ') };
 }
 
