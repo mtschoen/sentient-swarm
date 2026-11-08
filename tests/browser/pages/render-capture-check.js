@@ -19,6 +19,7 @@ import {
 } from '/src/sim/layout.js';
 import { PARTICLE_HEADER_BYTES, PARTICLE_STRIDE_BYTES } from '/src/sim/particles.js';
 import { Simulation } from '/src/sim/simulation.js';
+import { normalizeShares } from '/src/sim/species.js';
 
 const CAPACITY = 65536;
 const AGENT_COUNT = 6000;
@@ -152,7 +153,7 @@ async function run() {
   const { device } = gpu;
   const viewport = new Viewport();
   viewport.setCanvasSize(CANVAS_WIDTH, CANVAS_HEIGHT, 1);
-  const simulation = await Simulation.create(gpu, { capacity: CAPACITY });
+  const simulation = await Simulation.create(gpu, { capacity: CAPACITY, shares: normalizeShares([1, 1, 1, 1, 1]) });
   const random = seededRandom(12345);
   seedField(device, simulation, seedAgents(device, simulation, random));
   seedParticles(device, simulation, random);

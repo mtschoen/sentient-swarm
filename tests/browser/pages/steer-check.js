@@ -451,7 +451,7 @@ async function checkNeighborCap(gpu, common) {
   };
 }
 
-// (f) The default species mix (equal shares, all five species) at the 262144 capacity, seeded
+// (f) The default species mix (equal shares, all five species, explicit so the fixture does not follow the shipped default) at the 262144 capacity, seeded
 // uniformly with the player fixed at the center, for 900 steps: fewer than 15 percent of the
 // agents sit within 1.0 world unit of the player, and no coarse cell holds more than 4 times the
 // capacity-average density per cell (the average of the population under test, which is stricter

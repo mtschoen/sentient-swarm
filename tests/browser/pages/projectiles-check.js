@@ -59,7 +59,7 @@ import { Projectiles } from '/src/game/projectiles.js';
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, PROJECTILE_FLAG_ALIVE, PROJECTILE_FLAG_MISSILE_RING, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES } from '/src/sim/params.js';
-import { defaultSpecies } from '/src/sim/species.js';
+import { defaultSpecies, normalizeShares } from '/src/sim/species.js';
 import { PROJECTILE_KINDS, WEAPON_TYPES } from '/src/game/weaponTypes.js';
 
 const CAPACITY = 65536;
@@ -678,7 +678,7 @@ async function runCheck() {
   device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
 
   const species = defaultSpecies().map((row) => ({ ...row, maximumSpeed: 0 }));
-  const simulation = await Simulation.create(gpu, { capacity: CAPACITY, species });
+  const simulation = await Simulation.create(gpu, { capacity: CAPACITY, species, shares: normalizeShares([1, 1, 1, 1, 1]) });
   simulation.setPlayer(1, 1);
   const projectiles = await Projectiles.create(gpu, {});
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));

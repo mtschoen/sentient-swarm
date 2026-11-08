@@ -231,7 +231,7 @@ function seedAgents(device, simulation, firstSlot, count) {
 async function runShrinkCheck(gpu) {
   const { device } = gpu;
   const zeroSpawns = () => new Uint32Array(SPECIES_COUNT);
-  let simulation = await Simulation.create(gpu, { capacity: SHRINK_FROM_CAPACITY });
+  let simulation = await Simulation.create(gpu, { capacity: SHRINK_FROM_CAPACITY, shares: normalizeShares([1, 1, 1, 1, 1]) });
   seedAgents(device, simulation, SHRINK_FIRST_SLOT, SHRINK_AGENT_COUNT);
   const collected = new Map();
   await submitStep(device, simulation, zeroSpawns());
@@ -252,7 +252,7 @@ async function runShrinkCheck(gpu) {
 async function runSwapKillCheck(gpu) {
   const { device } = gpu;
   const zeroSpawns = () => new Uint32Array(SPECIES_COUNT);
-  let simulation = await Simulation.create(gpu, { capacity: INITIAL_CAPACITY });
+  let simulation = await Simulation.create(gpu, { capacity: INITIAL_CAPACITY, shares: normalizeShares([1, 1, 1, 1, 1]) });
   simulation.setPlayer(PLAYER[0], PLAYER[1]);
   seedAgents(device, simulation, 0, SHRINK_AGENT_COUNT);
   const collected = new Map();
@@ -286,7 +286,7 @@ async function pollUntilMaps(device, simulation, count) {
 async function runDensityCheck(gpu) {
   const { device } = gpu;
   const zeroSpawns = () => new Uint32Array(SPECIES_COUNT);
-  let simulation = await Simulation.create(gpu, { capacity: INITIAL_CAPACITY });
+  let simulation = await Simulation.create(gpu, { capacity: INITIAL_CAPACITY, shares: normalizeShares([1, 1, 1, 1, 1]) });
   simulation.setPlayer(PLAYER[0], PLAYER[1]);
   const clusterCount = 600;
   const bytes = new ArrayBuffer(clusterCount * AGENT_STRIDE_BYTES);
@@ -458,7 +458,7 @@ async function runCheck() {
 // every alive agent lies within its species' gate radius plus one step of ejection.
 async function runGateCheck(gpu) {
   const { device } = gpu;
-  const simulation = await Simulation.create(gpu, { capacity: GATE_CHECK_CAPACITY });
+  const simulation = await Simulation.create(gpu, { capacity: GATE_CHECK_CAPACITY, shares: normalizeShares([1, 1, 1, 1, 1]) });
   simulation.setPlayer(ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
   const spawnPerSpecies = Uint32Array.from({ length: SPECIES_COUNT }, (unused, species) => (species < 2 ? GATE_CHECK_SPAWNS : 0));
   await submitStep(device, simulation, spawnPerSpecies, { gates: GATE_CHECK_GATES, speciesBias: 1 });

@@ -29,7 +29,7 @@ import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, AREN
 import { DEFAULT_PLAYER_RADIUS, Simulation } from '/src/sim/simulation.js';
 import { Game } from '/src/game/game.js';
 import { InputState } from '/src/input/input.js';
-import { defaultSpecies } from '/src/sim/species.js';
+import { defaultSpecies, normalizeShares } from '/src/sim/species.js';
 
 const CAPACITY = 16384;
 const GROWN_CAPACITY = 32768;
@@ -185,7 +185,7 @@ function seedBlastRings(device, simulation, center) {
 async function runBlastCase(gpu) {
   const { device } = gpu;
   const species = defaultSpecies().map((row) => ({ ...row, maximumSpeed: 0 }));
-  const simulation = await Simulation.create(gpu, { capacity: BLAST_CAPACITY, species });
+  const simulation = await Simulation.create(gpu, { capacity: BLAST_CAPACITY, species, shares: normalizeShares([1, 1, 1, 1, 1]) });
   const renderer = { setSimulation() {}, render() {}, afterSubmit() {} };
   const input = { state: new InputState(), update() {} };
   const game = await Game.create({ gpu, simulation, renderer, input, capacity: BLAST_CAPACITY, random: () => 0.5 });
@@ -234,7 +234,7 @@ async function runCheck() {
   device.lost.then((info) => { lostReason = info.message || info.reason || 'lost'; });
   device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
 
-  let simulation = await Simulation.create(gpu, { capacity: CAPACITY });
+  let simulation = await Simulation.create(gpu, { capacity: CAPACITY, shares: normalizeShares([1, 1, 1, 1, 1]) });
   const harness = new Harness(device, simulation);
   harness.seedRing();
   const verdicts = [];
