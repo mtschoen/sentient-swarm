@@ -36,7 +36,7 @@ One `Game.update(deltaSeconds)` is one fixed step (full comments at the top of `
 2. `PlayerShip.update` (Playing only); the mouse aims from the ship to the pointer unless a stick or touch aim is pushed.
 3. `PickupDirector.update`, then collection at the player into `WeaponState.collect`, before charge expiry.
 4. `WeaponState.update`: spawns go to `Projectiles.queueSpawn` and the beam to `setBeam` (cleared on the expiry frame).
-5. `Simulation.setPlayerState` (`setPlayer` only in Ready, so contact stays off until start), then spawn pressure (`SpawnPressure.update` with the latest stats and the step's sequence, so spawns still in flight are not requested twice; paused while dying and respawning), then the simulation step is submitted.
+5. `Simulation.setPlayerState` (`setPlayer` only in Ready, so contact stays off until start), then spawn pressure (`SpawnPressure.update` with the latest stats and the step's sequence, so spawns still in flight are not requested twice; paused while dying and respawning) and its ramped seek scale and spawn distance (`setSeekScale`, `setSpawnDistanceFraction`; the ramp restarts on start and respawn and is retuned through `SpawnPressure.setRamp`), then the simulation step is submitted.
 6. Every ready stats frame (`readAllStats`, oldest first): kills (`killsSinceLastRead`, the difference of the cumulative counter) score once per stats frame and only while Playing, awards add lives and bombs, ring detonations queue a shockwave, and each new `playerHitSequence` is acknowledged and offered to `RunState.playerHit` (which drops the weapon and resets the multiplier).
 7. `RunState.update` drains actions: clear the arena and projectiles, queue bomb and death shockwaves, respawn.
 

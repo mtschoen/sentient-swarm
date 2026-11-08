@@ -28,8 +28,10 @@ test('packSimParams produces the 112-byte uniform layout', () => {
 test('packSimParams defaults missing fields to zero', () => {
   const view = new DataView(packSimParams({}));
   for (let offset = 0; offset < SIM_PARAMS_BYTES; offset += 4) {
-    // Same-species cohesion defaults to on.
-    assert.equal(view.getUint32(offset, true), offset === 88 ? 1 : 0);
+    // Same-species cohesion defaults to on the seek scale to 1 (full seek) and the spawn distance to 0.25 of the arena width.
+    if (offset === 108) assert.equal(view.getFloat32(offset, true), 1);
+    else if (offset === 36) assert.equal(view.getFloat32(offset, true), 0.25);
+    else assert.equal(view.getUint32(offset, true), offset === 88 ? 1 : 0);
   }
 });
 
@@ -49,5 +51,13 @@ test('packSimParams writes the player contact and kill-all fields', () => {
   assert.equal(view.getUint32(96, true), 1);
   assert.equal(view.getUint32(100, true), 77);
   assert.equal(view.getUint32(104, true), 1);
-  assert.equal(view.getUint32(108, true), 0);
+});
+
+test('packSimParams writes seekScale as f32 at byte offset 108', () => {
+  assert.equal(new DataView(packSimParams({ seekScale: 0.25 })).getFloat32(108, true), 0.25);
+  assert.equal(new DataView(packSimParams({ seekScale: 0 })).getFloat32(108, true), 0);
+});
+
+test('packSimParams writes spawnDistanceFraction as f32 at byte offset 36', () => {
+  assert.equal(new DataView(packSimParams({ spawnDistanceFraction: 0.375 })).getFloat32(36, true), 0.375);
 });

@@ -31,6 +31,8 @@ function createFakeSimulation() {
     killAllRequests: 0,
     acknowledged: [],
     playerStates: [],
+    seekScales: [],
+    spawnDistanceFractions: [],
     playerPositions: [],
     spawnBudgets: [],
     passes: [],
@@ -41,6 +43,8 @@ function createFakeSimulation() {
     },
     setPlayer(x, y) { this.playerPositions.push({ x, y }); },
     setPlayerState(state) { this.playerStates.push(state); },
+    setSeekScale(scale) { this.seekScales.push(scale); },
+    setSpawnDistanceFraction(fraction) { this.spawnDistanceFractions.push(fraction); },
     acknowledgeHit(sequence) { this.acknowledged.push(sequence); },
     requestKillAll() {
       this.killAllRequests += 1;
@@ -597,4 +601,18 @@ test('a failed capacity change keeps the old simulation and resumes stepping', a
   const before = simulation.frameSequence;
   game.update(STEP);
   assert.equal(simulation.frameSequence, before + 1);
+});
+
+test('every step hands the spawn pressure seek scale and spawn distance to the simulation before stepping', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  game.update(STEP);
+  assert.equal(simulation.seekScales.length, simulation.frameSequence);
+  assert.equal(simulation.spawnDistanceFractions.length, simulation.frameSequence);
+  assert.equal(simulation.spawnDistanceFractions.at(-1), game.spawnPressure.spawnDistanceFraction);
+  assert.equal(simulation.seekScales.at(-1), game.spawnPressure.seekScale);
+  runFor(game, 60);
+  assert.ok(simulation.seekScales.at(-1) > simulation.seekScales[0], 'seek ramps up during play');
+  assert.ok(simulation.spawnDistanceFractions.at(-1) < simulation.spawnDistanceFractions[0], 'spawns move closer during play');
+  assert.equal(simulation.seekScales.at(-1), game.spawnPressure.seekScale);
 });

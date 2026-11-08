@@ -19,11 +19,11 @@
 //   full strength in a random direction.
 //
 // Every term adds to a desired velocity: weight times a direction of length at most 1 times
-// maximumSpeed, except seek (weight times seekVelocity, which brakes near the player), alignment
-// (weight times the average neighbor velocity) and pressure (at most PRESSURE_MAXIMUM_MULTIPLE
-// times maximumSpeed, so up to 2x maximumSpeed). The steering acceleration is
-// (desired - velocity) * STEERING_RESPONSE, clamped to maximumTurn * maximumSpeed; the new
-// speed is clamped to maximumSpeed.
+// maximumSpeed, except seek (weight times params.seekScale, which ramps with spawn pressure, times
+// seekVelocity, which brakes near the player), alignment (weight times the average neighbor
+// velocity) and pressure (at most PRESSURE_MAXIMUM_MULTIPLE times maximumSpeed, so up to 2x
+// maximumSpeed). The steering acceleration is (desired - velocity) * STEERING_RESPONSE, clamped
+// to maximumTurn * maximumSpeed; the new speed is clamped to maximumSpeed.
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read> agentsIn: array<Agent>;
@@ -201,7 +201,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   let targetDensity = max(speciesField(species, FIELD_TARGET_DENSITY), MINIMUM_LENGTH);
 
   let seek = seekVelocity(agent.position, speciesField(species, FIELD_ORBIT_RADIUS), maximumSpeed, maximumAcceleration);
-  var desired = seek * speciesField(species, FIELD_SEEK);
+  var desired = seek * speciesField(species, FIELD_SEEK) * params.seekScale;
 
   let neighbors = fineNeighborAverages(index, agent, species);
   desired = desired + neighbors.separation * speciesField(species, FIELD_SEPARATION) * maximumSpeed;

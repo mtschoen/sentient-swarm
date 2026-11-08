@@ -13,7 +13,9 @@
 //   4. weapons.update; spawns go to projectiles.queueSpawn and the beam to setBeam (null on the
 //      expiry frame even when the weapon still returned one).
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
-//   6. spawn pressure (paused while Dying and Respawning), then the simulation step is submitted.
+//   6. spawn pressure (paused while Dying and Respawning), its seek scale and its spawn distance
+//      (setSeekScale, setSpawnDistanceFraction: both ramp with the count), then the simulation
+//      step is submitted.
 //   7. every ready stats frame (readAllStats, oldest first): kills (killsSinceLastRead) score once
 //      per stats frame and only while Playing; awards add lives and bombs; a frame with pulse ring
 //      detonations queues one RING_IMPULSE_STRENGTH impulse at its reported ring position; every
@@ -198,7 +200,10 @@ export class Game {
       this.simulation.setPlayerState({ x, y, radius: this.player.radius, invulnerable: !playing || this.run.invulnerable });
     }
 
-    this.stepSimulation(deltaSeconds, this.spawnCounts(deltaSeconds));
+    const spawnPerSpecies = this.spawnCounts(deltaSeconds);
+    this.simulation.setSeekScale(this.spawnPressure.seekScale);
+    this.simulation.setSpawnDistanceFraction(this.spawnPressure.spawnDistanceFraction);
+    this.stepSimulation(deltaSeconds, spawnPerSpecies);
     const frames = this.simulation.readAllStats();
     frames.forEach((stats) => this.processStats(stats));
     if (frames.length > 0) {

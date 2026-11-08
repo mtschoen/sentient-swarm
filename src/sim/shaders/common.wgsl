@@ -53,7 +53,7 @@ struct Agent {
 //  24 gridRows           u32
 //  28 cellSize           f32
 //  32 capacity           u32
-//  36 aliveTarget        u32 (reserved: written by no caller and read by no shader)
+//  36 spawnDistanceFraction f32 (minimum spawn distance from the player, of ARENA_WIDTH)
 //  40 debugKillPosition  vec2f
 //  48 spawnPerSpecies0   vec4u (species 0 to 3)
 //  64 spawnPerSpecies1   vec4u (species 4 in .x, rest 0)
@@ -64,7 +64,7 @@ struct Agent {
 //  96 playerInvulnerable u32 (1: contact never hits)
 // 100 acknowledgedHitSequence u32 (newest hit frameSequence the CPU has read)
 // 104 killAllRequested   u32 (1 only in the step that runs kill_all.wgsl)
-// 108 padding1           u32
+// 108 seekScale          f32 (multiplier on every species' seek weight, from SpawnPressure)
 struct SimParams {
   dt: f32,
   time: f32,
@@ -74,7 +74,7 @@ struct SimParams {
   gridRows: u32,
   cellSize: f32,
   capacity: u32,
-  aliveTarget: u32,
+  spawnDistanceFraction: f32,
   debugKillPosition: vec2f,
   spawnPerSpecies0: vec4u,
   spawnPerSpecies1: vec4u,
@@ -85,7 +85,7 @@ struct SimParams {
   playerInvulnerable: u32,
   acknowledgedHitSequence: u32,
   killAllRequested: u32,
-  padding1: u32,
+  seekScale: f32,
 }
 
 // Bit 0 alive, bits 8..15 spawn-in frames remaining.

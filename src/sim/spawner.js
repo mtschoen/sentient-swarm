@@ -1,6 +1,18 @@
-// CPU spawn pressure: decides how many agents of each species the GPU spawner adds this frame.
-// The alive target ramps from floorFraction to ceilingFraction of capacity over rampSeconds; each
-// frame spawns the deficit between the target and the estimated alive count, capped at
+// CPU spawn pressure: decides how many agents of each species the GPU spawner adds this frame, how
+// strongly they seek the player and how far from the player they land.
+// The ramp: rampProgress = (elapsed / rampSeconds) ^ curveExponent, clamped to [0, 1]. The alive
+// target is lerp(floorFraction, ceilingFraction, rampProgress) of capacity and the seek scale (a
+// multiplier on every species' seek weight, SimParams.seekScale) is lerp(seekFloorFraction, 1,
+// rampProgress); the minimum spawn distance from the player (SimParams.spawnDistanceFraction, of the
+// arena width) is lerp(spawnDistanceStartFraction, 0.25, rampProgress), never under the spec's
+// quarter. The defaults ease in (exponent 2) from 1 percent to 90 percent over 120 seconds, with
+// seek at 10 percent and spawns 0.4 of the arena width away at the start. Count alone does not set
+// the time to the first death: at full seek a stationary ship died about 1.5 to 2 seconds in at
+// any count down to 135 agents (the first Chasers arrive about a second after their spawn-in), and
+// far spawns alone did not help either; weak early seek plus far early spawns did (task C0 report).
+// Counts are fractions of capacity and distances fractions of the arena, so the ramp feels the
+// same at every capacity.
+// Each frame spawns the deficit between the target and the estimated alive count, capped at
 // capacity / 60, split across species by shares with largest-remainder rounding so the per-species
 // counts add up to exactly the frame's total. Each species carries its rounding error to the next
 // frame, so small frames rotate the leftover units and long-run totals follow the shares.
@@ -14,6 +26,45 @@ import { SPECIES_COUNT } from './layout.js';
 
 // A frame spawns at most capacity / SPAWN_CAP_DIVISOR agents: a full arena refills in a second at 60 fps.
 const SPAWN_CAP_DIVISOR = 60;
+
+// The tuned ramp (Plan C task C0); setRamp and the constructor take any subset of these names.
+export const DEFAULT_RAMP = Object.freeze({
+  floorFraction: 0.01,
+  rampSeconds: 120,
+  ceilingFraction: 0.9,
+  curveExponent: 2,
+  seekFloorFraction: 0.1,
+  spawnDistanceStartFraction: 0.4,
+});
+
+// The spec's minimum spawn distance from the player, as a fraction of the arena width: the end of
+// the spawn distance ramp. The start may lie up to MAXIMUM_SPAWN_DISTANCE_FRACTION, where the
+// arena's far corners still leave room to place spawns around a centered player.
+export const SPEC_SPAWN_DISTANCE_FRACTION = 0.25;
+const MAXIMUM_SPAWN_DISTANCE_FRACTION = 0.5;
+
+// Fractions lie in [0, 1]; rampSeconds and curveExponent are positive and finite.
+const UNIT_FIELDS = ['floorFraction', 'ceilingFraction', 'seekFloorFraction'];
+const POSITIVE_FIELDS = ['rampSeconds', 'curveExponent'];
+
+function validatedRamp(ramp) {
+  for (const name of UNIT_FIELDS) {
+    if (!(ramp[name] >= 0 && ramp[name] <= 1)) throw new RangeError(`SpawnPressure ${name} must lie in [0, 1], got ${ramp[name]}`);
+  }
+  for (const name of POSITIVE_FIELDS) {
+    if (!(ramp[name] > 0 && Number.isFinite(ramp[name]))) throw new RangeError(`SpawnPressure ${name} must be positive and finite, got ${ramp[name]}`);
+  }
+  const start = ramp.spawnDistanceStartFraction;
+  if (!(start >= SPEC_SPAWN_DISTANCE_FRACTION && start <= MAXIMUM_SPAWN_DISTANCE_FRACTION)) {
+    throw new RangeError(`SpawnPressure spawnDistanceStartFraction must lie in [${SPEC_SPAWN_DISTANCE_FRACTION}, ${MAXIMUM_SPAWN_DISTANCE_FRACTION}], got ${start}`);
+  }
+  return ramp;
+}
+
+// Only the known ramp names, and only those given (undefined leaves the current value).
+function pickRamp(ramp) {
+  return Object.fromEntries(Object.keys(DEFAULT_RAMP).filter((name) => ramp[name] !== undefined).map((name) => [name, ramp[name]]));
+}
 
 function lerp(start, end, amount) {
   return start * (1 - amount) + end * amount;
@@ -49,11 +100,9 @@ export function splitByShares(total, shares, carry = new Float64Array(SPECIES_CO
 }
 
 export class SpawnPressure {
-  constructor({ capacity, rampSeconds = 90, floorFraction = 0.05, ceilingFraction = 0.9 }) {
+  constructor({ capacity, ...ramp }) {
     this.capacity = capacity;
-    this.rampSeconds = rampSeconds;
-    this.floorFraction = floorFraction;
-    this.ceilingFraction = ceilingFraction;
+    this.ramp = validatedRamp({ ...DEFAULT_RAMP, ...pickRamp(ramp) });
     this.maximumPerFrame = Math.floor(capacity / SPAWN_CAP_DIVISOR);
     this.elapsed = 0;
     this.carry = new Float64Array(SPECIES_COUNT);
@@ -62,8 +111,30 @@ export class SpawnPressure {
     this.newestStats = null;
   }
 
+  // For the lab sliders: replaces the given ramp parameters (any subset of DEFAULT_RAMP's names)
+  // and keeps the ramp position, so the target moves to the new curve at the same elapsed time.
+  // Throws RangeError and changes nothing when a value is out of range.
+  setRamp(ramp) {
+    this.ramp = validatedRamp({ ...this.ramp, ...pickRamp(ramp) });
+  }
+
+  // 0 at the start of a run or a life, 1 from rampSeconds on.
+  get rampProgress() {
+    return clampUnit(this.elapsed / this.ramp.rampSeconds) ** this.ramp.curveExponent;
+  }
+
   get targetAlive() {
-    return this.capacity * lerp(this.floorFraction, this.ceilingFraction, clampUnit(this.elapsed / this.rampSeconds));
+    return this.capacity * lerp(this.ramp.floorFraction, this.ramp.ceilingFraction, this.rampProgress);
+  }
+
+  // Multiplier on every species' seek weight for this step.
+  get seekScale() {
+    return lerp(this.ramp.seekFloorFraction, 1, this.rampProgress);
+  }
+
+  // Minimum spawn distance from the player for this step, as a fraction of the arena width.
+  get spawnDistanceFraction() {
+    return lerp(this.ramp.spawnDistanceStartFraction, SPEC_SPAWN_DISTANCE_FRACTION, this.rampProgress);
   }
 
   // For a capacity change: keeps the ramp position and the rounding carry, so the target scales

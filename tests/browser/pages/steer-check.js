@@ -151,7 +151,6 @@ class Harness {
       gridRows: this.dimensions.rows,
       cellSize: this.dimensions.cellSize,
       capacity: this.capacity,
-      aliveTarget: this.capacity,
     }));
   }
 

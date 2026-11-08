@@ -32,7 +32,9 @@ export const DEFAULT_RENDER_SETTINGS = {
   // Quad half-size over ship half-length. The Predator plume reaches local x -1.84 (nozzle -0.94
   // plus PLUME_LENGTH 0.9 in glyphs.wgsl), so glowScale must stay at least 2 or the plume clips.
   glowScale: 2,
-  trailDecay: 0.90,
+  // Fraction of the trail kept per 1/60 second. 0.6 (Plan C task C0, owner ruling R2): at 0.9 a
+  // full arena smeared into one blur; at 0.6 single ships stay readable with a short streak.
+  trailDecay: 0.6,
   bloomStrength: 0.8,
   warpDensityWeight: 0.15,
   warpThreatWeight: 0.6,

@@ -120,6 +120,10 @@ export class Simulation {
     this.timeValue = 0;
     this.lastKillsTotal = 0;
     this.sameSpeciesCohesion = true;
+    // Multiplier on every species' seek weight; the game sets it from SpawnPressure every step.
+    this.seekScale = 1;
+    // Minimum spawn distance from the player, a fraction of the arena width (also from SpawnPressure).
+    this.spawnDistanceFraction = 0.25;
     this.registeredPasses = [];
     this.setSpecies(species, matrix);
     this.setShares(shares);
@@ -193,6 +197,16 @@ export class Simulation {
     this.sharesValue = normalizeShares(shares);
   }
 
+  // scale multiplies every species' seek weight from the next step on (1 is full seek).
+  setSeekScale(scale) {
+    this.seekScale = scale;
+  }
+
+  // Spawns from the next step on land at least fraction * ARENA_WIDTH from the player.
+  setSpawnDistanceFraction(fraction) {
+    this.spawnDistanceFraction = fraction;
+  }
+
   // spawnPerSpecies: SPECIES_COUNT counts for this frame, usually from SpawnPressure.update.
   step(encoder, deltaSeconds, spawnPerSpecies = new Uint32Array(SPECIES_COUNT)) {
     this.frameSequenceValue += 1;
@@ -211,6 +225,8 @@ export class Simulation {
       spawnPerSpecies: Array.from(spawnPerSpecies),
       frameSequence: this.frameSequenceValue,
       sameSpeciesCohesion: this.sameSpeciesCohesion ? 1 : 0,
+      seekScale: this.seekScale,
+      spawnDistanceFraction: this.spawnDistanceFraction,
       playerRadius: this.playerContact?.radius ?? 0,
       playerInvulnerable: this.playerContact?.invulnerable ? 1 : 0,
       acknowledgedHitSequence: this.acknowledgedHitSequence,
@@ -327,6 +343,8 @@ export class Simulation {
     next.setSpecies(this.species, this.matrix);
     next.setShares(this.sharesValue);
     next.setSameSpeciesCohesion(this.sameSpeciesCohesion);
+    next.setSeekScale(this.seekScale);
+    next.setSpawnDistanceFraction(this.spawnDistanceFraction);
     next.registeredPasses = this.registeredPasses;
     next.frameSequenceValue = this.frameSequenceValue;
     next.timeValue = this.timeValue;

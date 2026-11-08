@@ -7,7 +7,8 @@
 // positive value that already counted every earlier claim), so no unit is spent twice, and the
 // counter only dips below 0 between a failed subtraction and its give-back. A compare-exchange
 // retry loop was measured to give up under contention and leave much of the budget unspent.
-// The claimed agent gets a random position at least ARENA_WIDTH / 4 from the player (up to
+// The claimed agent gets a random position at least ARENA_WIDTH * params.spawnDistanceFraction
+// from the player (SpawnPressure ramps it from 0.4 down to the spec's quarter; up to
 // POSITION_ATTEMPTS draws; if every draw is too close the slot stays dead and the unit goes back
 // with atomicAdd), zero velocity, SPAWN_IN_FRAMES spawn-in frames, the alive bit, the species, a
 // random phase in [0, tau) and a random hueJitter in [-1, 1].
@@ -57,7 +58,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   }
 
   var randomState = pcgHash(slot ^ pcgHash(params.frameSequence));
-  let minimumDistance = ARENA_WIDTH / 4.0;
+  let minimumDistance = ARENA_WIDTH * params.spawnDistanceFraction;
   var position = vec2f(0.0, 0.0);
   var placed = false;
   for (var attempt = 0u; attempt < POSITION_ATTEMPTS; attempt = attempt + 1u) {

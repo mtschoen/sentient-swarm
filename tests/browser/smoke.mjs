@@ -10,7 +10,8 @@
 // loads, read by the real input path): the left stick moves the ship 2 units left of center and
 // starts the run, then the right stick fires toward the arena center for N frames; the score
 // must be positive, the box around the ship (captured 60 frames into the fire, while the ship is
-// alive) brighter than the arena mean, and no console errors.
+// alive) brighter than the arena mean, the first death after fire frame 300 or never, a run of at
+// least 1800 frames must still kill and score after fire frame 900, and no console errors.
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 // Liveness: every page.evaluate is bounded by EVALUATE_TIMEOUT_MILLISECONDS (a capture resolves only
 // on a later rendered frame, so a renderer that throws or stops would leave it pending forever),
@@ -31,10 +32,10 @@ const MINIMUM_ALIVE_TOTAL = 1000;
 const MINIMUM_LUMINANCE = 0.02;
 const MAXIMUM_LUMINANCE = 0.6;
 const RESIZE_WINDOW_FRAMES = 60;
-// A resize recreates (clears) the trail textures; 60 frames at decay 0.9 bring them back to their
-// steady state (0.9^60 is 0.2 percent), so the luminance capture after the resize check is not
-// read from half-built trails.
-const TRAIL_SETTLE_FRAMES = 60;
+// A resize recreates (clears) the trail textures; 20 frames at the default decay 0.6 bring them back
+// to their steady state (0.6^20 is under 0.01 percent), so the luminance capture after the resize
+// check is not read from half-built trails.
+const TRAIL_SETTLE_FRAMES = 20;
 const RESIZE_TOLERANCE = 0.05;
 const PORTRAIT_VIEWPORT = { width: 800, height: 1200 };
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
@@ -43,8 +44,10 @@ const MAXIMUM_BAND_LUMINANCE = 0.01;
 // (CAPTURE_SETTLE_FRAMES in capture-hook.js), so the capture sees a young flood.
 const START_CLICK_SETTLE_FRAMES = 24;
 const START_CLICK_HOLD_FRAMES = 3;
-// Measured rise is about 0.023 (0.0175 -> 0.041) over three runs.
-const FLOOD_MARGIN = 0.01;
+// Measured rise is 0.0023 to 0.0030 (0.0431 -> 0.0454 to 0.0461) over four runs, with the calm mean
+// steady within 0.0001: the Ready arena now holds only the ramp floor (about 2,700 agents at the
+// default capacity, Plan C task C0), so the clear kills far fewer than the 13,000 of the old floor.
+const FLOOD_MARGIN = 0.001;
 const FLOOD_SETTINGS = { trailDecay: 0, shipArenaFraction: 0 };
 // --play: the ship moves left at full stick for this many frames (6 units per second, about 2 units
 // at 60 frames per second), then fires to the right, toward the arena center.
@@ -54,6 +57,12 @@ const PLAY_TIMEOUT_MILLISECONDS = 60_000;
 const SHIP_BOX_DEVICE_PIXELS = 40;
 // --play: fire frames before the ship capture.
 const PLAY_SHIP_CAPTURE_FRAMES = 60;
+// --play acceptance (owner ruling R1, Plan C task C0): the stationary firing ship's first death
+// comes after this many fire frames or never, and a run of at least PLAY_LATE_RUN_FRAMES frames
+// still kills and scores after PLAY_LATE_CHECK_FRAMES (the ramp must not empty the game).
+const PLAY_MINIMUM_FIRST_DEATH_FRAMES = 300;
+const PLAY_LATE_RUN_FRAMES = 1800;
+const PLAY_LATE_CHECK_FRAMES = 900;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
 async function writeDataUrl(name, dataUrl) {
@@ -97,9 +106,9 @@ function waitForFrame(page, target) {
 
 // Resizes to a portrait viewport and back, checking the agent count survives, the arena letterboxes
 // and the bands stay black. Returns a failure message, or null. The spawner ramps the alive target
-// for 90 seconds (about 4 percent of the count per 60 frames at this point), so a flat 5 percent
-// comparison would fail on the ramp alone. Instead the growth over the 60 frames after the resize
-// must match the growth over the 60 frames before it, within 5 percent of the count.
+// (easing in over 120 seconds, so the count still grows a little per 60 frames at this point), so
+// the check does not compare counts directly. Instead the growth over the 60 frames after the
+// resize must match the growth over the 60 frames before it, within 5 percent of the count.
 async function checkResize(page) {
   const readFrame = () => evaluateWithin(page, 'reading the frame count', () => window.__murmuration.frame);
   const readAlive = async () => (await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats)).aliveTotal;
@@ -190,8 +199,7 @@ async function checkPlay(page, frames) {
   await waitForFrame(page, begin + PLAY_MOVE_FRAMES);
   await setSticks(page, [0, 0, 1, 0]);
   const firing = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
-  // Survival-difficulty input for tuning (printed, not asserted): the first frame that leaves
-  // Playing (a death) while the ship sits still and fires.
+  // The first frame that leaves Playing (a death) while the ship sits still and fires.
   await evaluateWithin(page, 'watching for the first death', () => {
     window.__smokeFirstDeathFrame = null;
     const watch = () => {
@@ -221,6 +229,11 @@ async function checkPlay(page, frames) {
   await writeDataUrl('smoke-play.png', capture.pngDataUrl);
   const shipLuminance = capture.regionLuminances[0];
   console.log(`smoke: play ship box luminance ${shipLuminance.toFixed(4)}, arena mean ${capture.meanLuminance.toFixed(4)}, phase ${early.phase}`);
+  let late = null;
+  if (frames >= PLAY_LATE_RUN_FRAMES) {
+    await page.waitForFunction((target) => window.__murmuration.frame >= target, firing + PLAY_LATE_CHECK_FRAMES, { timeout: PLAY_TIMEOUT_MILLISECONDS });
+    late = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  }
   await page.waitForFunction((target) => window.__murmuration.frame >= target, firing + frames, { timeout: PLAY_TIMEOUT_MILLISECONDS });
   const stats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
   const firstDeathFrame = await evaluateWithin(page, 'reading the first death', () => window.__smokeFirstDeathFrame);
@@ -229,9 +242,16 @@ async function checkPlay(page, frames) {
     ? `smoke: play first death: none in ${frames} frames of fire`
     : `smoke: play first death at fire frame ${firstDeathFrame - firing} (${((firstDeathFrame - firing) / 60).toFixed(1)} s at 60 Hz)`);
   console.log(`smoke: play ${frames} frames: score ${stats.score}, multiplier ${stats.multiplier}, lives ${stats.lives}, bombs ${stats.bombs}, armed ${stats.armed} ${stats.tier}, phase ${stats.phase}, aliveTotal ${stats.aliveTotal}`);
+  if (late) console.log(`smoke: play fire frame ${PLAY_LATE_CHECK_FRAMES}: score ${late.score}, kills ${late.killsTotal}; at the end: score ${stats.score}, kills ${stats.killsTotal}`);
   if (page.consoleErrors.length > 0) return `smoke: console errors during play: ${page.consoleErrors.join(' | ')}`;
   if (!(stats.score > 0)) return `smoke: expected a positive score after ${frames} frames of fire, got ${stats.score}`;
   if (early.phase !== 'playing') return `smoke: expected the run to be playing at the ship capture, got ${early.phase}`;
+  if (firstDeathFrame !== null && firstDeathFrame - firing <= PLAY_MINIMUM_FIRST_DEATH_FRAMES) {
+    return `smoke: expected the first death after fire frame ${PLAY_MINIMUM_FIRST_DEATH_FRAMES} or never, got fire frame ${firstDeathFrame - firing}`;
+  }
+  if (late && !(stats.score > late.score && stats.killsTotal > late.killsTotal)) {
+    return `smoke: expected kills and score growth after fire frame ${PLAY_LATE_CHECK_FRAMES}: score ${late.score} -> ${stats.score}, kills ${late.killsTotal} -> ${stats.killsTotal}`;
+  }
   if (!(shipLuminance > capture.meanLuminance)) {
     return `smoke: expected the ${SHIP_BOX_DEVICE_PIXELS}px box around the ship (${shipLuminance.toFixed(4)}) to be brighter than the arena mean (${capture.meanLuminance.toFixed(4)})`;
   }
