@@ -1,9 +1,17 @@
-// Owns the AudioContext and the output bus: music and effects gains feed a master gain and a
-// compressor, so the mix can be loud without clipping. The context is created on unlock() only,
-// which the page calls from a user gesture (browsers keep audio suspended until one happens).
+// Owns the AudioContext and the output bus: music and effects gains feed a master gain, a glue
+// compressor, a limiter and an output trim, so the mix is loud and dense on small speakers without
+// clipping (levels measured offline by tests/browser/audio-render.mjs: the Web Audio compressor
+// adds its own makeup gain, so the trim keeps about 1 dB of headroom under full scale). The
+// context is created on unlock() only, which the page calls inside a user gesture's handler.
 // A failed construction (no Web Audio, blocked device) warns once and leaves the engine silent;
 // it never throws into the page.
-const MASTER_LEVEL = 0.9;
+const MASTER_LEVEL = 1.7;
+const GLUE_COMPRESSOR = Object.freeze({ threshold: -16, knee: 8, ratio: 3, attack: 0.006, release: 0.2 });
+const LIMITER = Object.freeze({ threshold: -8, knee: 0, ratio: 20, attack: 0.001, release: 0.08 });
+const OUTPUT_TRIM = 0.85;
+// The settings defaults (music 80, effects 80 percent).
+export const DEFAULT_MUSIC_VOLUME = 0.8;
+export const DEFAULT_EFFECTS_VOLUME = 0.8;
 const VOLUME_SMOOTHING_SECONDS = 0.03;
 
 export class AudioEngine {
@@ -11,8 +19,8 @@ export class AudioEngine {
     this.contextFactory = contextFactory;
     this.audioContext = null;
     this.failed = false;
-    this.musicVolume = 1;
-    this.effectsVolume = 1;
+    this.musicVolume = DEFAULT_MUSIC_VOLUME;
+    this.effectsVolume = DEFAULT_EFFECTS_VOLUME;
     this.musicOutput = null;
     this.effectsOutput = null;
     this.muteOutput = null;
@@ -36,13 +44,13 @@ export class AudioEngine {
     if (this.failed) return null;
     try {
       const context = this.contextFactory();
-      const compressor = context.createDynamicsCompressor();
-      compressor.threshold.setValueAtTime(-12, 0);
-      compressor.knee.setValueAtTime(6, 0);
-      compressor.ratio.setValueAtTime(4, 0);
-      compressor.attack.setValueAtTime(0.003, 0);
-      compressor.release.setValueAtTime(0.15, 0);
-      compressor.connect(context.destination);
+      const trim = context.createGain();
+      trim.gain.setValueAtTime(OUTPUT_TRIM, 0);
+      trim.connect(context.destination);
+      const limiter = createCompressor(context, LIMITER);
+      limiter.connect(trim);
+      const compressor = createCompressor(context, GLUE_COMPRESSOR);
+      compressor.connect(limiter);
       // The mute gain sits after the master so M silences music and effects together.
       this.muteOutput = context.createGain();
       this.muteOutput.gain.setValueAtTime(this.muted ? 0 : 1, 0);
@@ -92,6 +100,12 @@ export class AudioEngine {
   suspend() {
     return Promise.resolve(this.audioContext?.suspend?.()).catch(() => {});
   }
+}
+
+function createCompressor(context, settings) {
+  const compressor = context.createDynamicsCompressor();
+  for (const [name, value] of Object.entries(settings)) compressor[name].setValueAtTime(value, 0);
+  return compressor;
 }
 
 function clampUnit(value) {

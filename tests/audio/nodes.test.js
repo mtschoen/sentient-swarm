@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AudioEngine } from '../../src/audio/audio.js';
 import { ProceduralMusic } from '../../src/audio/music.js';
-import { EffectsSynth } from '../../src/audio/sfx.js';
+import { EffectsSynth, WEAPON_VOICE_KINDS } from '../../src/audio/sfx.js';
 import { FakeAudioContext } from './fake-audio-context.js';
 
 function everySound() {
@@ -15,16 +15,20 @@ function everySound() {
   const music = new ProceduralMusic(engine);
   music.setIntensity(1);
   music.start();
-  for (let time = 0; time < 8; time += 0.025) {
+  // 48 bars at 134 bpm reach every section (intro, groove, build, drop, breakdown) and every fill.
+  for (let time = 0; time < 86; time += 0.05) {
     context.currentTime = time;
     music.update(time);
+    if (Math.round(time / 0.05) % 20 === 0) music.hit(4);
   }
   music.cue('pickup');
   music.cue('bomb');
   const effects = new EffectsSynth(engine);
-  for (const kind of ['blaster', 'spread', 'laser', 'missile']) {
-    context.currentTime += 1;
-    effects.weaponFire(kind, 3);
+  for (const kind of WEAPON_VOICE_KINDS) {
+    for (const tier of [1, 2, 3]) {
+      context.currentTime += 1;
+      effects.weaponFire(kind, tier);
+    }
   }
   effects.kills(12);
   for (const method of ['pickup', 'bomb', 'death', 'expiry']) effects[method]();

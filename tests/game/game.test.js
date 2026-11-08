@@ -560,6 +560,40 @@ test('an accepted bomb press and an accepted hit play the bomb and death effects
   assert.deepEqual(played, ['bomb', 'death']);
 });
 
+test('a pickup, every shot (with the kind and tier it fired at) and the charge expiry play their cues', async () => {
+  const gpu = createFakeGpu();
+  const simulation = createFakeSimulation();
+  const input = createFakeInput();
+  const played = [];
+  const effects = {
+    pickup: () => played.push('pickup'),
+    expiry: () => played.push('expiry'),
+    weaponFire: (kind, tier) => played.push(`fire ${kind} ${tier}`),
+  };
+  const game = await Game.create({
+    gpu, simulation, projectiles: createFakeProjectiles(), renderer: createFakeRenderer(), input, capacity: CAPACITY, random: () => 0.5, effects,
+  });
+  game.start();
+  const { x, y } = game.player.position;
+  game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 });
+  game.update(STEP);
+  assert.deepEqual(played, ['pickup']);
+  input.state.aim = { x: 1, y: 0 };
+  input.state.firing = true;
+  for (let frame = 0; frame < 1000 && game.state.armed !== 'base'; frame += 1) game.update(STEP);
+  const expiryIndex = played.indexOf('expiry');
+  assert.ok(expiryIndex > 1, 'the charge expired');
+  const shots = played.slice(1, expiryIndex);
+  assert.ok(shots.length >= 30, `scatter shots ${shots.length}`);
+  assert.ok(shots.every((entry) => entry === 'fire scatter 1'));
+  runFor(game, 0.5);
+  assert.ok(played.slice(expiryIndex + 1).every((entry) => entry === 'fire base 1'));
+  played.length = 0;
+  game.debugArm('beam', 3);
+  game.update(STEP);
+  assert.deepEqual(played, ['fire beam 3'], 'the beam fires every frame it is on');
+});
+
 test('freshStats is the newest frame read this update with the kills of every frame summed', async () => {
   const { game, simulation } = await createGame();
   game.start();

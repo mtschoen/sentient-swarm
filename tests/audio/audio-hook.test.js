@@ -24,40 +24,77 @@ function fakePage() {
   documentObject.hidden = false;
   documentObject.body = { appendChild: (element) => { documentObject.hint = element; } };
   documentObject.createElement = () => ({ textContent: '', setAttribute() {}, remove() {} });
-  return { windowObject, documentObject };
+  const canvas = new FakeEventTarget();
+  return { windowObject, documentObject, canvas };
 }
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
-const GESTURES = ['pointerup', 'touchend', 'click'];
+// The canvas gestures that start a run (pointer.js, touch.js), plus touchend: iOS Safari only
+// counts a touchend as user activation, so a touch start that leaves the context suspended is
+// resumed when the finger lifts.
+const CANVAS_GESTURES = ['pointerdown', 'touchstart', 'touchend'];
 
-test('a context left suspended by the first gesture is resumed by the next one', async () => {
-  const { windowObject, documentObject } = fakePage();
+function install(contextFactory) {
+  const page = fakePage();
+  const audio = installAudio({ ...page, gestureTarget: page.canvas, contextFactory });
+  return { ...page, audio };
+}
+
+test('only the run-start gestures on the canvas and keydown unlock; there are no window-wide pointer listeners', () => {
+  const { windowObject, canvas, audio } = install(() => new FakeAudioContext());
+  for (const name of CANVAS_GESTURES) assert.equal(canvas.count(name), 1, `canvas ${name}`);
+  for (const name of ['pointerup', 'pointerdown', 'touchend', 'touchstart', 'click']) assert.equal(windowObject.count(name), 0, `window ${name}`);
+  assert.equal(audio.engine.context, null);
+  canvas.dispatch('pointermove');
+  assert.equal(audio.engine.context, null, 'a hover is not a gesture');
+});
+
+for (const gesture of ['pointerdown', 'touchstart']) {
+  test(`the ${gesture} that starts the run unlocks audio synchronously and starts the music`, () => {
+    const { canvas, audio } = install(() => new FakeAudioContext());
+    canvas.dispatch(gesture);
+    assert.notEqual(audio.engine.context, null, 'the context exists before the handler returns');
+    assert.equal(audio.music.started, true);
+  });
+}
+
+test('a start key unlocks audio inside the keydown handler', () => {
+  const { windowObject, audio } = install(() => new FakeAudioContext());
+  windowObject.dispatch('keydown', { code: 'KeyW', repeat: false, target: null });
+  assert.notEqual(audio.engine.context, null);
+  assert.equal(audio.music.started, true);
+});
+
+test('audio.unlock() is the explicit path a start button calls', () => {
+  const { audio } = install(() => new FakeAudioContext());
+  assert.notEqual(audio.unlock(), null);
+  assert.equal(audio.music.started, true);
+  const nodeCount = audio.engine.context.nodes.length;
+  audio.unlock();
+  assert.equal(audio.engine.context.nodes.length, nodeCount, 'one graph however often it is called');
+});
+
+test('a context left suspended by the touchstart is resumed by the touchend, then the listeners go', async () => {
   const context = FakeAudioContext.suspendedUntilResumedTimes(2);
-  const audio = installAudio({ windowObject, documentObject, contextFactory: () => context });
-  for (const name of GESTURES) assert.equal(windowObject.count(name), 1);
-  assert.equal(windowObject.count('pointerdown'), 0);
-
-  windowObject.dispatch('touchend');
+  const { canvas, windowObject, documentObject, audio } = install(() => context);
+  canvas.dispatch('touchstart');
   await flush();
   assert.equal(context.state, 'suspended');
-  assert.equal(audio.engine.context, context);
-  assert.equal(audio.music.started, true);
   assert.equal(audio.listening, true);
-  for (const name of GESTURES) assert.equal(windowObject.count(name), 1, `${name} still listening`);
+  for (const name of CANVAS_GESTURES) assert.equal(canvas.count(name), 1, `${name} still listening`);
 
-  windowObject.dispatch('click');
+  canvas.dispatch('touchend');
   await flush();
   assert.equal(context.state, 'running');
   assert.equal(audio.listening, false);
-  for (const name of GESTURES) assert.equal(windowObject.count(name), 0, `${name} removed`);
+  for (const name of CANVAS_GESTURES) assert.equal(canvas.count(name), 0, `${name} removed`);
   assert.equal(windowObject.count('keydown'), 1, 'keydown stays for the mute key');
   assert.equal(documentObject.hint.textContent, 'M to mute');
 });
 
 test('M mutes and resumes music and effects together', async () => {
-  const { windowObject, documentObject } = fakePage();
-  const audio = installAudio({ windowObject, documentObject, contextFactory: () => new FakeAudioContext() });
-  windowObject.dispatch('pointerup');
+  const { windowObject, canvas, documentObject, audio } = install(() => new FakeAudioContext());
+  canvas.dispatch('pointerdown');
   await flush();
   windowObject.dispatch('keydown', { code: 'KeyM', repeat: false, target: null });
   assert.equal(audio.muted, true);
@@ -73,21 +110,20 @@ test('M mutes and resumes music and effects together', async () => {
 });
 
 test('dispose removes every listener and stops the scheduling timer', async () => {
-  const { windowObject, documentObject } = fakePage();
-  const audio = installAudio({ windowObject, documentObject, contextFactory: () => FakeAudioContext.suspendedUntilResumedTimes(99) });
-  windowObject.dispatch('pointerup');
+  const { windowObject, canvas, documentObject, audio } = install(() => FakeAudioContext.suspendedUntilResumedTimes(99));
+  canvas.dispatch('pointerdown');
   await flush();
   assert.equal(windowObject.intervals.size, 1);
   audio.dispose();
-  for (const name of [...GESTURES, 'keydown']) assert.equal(windowObject.count(name), 0, `${name} removed`);
+  for (const name of CANVAS_GESTURES) assert.equal(canvas.count(name), 0, `${name} removed`);
+  for (const name of ['keydown', 'focus']) assert.equal(windowObject.count(name), 0, `${name} removed`);
   assert.equal(documentObject.count('visibilitychange'), 0);
   assert.equal(windowObject.intervals.size, 0);
 });
 
-test('hiding the page suspends audio and showing it resumes', async () => {
-  const { windowObject, documentObject } = fakePage();
-  const audio = installAudio({ windowObject, documentObject, contextFactory: () => new FakeAudioContext() });
-  windowObject.dispatch('click');
+test('hiding the page suspends audio, and showing it or focusing the window resumes', async () => {
+  const { windowObject, canvas, documentObject, audio } = install(() => new FakeAudioContext());
+  canvas.dispatch('pointerdown');
   await flush();
   documentObject.hidden = true;
   documentObject.dispatch('visibilitychange');
@@ -95,4 +131,44 @@ test('hiding the page suspends audio and showing it resumes', async () => {
   documentObject.hidden = false;
   documentObject.dispatch('visibilitychange');
   assert.equal(audio.engine.context.state, 'running');
+  audio.engine.context.state = 'suspended';
+  windowObject.dispatch('focus');
+  assert.equal(audio.engine.context.state, 'running');
+});
+
+test('the game cues play both the effect and the music cue, and a death feeds the intensity', () => {
+  const notes = [];
+  const { canvas, audio } = install(() => new FakeAudioContext());
+  canvas.dispatch('pointerdown');
+  audio.music.onNote = (note) => notes.push(note.voice);
+  const started = () => audio.engine.context.started.length;
+  for (const [cue, voice] of [['pickup', 'riser'], ['bomb', 'crash']]) {
+    const before = started();
+    audio.cues[cue]();
+    assert.ok(started() > before, `${cue} plays an effect`);
+    assert.ok(notes.includes(voice), `${cue} cues the music ${voice}`);
+  }
+  audio.cues.expiry();
+  assert.ok(audio.music.dropUntilStep > 0, 'expiry drops the music');
+  audio.intensity.survivalSeconds = 20;
+  audio.cues.death();
+  assert.ok(audio.music.muteUntilStep > 0, 'death drops the music out');
+  assert.equal(audio.intensity.survivalSeconds, 10);
+  assert.equal(audio.cues.weaponFire('scatter', 2), true);
+});
+
+test('update drives the intensity from multiplier, kills and survival, and kills while playing hit the melody', () => {
+  const { canvas, audio } = install(() => new FakeAudioContext());
+  canvas.dispatch('pointerdown');
+  const hits = [];
+  audio.music.hit = (count) => hits.push(count);
+  const frame = (phase, kills, multiplier = 1) => audio.update({ fixedStep: 1 / 60, freshStats: { killsSinceLastRead: kills }, capacity: 262144, phase, multiplier });
+  frame('ready', 5);
+  assert.deepEqual(hits, [], 'no melodic hits outside play');
+  for (let index = 0; index < 600; index += 1) frame('playing', index % 20 === 0 ? 4 : 0, 2);
+  assert.ok(audio.music.intensity > 0.3, `intensity ${audio.music.intensity}`);
+  assert.equal(hits.length, 30);
+  frame('gameOver', 0);
+  frame('playing', 0);
+  assert.ok(audio.intensity.survivalSeconds < 0.1, 'a new run starts the build over');
 });

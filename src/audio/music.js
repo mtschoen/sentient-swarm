@@ -1,42 +1,49 @@
-// Procedural four-on-the-floor techno. A 16-step sequencer drives: kick on every beat, closed hat on
-// the offbeats with an open hat every fourth, a clap on two and four, a resonant saw plus sine sub
-// bass on a four-bar minor progression (Am F C G), a detuned saw lead arpeggio above intensity 0.4,
-// and a dotted-eighth delay on the lead. Bass and lead duck under each kick (sidechain pump).
-// Intensity (0..1) maps to tempo 124 + 10 * intensity, the bass and lead lowpass cutoffs, and the
-// layer levels. Cues: pickup is a one-bar riser, expiry drops lead and hats for two bars, death is a
-// two-beat dropout, bomb is a crash.
-// An optional onNote({ voice, step, time, rootNote }) listener sees every scheduled note, for
-// beat-synced visuals later and for structural tests.
+// Procedural four-on-the-floor techno arranged as a song (sections, phrases, fills and the melody
+// come from arrangement.js; the synth voices from voices.js). A 16-step sequencer drives, per the
+// current section: kick on every beat, closed hats on the offbeats (open hat on the last one and a
+// shaker when hot), a clap on two and four, a resonant saw plus sine sub bass, a melody that plays
+// from the first bar (a plucked detuned saw following the chords), a saw arpeggio above intensity
+// 0.4, a held pad in the breakdown, and a dotted-eighth delay on the lead and melody. Bass, lead,
+// melody and pad duck under each kick (sidechain pump). Fills end every 8-bar phrase; the build's
+// last bar drops the kick under a riser and a snare roll; the drop opens on a crash.
+// Intensity (0..1) maps to tempo 124 + 10 * intensity, the filter cutoffs, the layer levels and
+// which section follows a breakdown. Cues: pickup is a one-bar riser, expiry drops the melody,
+// lead and hats for two bars, death is a two-beat dropout, bomb is a crash. hit(count) plays a
+// melodic stab (a chord tone) on the next eighth, at most one per eighth: kills are heard as notes.
+// An optional onNote({ voice, step, time, ... }) listener sees every scheduled note and each
+// section start (voice 'section'), for beat-synced visuals later and for structural tests.
 import { StepSequencer } from './sequencer.js';
+import { Arrangement, fillDropsKick, fillForBar, fillHits, melodyForBar, STEPS_PER_BAR } from './arrangement.js';
 import { playBass, playClap, playCrash, playHat, playKick, playLead, playRiser } from './voices.js';
 
-const STEPS_PER_BAR = 16;
-const PROGRESSION = [
-  { root: 33, chord: [69, 72, 76] }, // A minor
-  { root: 29, chord: [65, 69, 72] }, // F major
-  { root: 36, chord: [67, 72, 76] }, // C major
-  { root: 31, chord: [67, 71, 74] }, // G major
-];
-// Chord-tone index per eighth note; 3 is the root an octave up.
-const LEAD_PATTERN = [0, 2, 1, 2, 3, 2, 1, 2];
 const LEAD_THRESHOLD = 0.4;
 const DEATH_DROPOUT_STEPS = 8;
 const EXPIRY_DROP_STEPS = 32;
+const HIT_SPACING_STEPS = 2;
 const PARAMETER_SMOOTHING_SECONDS = 0.08;
+const SUB_SHELF_HERTZ = 90;
+const SUB_SHELF_DECIBELS = -5;
+const PRESENCE_HERTZ = 2500;
+const PRESENCE_DECIBELS = 3;
 
 export function levelsForIntensity(intensity) {
   return {
-    kick: 0.95,
-    hat: 0.22 + 0.2 * intensity,
-    shaker: intensity >= 0.6 ? 0.08 + 0.08 * intensity : 0,
-    clap: intensity >= 0.3 ? 0.45 + 0.2 * intensity : 0,
-    bass: 0.5 + 0.2 * intensity,
+    kick: 0.62,
+    hat: 0.45 + 0.25 * intensity,
+    shaker: intensity >= 0.6 ? 0.14 + 0.12 * intensity : 0,
+    clap: 0.7 + 0.2 * intensity,
+    bass: 0.7 + 0.2 * intensity,
     rollingBass: intensity >= 0.5,
-    lead: intensity > LEAD_THRESHOLD ? 0.14 + 0.2 * (intensity - LEAD_THRESHOLD) / (1 - LEAD_THRESHOLD) : 0,
+    melody: 0.75 + 0.15 * intensity,
+    lead: intensity > LEAD_THRESHOLD ? 0.22 + 0.25 * (intensity - LEAD_THRESHOLD) / (1 - LEAD_THRESHOLD) : 0,
     leadSixteenths: intensity >= 0.75,
-    crash: intensity >= 0.6 ? 0.3 : 0,
-    bassCutoff: 220 + 1600 * intensity ** 1.5,
+    chords: 0.35,
+    hit: 0.5,
+    crash: 0.4,
+    repeatCrash: intensity >= 0.6,
+    bassCutoff: 420 + 1800 * intensity ** 1.5,
     leadCutoff: 900 + 6000 * intensity,
+    melodyCutoff: 2400 + 3600 * intensity,
   };
 }
 
@@ -50,11 +57,18 @@ export class ProceduralMusic {
     this.timers = timers;
     this.timer = null;
     this.sequencer = new StepSequencer({ stepsPerBar: STEPS_PER_BAR });
+    this.arrangement = new Arrangement();
+    this.barContext = null;
+    this.barMelody = [];
     this.started = false;
     this.nodes = null;
     this.muteUntilStep = -1;
     this.dropUntilStep = -1;
+    this.pendingHit = 0;
+    this.nextHitStep = 0;
+    this.hitCount = 0;
     this.delayTempo = null;
+    this.intensity = -1;
     this.setIntensity(0.2);
     this.scheduleStep = this.scheduleStep.bind(this);
   }
@@ -69,6 +83,8 @@ export class ProceduralMusic {
     if (context === null) return;
     if (this.nodes === null) this.nodes = this.buildGraph(context);
     this.sequencer.reset();
+    this.arrangement.reset();
+    this.barContext = null;
     this.started = true;
     this.applyParameters();
     if (this.timers !== null && this.timer === null) {
@@ -101,9 +117,20 @@ export class ProceduralMusic {
     else if (name === 'expiry') this.dropUntilStep = next + EXPIRY_DROP_STEPS;
     else if (this.nodes !== null && context !== null) {
       const barSeconds = this.sequencer.stepDuration * STEPS_PER_BAR;
-      if (name === 'pickup') playRiser(context, this.engine.noiseBuffer, this.nodes.bus, context.currentTime, { level: 0.35, durationSeconds: barSeconds });
-      else if (name === 'bomb') playCrash(context, this.engine.noiseBuffer, this.nodes.bus, context.currentTime, { level: 0.6 });
+      const time = context.currentTime;
+      if (name === 'pickup') {
+        playRiser(context, this.engine.noiseBuffer, this.nodes.layers.effects, time, { level: 0.45, durationSeconds: barSeconds });
+        this.note('riser', next, time, { cue: name });
+      } else if (name === 'bomb') {
+        playCrash(context, this.engine.noiseBuffer, this.nodes.layers.effects, time, { level: 0.7 });
+        this.note('crash', next, time, { cue: name });
+      }
     }
+  }
+
+  // Kills this frame: a melodic stab on the next eighth (bigger counts play louder).
+  hit(count) {
+    if (count > 0) this.pendingHit = Math.max(this.pendingHit, count);
   }
 
   update(currentTime) {
@@ -111,36 +138,58 @@ export class ProceduralMusic {
     this.sequencer.update(currentTime, this.scheduleStep);
   }
 
+  // layers names each node that feeds the music bus or the pump once, so the offline render check
+  // can solo one layer by disconnecting the others.
   buildGraph(context) {
-    const output = (node) => { node.connect(bus); return node; };
+    const filter = (type, frequency, q, destination, gainDecibels = 0) => {
+      const node = context.createBiquadFilter();
+      node.type = type;
+      node.frequency.setValueAtTime(frequency, 0);
+      node.Q.setValueAtTime(q, 0);
+      if (gainDecibels !== 0) node.gain.setValueAtTime(gainDecibels, 0);
+      node.connect(destination);
+      return node;
+    };
+    // Laptop and phone speakers cannot play the sub below about 90 Hz, where it only eats the
+    // output compressor's headroom: the bus trims it and lifts the presence band instead.
+    const lowShelf = filter('lowshelf', SUB_SHELF_HERTZ, 0.7, this.engine.musicOutput, SUB_SHELF_DECIBELS);
+    const presence = filter('peaking', PRESENCE_HERTZ, 0.8, lowShelf, PRESENCE_DECIBELS);
     const bus = context.createGain();
-    bus.connect(this.engine.musicOutput);
-    const drums = output(context.createGain());
-    const hatFilter = output(context.createBiquadFilter());
-    hatFilter.type = 'highpass';
-    hatFilter.frequency.setValueAtTime(7500, 0);
-    const clapFilter = output(context.createBiquadFilter());
-    clapFilter.type = 'bandpass';
-    clapFilter.frequency.setValueAtTime(1600, 0);
-    clapFilter.Q.setValueAtTime(0.8, 0);
-    // Bass and lead share a pump gain that ducks under each kick.
-    const pump = output(context.createGain());
-    const leadBus = context.createGain();
-    leadBus.connect(pump);
-    const leadFilter = context.createBiquadFilter();
-    leadFilter.type = 'lowpass';
-    leadFilter.Q.setValueAtTime(4, 0);
-    leadFilter.connect(leadBus);
+    bus.connect(presence);
+    const toBus = (node) => { node.connect(bus); return node; };
+    const pump = toBus(context.createGain());
+    const toPump = (node) => { node.connect(pump); return node; };
+    const kick = toBus(context.createGain());
+    const hats = filter('highpass', 7000, 0.7, bus);
+    const clap = filter('bandpass', 1600, 0.8, bus);
+    const bass = toPump(context.createGain());
+    const lead = toPump(context.createGain());
+    const melody = toPump(context.createGain());
+    const chords = toPump(context.createGain());
+    const hits = toBus(context.createGain());
+    const effects = toBus(context.createGain());
+    const leadFilter = filter('lowpass', 2000, 4, lead);
+    const melodyFilter = filter('lowpass', 3000, 2, melody);
+    const padFilter = filter('lowpass', 1400, 1, chords);
+    const hitFilter = filter('lowpass', 6500, 1, hits);
     const delay = context.createDelay(1);
     const feedback = context.createGain();
     feedback.gain.setValueAtTime(0.38, 0);
-    const delayWet = output(context.createGain());
+    const delayWet = toBus(context.createGain());
     delayWet.gain.setValueAtTime(0.3, 0);
-    leadBus.connect(delay);
+    lead.connect(delay);
+    const melodySend = context.createGain();
+    melodySend.gain.setValueAtTime(0.5, 0);
+    melody.connect(melodySend);
+    melodySend.connect(delay);
+    hits.connect(melodySend);
     delay.connect(feedback);
     feedback.connect(delay);
     delay.connect(delayWet);
-    return { bus, drums, hatFilter, clapFilter, pump, leadFilter, delay };
+    return {
+      bus, pump, delay, leadFilter, melodyFilter, padFilter, hitFilter,
+      layers: { kick, hats, clap, bass, lead, melody, chords, hits, effects },
+    };
   }
 
   applyParameters() {
@@ -148,10 +197,11 @@ export class ProceduralMusic {
     if (this.nodes === null || context === null) return;
     const now = context.currentTime;
     this.nodes.leadFilter.frequency.setTargetAtTime(this.levels.leadCutoff, now, PARAMETER_SMOOTHING_SECONDS);
+    this.nodes.melodyFilter.frequency.setTargetAtTime(this.levels.melodyCutoff, now, PARAMETER_SMOOTHING_SECONDS);
   }
 
   // The dotted-eighth delay follows the tempo the sequencer actually plays, so it only moves at a
-  // bar start, together with the tempo, and never glides with the per-frame kill pulse.
+  // bar start, together with the tempo, and never glides with the per-frame intensity.
   followTempoWithDelay(time) {
     if (this.delayTempo === this.sequencer.beatsPerMinute) return;
     this.delayTempo = this.sequencer.beatsPerMinute;
@@ -162,55 +212,142 @@ export class ProceduralMusic {
     this.onNote?.({ voice, step, time, ...extra });
   }
 
+  // The bar's arrangement context, refreshed when the step enters a new bar (steps may skip).
+  enterBar(bar, step, time) {
+    if (this.barContext !== null && this.barContext.bar === bar) return;
+    this.barContext = this.arrangement.bar(bar, this.intensity);
+    this.barMelody = melodyForBar(this.barContext);
+    this.barFill = fillForBar(this.barContext);
+    this.barFillHits = new Map(fillHits(this.barFill).map(({ position, scale }) => [position, scale]));
+    const { name, barInSection, transpose, progression } = this.barContext;
+    if (barInSection === 0) this.note('section', step, time, { name, bar, transpose, progression });
+  }
+
   scheduleStep(step, time) {
     this.followTempoWithDelay(time);
+    const position = step % STEPS_PER_BAR;
+    this.enterBar(Math.floor(step / STEPS_PER_BAR), step, time);
     if (step < this.muteUntilStep) return;
+    const playing = { step, time, position, dropped: step < this.dropUntilStep, stepDuration: this.sequencer.stepDuration };
+    this.scheduleDrums(playing);
+    this.scheduleFill(playing);
+    this.scheduleBass(playing);
+    this.scheduleMelody(playing);
+    this.scheduleLead(playing);
+    this.scheduleChords(playing);
+    this.scheduleHit(playing);
+  }
+
+  scheduleDrums({ step, time, position, dropped, stepDuration }) {
     const context = this.engine.context;
     const noise = this.engine.noiseBuffer;
     const { levels, nodes } = this;
-    const stepDuration = this.sequencer.stepDuration;
-    const position = step % STEPS_PER_BAR;
-    const bar = Math.floor(step / STEPS_PER_BAR);
-    const harmony = PROGRESSION[bar % PROGRESSION.length];
-    const dropped = step < this.dropUntilStep;
-
-    if (position % 4 === 0) {
-      playKick(context, nodes.drums, time, levels.kick);
+    const { section, barInSection, sectionEnd } = this.barContext;
+    const kickOn = section.kick === 'four' && !fillDropsKick(this.barFill, position);
+    if (position % 4 === 0 && kickOn) {
+      playKick(context, nodes.layers.kick, time, levels.kick);
       this.note('kick', step, time);
       nodes.pump.gain.setValueAtTime(0.35, time);
       nodes.pump.gain.linearRampToValueAtTime(1, time + stepDuration * 2.5);
     }
-    if (position === 0 && bar % 4 === 0 && levels.crash > 0 && !dropped) {
-      playCrash(context, noise, nodes.bus, time, { level: levels.crash, seed: bar });
+    if (position === 0 && section.crash && (barInSection === 0 || (levels.repeatCrash && barInSection % 4 === 0)) && !dropped) {
+      playCrash(context, noise, nodes.layers.effects, time, { level: levels.crash, seed: step });
       this.note('crash', step, time);
     }
-    if (position % 4 === 2 && !dropped) {
-      const open = position === 14;
-      playHat(context, noise, nodes.hatFilter, time, { level: levels.hat * (open ? 0.9 : 1), open, seed: step });
+    if (position === 0 && section.endRiser && sectionEnd) {
+      playRiser(context, noise, nodes.layers.effects, time, { level: 0.4, durationSeconds: stepDuration * STEPS_PER_BAR });
+      this.note('riser', step, time);
+    }
+    if (dropped) return;
+    const hatsOn = section.hats === 'sparse' ? position === 14 : position % 4 === 2;
+    if (hatsOn) {
+      const open = position === 14 && section.hats !== 'closed';
+      playHat(context, noise, nodes.layers.hats, time, { level: levels.hat * (open ? 0.9 : 1), open, seed: step });
       this.note(open ? 'open-hat' : 'closed-hat', step, time);
     }
-    if (position % 2 === 1 && levels.shaker > 0 && !dropped) {
-      playHat(context, noise, nodes.hatFilter, time, { level: levels.shaker, open: false, seed: step + 101 });
+    if (section.hats === 'full' && position % 2 === 1 && levels.shaker > 0) {
+      playHat(context, noise, nodes.layers.hats, time, { level: levels.shaker, open: false, seed: step + 101 });
       this.note('shaker', step, time);
     }
-    if ((position === 4 || position === 12) && levels.clap > 0) {
-      playClap(context, noise, nodes.clapFilter, time, { level: levels.clap, seed: step });
+    if (section.clap && (position === 4 || position === 12) && !this.barFillHits.has(position)) {
+      playClap(context, noise, nodes.layers.clap, time, { level: levels.clap, seed: step });
       this.note('clap', step, time);
     }
-    const offbeatBass = position % 4 === 2;
-    const rollingBass = position % 4 === 3 && levels.rollingBass;
-    if (offbeatBass || rollingBass) {
-      const note = harmony.root + (rollingBass ? 12 : 0);
-      playBass(context, nodes.pump, time, { note, level: levels.bass, cutoff: levels.bassCutoff, lengthSeconds: stepDuration * (offbeatBass ? 1.4 : 0.9) });
-      this.note('bass', step, time, { rootNote: harmony.root });
+  }
+
+  scheduleFill({ step, time, position }) {
+    const scale = this.barFillHits.get(position);
+    if (scale === undefined) return;
+    playClap(this.engine.context, this.engine.noiseBuffer, this.nodes.layers.clap, time, { level: this.levels.clap * scale, seed: step });
+    this.note('fill', step, time, { fill: this.barFill });
+  }
+
+  scheduleBass({ step, time, position, stepDuration }) {
+    const { section, harmony } = this.barContext;
+    if (this.barFill === 'kick-out') return;
+    const levels = this.levels;
+    let note = null;
+    let lengthSteps = 1.4;
+    if (section.bass === 'held') {
+      if (position === 0) {
+        note = harmony.root;
+        lengthSteps = STEPS_PER_BAR * 0.9;
+      }
+    } else if (section.bass === 'sparse') {
+      if (position === 2 || position === 10) note = harmony.root;
+    } else if (position % 4 === 2) {
+      note = harmony.root;
+    } else if (position % 4 === 3 && (section.bass === 'rolling' || levels.rollingBass)) {
+      note = harmony.root + 12;
+      lengthSteps = 0.9;
     }
+    if (note === null) return;
+    const cutoff = section.bass === 'held' ? levels.bassCutoff * 0.6 : levels.bassCutoff;
+    playBass(this.engine.context, this.nodes.layers.bass, time, { note, level: levels.bass, cutoff, lengthSeconds: stepDuration * lengthSteps });
+    this.note('bass', step, time, { rootNote: harmony.root });
+  }
+
+  scheduleMelody({ step, time, position, dropped, stepDuration }) {
+    if (dropped) return;
+    const { harmony } = this.barContext;
+    for (const entry of this.barMelody) {
+      if (entry.position !== position) continue;
+      playLead(this.engine.context, this.nodes.melodyFilter, time, { note: entry.note, level: this.levels.melody, lengthSeconds: stepDuration * (entry.lengthSteps + 0.6) });
+      this.note('melody', step, time, { note: entry.note, chord: harmony.chord });
+    }
+  }
+
+  // The saw arpeggio, an octave below the melody so the two do not crowd each other.
+  scheduleLead({ step, time, position, dropped, stepDuration }) {
+    const { section, harmony } = this.barContext;
+    const levels = this.levels;
     const eighth = position % 2 === 0;
-    if (levels.lead > 0 && !dropped && (eighth || levels.leadSixteenths)) {
-      const patternIndex = Math.floor(position / 2) + (eighth ? 0 : 3);
-      const tone = LEAD_PATTERN[patternIndex % LEAD_PATTERN.length];
-      const note = tone === 3 ? harmony.chord[0] + 12 : harmony.chord[tone];
-      playLead(context, nodes.leadFilter, time, { note, level: levels.lead * (eighth ? 1 : 0.55), lengthSeconds: stepDuration * (eighth ? 1.8 : 0.9) });
-      this.note('lead', step, time, { rootNote: harmony.root });
+    if (!section.lead || levels.lead === 0 || dropped || this.barFill === 'kick-out' || !(eighth || levels.leadSixteenths)) return;
+    const pattern = [0, 2, 1, 2, 3, 2, 1, 2];
+    const tone = pattern[(Math.floor(position / 2) + (eighth ? 0 : 3)) % pattern.length];
+    const note = (tone === 3 ? harmony.chord[0] + 12 : harmony.chord[tone]) - 12;
+    playLead(this.engine.context, this.nodes.leadFilter, time, { note, level: levels.lead * (eighth ? 1 : 0.55), lengthSeconds: stepDuration * (eighth ? 1.8 : 0.9) });
+    this.note('lead', step, time, { rootNote: harmony.root });
+  }
+
+  scheduleChords({ step, time, position, stepDuration }) {
+    const { section, harmony } = this.barContext;
+    if (!section.chords || position !== 0) return;
+    for (const tone of harmony.chord) {
+      playLead(this.engine.context, this.nodes.padFilter, time, { note: tone - 12, level: this.levels.chords, lengthSeconds: stepDuration * STEPS_PER_BAR });
     }
+    this.note('chord', step, time, { chord: harmony.chord });
+  }
+
+  scheduleHit({ step, time, position, stepDuration }) {
+    if (this.pendingHit === 0 || position % 2 !== 0 || step < this.nextHitStep) return;
+    const { harmony } = this.barContext;
+    const note = harmony.chord[this.hitCount % harmony.chord.length] + 12;
+    const level = this.levels.hit * Math.min(1, 0.5 + 0.15 * Math.log2(1 + this.pendingHit));
+    playLead(this.engine.context, this.nodes.hitFilter, time, { note, level, lengthSeconds: stepDuration * 1.2 });
+    this.note('hit', step, time, { note, chord: harmony.chord, count: this.pendingHit });
+    this.hitCount += 1;
+    this.pendingHit = 0;
+    this.nextHitStep = step + HIT_SPACING_STEPS;
   }
 }

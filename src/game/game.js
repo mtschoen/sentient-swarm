@@ -9,9 +9,10 @@
 //      bomb kills before projectiles and contact.
 //   2. player.update (Playing only), with mouse aim derived as pointerWorld minus the player.
 //   3. pickups.update, then collect at the player into weapons.collect (before charge expiry); a
-//      collection queues a PICKUP_IMPULSE_STRENGTH impulse at the ship.
+//      collection queues a PICKUP_IMPULSE_STRENGTH impulse at the ship and plays the pickup cue.
 //   4. weapons.update; spawns go to projectiles.queueSpawn and the beam to setBeam (null on the
-//      expiry frame even when the weapon still returned one).
+//      expiry frame even when the weapon still returned one). A frame that fires (spawns or a
+//      beam) plays one weaponFire cue with the kind and tier it fired at; then the expiry cue.
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
 //   6. spawn pressure (paused while Dying and Respawning), its seek scale and its spawn distance
 //      (setSeekScale, setSpawnDistanceFraction: both ramp with the count), then the simulation
@@ -54,8 +55,9 @@ function isGesture(inputState) {
 export class Game {
   // projectiles is created (and registered with the simulation) when omitted; spawnPressure,
   // random and clock (seconds, used to stamp impulses) are injectable for tests. effects
-  // (optional, the audio hook's EffectsSynth) gets bomb() for an accepted bomb press and death()
-  // for an accepted hit.
+  // (optional, the audio hook's cues) gets bomb() for an accepted bomb press, death() for an
+  // accepted hit, pickup() for a collection, weaponFire(kind, tier) for a frame that fires and
+  // expiry() when the upgrade's charge runs out; a missing method is skipped.
   // frameTimer (optional, src/gpu/frame-timer.js) brackets every simulation step and render.
   static async create({ gpu, simulation, projectiles, renderer, input, capacity, clock, spawnPressure, random = Math.random, effects = null, frameTimer = null }) {
     const projectileSet = projectiles ?? await Projectiles.create(gpu);
@@ -216,13 +218,19 @@ export class Game {
       if (collected !== null) {
         this.weapons.collect(collected);
         this.queueImpulse(x, y, PICKUP_IMPULSE_STRENGTH, false);
+        this.effects?.pickup?.();
       }
     }
 
     const aim = this.player.aim;
+    // The kind and tier this frame fires at; the update itself drops to base on expiry.
+    const firedKind = this.weapons.armed;
+    const firedTier = this.weapons.tier;
     const fire = this.weapons.update(deltaSeconds, { firing: playing && controls.firing, aimX: aim.x, aimY: aim.y, x, y });
     fire.spawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
     this.projectiles.setBeam(fire.expired ? null : fire.beam);
+    if (fire.spawns.length > 0 || (fire.beam !== null && !fire.expired)) this.effects?.weaponFire?.(firedKind, firedTier);
+    if (fire.expired) this.effects?.expiry?.();
 
     if (this.run.phase === RunPhase.Ready) {
       this.simulation.setPlayer(x, y);

@@ -64,9 +64,10 @@ async function boot() {
   const pinnedCapacity = pinnedCapacityFromSearch(location.search);
   const probeEnabled = !probeDisabledFromSearch(location.search);
   const store = new SettingsStore();
+  const settings = store.load();
   const adapterKey = adapterKeyFrom(gpu.adapter.info);
   const initialPreset = resolveInitialPreset({
-    settings: store.load(),
+    settings,
     adapterKey,
     isMobile: detectMobile(),
     maxStorageBufferBindingSize: gpu.limits.maxStorageBufferBindingSize,
@@ -79,7 +80,11 @@ async function boot() {
   const input = createInput(canvas, viewport);
   // Read by the browser checks (the mobile smoke asserts on the aim vector).
   window.__murmuration.input = input;
-  const audio = installAudio();
+  // Audio unlocks inside the gesture that starts the run (canvas pointerdown or touchstart, or a
+  // key); a start button calls audio.unlock() from its own click handler.
+  const audio = installAudio({ gestureTarget: canvas });
+  audio.engine.setMusicVolume(settings.music / 100);
+  audio.engine.setEffectsVolume(settings.effectsVolume / 100);
   window.__murmuration.audio = audio;
   // Frame times reach the quality controller once each frame's GPU work is done (frame-timer.js).
   let quality = null;
@@ -87,18 +92,18 @@ async function boot() {
     ? createFrameTimer(gpu, { now: () => performance.now(), onFrame: (milliseconds) => quality?.onFrame(milliseconds, performance.now() / 1000) })
     : null;
   // The game waits in Ready, the swarm running without player contact, until the first gesture.
-  const game = await Game.create({ gpu, simulation, renderer, input, capacity: simulation.capacity, effects: withHaptics(audio.effects), frameTimer });
+  const game = await Game.create({ gpu, simulation, renderer, input, capacity: simulation.capacity, effects: withHaptics(audio.cues), frameTimer });
   quality = new QualityController({ game, store, probe: new FrameTimeProbe(), adapterKey, ceiling: initialPreset.ceiling });
   if (pinnedCapacity === null) quality.start(initialPreset.name, { allowUp: initialPreset.allowUp });
   window.__murmuration.quality = quality;
   window.__murmuration.game = game;
 
   // The game steps the simulation; stats carry the latest read-back frame plus the game state. The
-  // audio follows the stats read this update (kills and the alive count drive the music intensity).
+  // audio follows the run: phase, multiplier and the kills read this update drive the intensity.
   const update = (fixedStep) => {
     game.update(fixedStep);
     if (game.latestStats) window.__murmuration.stats = { ...game.latestStats, ...game.state };
-    audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity });
+    audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity, phase: game.run.phase, multiplier: game.score.multiplier });
   };
 
   const touchOverlay = createTouchOverlay(document.getElementById('touch-overlay'), { touch: input.touch, canvas });
@@ -109,7 +114,10 @@ async function boot() {
     hud.update(state);
     touchOverlay.update(state);
     const isGameOver = state.phase === 'gameOver';
-    if (isGameOver && !gameOverShown) hud.showGameOver(state.score, () => game.restart());
+    if (isGameOver && !gameOverShown) hud.showGameOver(state.score, () => {
+      audio.unlock();
+      game.restart();
+    });
     else if (!isGameOver && gameOverShown) hud.hideGameOver();
     gameOverShown = isGameOver;
     window.__murmuration.frame = loop.frameCount;

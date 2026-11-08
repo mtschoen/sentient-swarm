@@ -90,6 +90,7 @@ export class FakeAudioContext {
     node.type = 'lowpass';
     node.frequency = new FakeParam(350);
     node.Q = new FakeParam(1);
+    node.gain = new FakeParam(0);
     return node;
   }
 
