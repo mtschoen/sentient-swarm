@@ -2,9 +2,7 @@
   "name": "murmuration",
   "version": "0.1.0",
   "private": true,
-  "engines": {
-    "node": ">=22"
-  },
+  "engines": { "node": ">=22" },
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,7 +12,7 @@
     "smoke": "node tests/browser/smoke.mjs",
     "smoke:menu": "node tests/browser/smoke-menu.mjs",
     "smoke:lab": "node tests/browser/smoke-lab.mjs",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.js\" --test-coverage-exclude=\"src/sim/grid.js\" --test-coverage-exclude=\"src/sim/kill.js\" --test-coverage-exclude=\"src/sim/stats.js\" --test-coverage-exclude=\"src/game/projectiles.js\" --test-coverage-exclude=\"src/render/gates.js\" --test-coverage-exclude=\"src/render/particles.js\" --test-coverage-exclude=\"src/render/pickups.js\" --test-coverage-exclude=\"src/render/projectiles.js\" --test-coverage-exclude=\"src/render/render-shaders.js\" --test-coverage-exclude=\"src/render/ship.js\" --test-coverage-exclude=\"src/gpu/device.js\" --test-coverage-lines=96 --test-coverage-functions=92 \"tests/**/*.test.js\""
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.js\" --test-coverage-exclude=\"src/sim/grid.js\" --test-coverage-exclude=\"src/render/render-shaders.js\" --test-coverage-lines=92 --test-coverage-functions=88 \"tests/**/*.test.js\""
   },
   "devDependencies": {
     "playwright": "^1.49.0",
