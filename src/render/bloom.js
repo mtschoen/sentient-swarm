@@ -1,5 +1,6 @@
-// Bloom: downsample the scene plus the warp grid layer to half resolution (bloom_downsample.wgsl),
-// so threat-lit grid ripples glow too, then blur it separably
+// Bloom: downsample the scene plus the warp grid layer to the bloom resolution
+// (bloom_downsample.wgsl: one bilinear tap at high, a four-tap box at medium and low so thin
+// moving features do not shimmer), so threat-lit grid ripples glow too, then blur it separably
 // (bloom_blur.wgsl): horizontal from first into second, vertical from second back into first.
 // outputTexture holds the result after encode. Bloom quality sets the blur resolution: the scene
 // divided by BLOOM_DIVISORS[quality] (high is half resolution); a lower resolution blurs fewer
