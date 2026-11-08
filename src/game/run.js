@@ -42,6 +42,7 @@ export class RunState {
     this._bombs = this._startBombs;
     this._phaseRemaining = 0;
     this._invulnerableRemaining = 0;
+    this._respawnSequence = 0;
     this._queue = [];
   }
 

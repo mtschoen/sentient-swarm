@@ -2,6 +2,9 @@ import { MAXIMUM_RAIL_TURRETS, RAIL_TURRET_SPACING_RADIANS, WEAPON_TYPES } from 
 
 const MAXIMUM_TIER = 3;
 const EXPIRY_EPSILON = 1e-9;
+// Volleys one update may fire. Real steps fire at most a few (a quarter second is two base volleys),
+// so this only bounds a huge deltaSeconds (a stalled tab) from looping for seconds.
+export const MAXIMUM_SHOTS_PER_UPDATE = 8;
 
 // Turret directions relative to the aim, in radians: centered on the rear (aim plus pi) and
 // RAIL_TURRET_SPACING_RADIANS apart, so the set grows outward from the back (1 at 180 degrees,
@@ -72,7 +75,11 @@ export class WeaponState {
       return result;
     }
     const length = Math.hypot(aimX, aimY);
-    if (length === 0) return result;
+    if (length === 0) {
+      this.accumulator = 0;
+      this.railAccumulator = 0;
+      return result;
+    }
     const directionX = aimX / length;
     const directionY = aimY / length;
 
@@ -80,8 +87,14 @@ export class WeaponState {
       result.beam = { x, y, directionX, directionY, halfWidth: values.radius };
     } else {
       this.accumulator += deltaSeconds;
+      let volleys = 0;
       while (this.accumulator >= values.fireInterval) {
+        if (volleys === MAXIMUM_SHOTS_PER_UPDATE) {
+          this.accumulator = 0;
+          break;
+        }
         this.accumulator -= values.fireInterval;
+        volleys += 1;
         this.#appendShot(result.spawns, definition.kind, values, { x, y, directionX, directionY });
       }
     }
@@ -103,8 +116,14 @@ export class WeaponState {
     const values = definition.tiers[this.railTier - 1];
     const aimAngle = Math.atan2(directionY, directionX);
     this.railAccumulator += deltaSeconds;
+    let volleys = 0;
     while (this.railAccumulator >= values.fireInterval) {
+      if (volleys === MAXIMUM_SHOTS_PER_UPDATE) {
+        this.railAccumulator = 0;
+        break;
+      }
       this.railAccumulator -= values.fireInterval;
+      volleys += 1;
       for (const offset of railTurretOffsets(this.railTurrets)) {
         const angle = aimAngle + offset;
         this.#appendShot(spawns, definition.kind, values, { x, y, directionX: Math.cos(angle), directionY: Math.sin(angle) });

@@ -199,3 +199,18 @@ test('a pity spawn on the time warp slot offers the next weapon instead; a miles
   director.update(STEP, { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: true, phasePlaying: true });
   assert.equal(director.pickups.at(-1).type, 'timewarp');
 });
+
+test('rotationSeconds at or below zero throws', () => {
+  assert.throws(() => new PickupDirector({ rotationSeconds: 0 }), /rotationSeconds/);
+  assert.throws(() => new PickupDirector({ rotationSeconds: -5 }), /rotationSeconds/);
+});
+
+test('fallback placement keeps the minimum distance from a corner player', () => {
+  const director = new PickupDirector({ arenaWidth: WIDTH, arenaHeight: HEIGHT, random: () => 0 });
+  // random 0: angle 0, so every attempt lands at playerX + minimumDistance, outside the arena.
+  director.spawn(WIDTH - 0.5, 0.5);
+  const [pickup] = director.pickups;
+  assert.equal(pickup.x >= 0 && pickup.x <= WIDTH && pickup.y >= 0 && pickup.y <= HEIGHT, true);
+  const distance = Math.hypot(pickup.x - (WIDTH - 0.5), pickup.y - 0.5);
+  assert.equal(distance >= director.minimumDistance - 1e-9, true);
+});

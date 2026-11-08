@@ -73,6 +73,7 @@ export class ScoreKeeper {
   recordHit() {
     this._streak = 0;
     this._stepIndex = 0;
+    this._milestone = false;
   }
 
   consumeMilestone() {

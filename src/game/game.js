@@ -213,8 +213,9 @@ export class Game {
   beginRun() {
     this.watchPressure = null;
     this.paused = false;
-    this.resetModules();
+    // start() zeroes the run's respawn sequence, so it runs before resetModules moves it forward.
     this.run.start();
+    this.resetModules();
     this.bombHeld = true;
   }
 

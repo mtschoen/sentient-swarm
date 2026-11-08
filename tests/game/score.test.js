@@ -84,3 +84,10 @@ test('capacity is read-only outside setCapacity', () => {
   const keeper = new ScoreKeeper({ capacity: REFERENCE_CAPACITY });
   assert.throws(() => { keeper.capacity = 1; }, TypeError);
 });
+
+test('recordHit clears a pending milestone', () => {
+  const keeper = new ScoreKeeper({ capacity: REFERENCE_CAPACITY });
+  keeper.recordKills(50);
+  keeper.recordHit();
+  assert.equal(keeper.consumeMilestone(), false);
+});

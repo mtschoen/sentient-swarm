@@ -18,6 +18,7 @@ export class PickupDirector {
     arenaHeight = ARENA_HEIGHT,
     random = Math.random,
   } = {}) {
+    if (!(rotationSeconds > 0)) throw new Error(`rotationSeconds must be above 0, got ${rotationSeconds}`);
     this.rotationSeconds = rotationSeconds;
     this.pitySeconds = pitySeconds;
     this.fadeSeconds = fadeSeconds;
@@ -69,19 +70,17 @@ export class PickupDirector {
 
   // Rejection-samples points on the placement annulus (16 attempts). Without densityAt the first
   // in-arena point wins; with densityAt(x, y) the lowest-density of the first 8 in-arena points wins
-  // (ties go to the earlier one). Clamps only if every attempt lands outside the arena.
+  // (ties go to the earlier one). If every attempt lands outside the arena it steps minimumDistance toward the arena center.
   // A pity spawn (the base-gun recovery guard) always offers a weapon: on the time warp slot it
   // takes the next slot's type instead, leaving the rotation where it is.
   spawn(playerX, playerY, densityAt = null, { pity = false } = {}) {
     const wanted = densityAt === null ? 1 : DENSITY_CANDIDATES;
     const candidates = [];
-    let x = playerX;
-    let y = playerY;
     for (let attempt = 0; attempt < PLACEMENT_ATTEMPTS && candidates.length < wanted; attempt += 1) {
       const angle = this.random() * Math.PI * 2;
       const distance = this.minimumDistance + this.random() * (this.maximumDistance - this.minimumDistance);
-      x = playerX + Math.cos(angle) * distance;
-      y = playerY + Math.sin(angle) * distance;
+      const x = playerX + Math.cos(angle) * distance;
+      const y = playerY + Math.sin(angle) * distance;
       if (x >= 0 && x <= this.arenaWidth && y >= 0 && y <= this.arenaHeight) candidates.push({ x, y });
     }
     let chosen = null;
@@ -98,14 +97,25 @@ export class PickupDirector {
         }
       }
     }
-    const placed = chosen ?? {
-      x: Math.min(this.arenaWidth, Math.max(0, x)),
-      y: Math.min(this.arenaHeight, Math.max(0, y)),
-    };
+    const placed = chosen ?? this.#fallbackPlacement(playerX, playerY);
     const type = pity && this.offeredType === 'timewarp'
       ? PICKUP_TYPE_NAMES[(this.rotationIndex + 1) % PICKUP_TYPE_NAMES.length]
       : this.offeredType;
     this.pickups.push({ x: placed.x, y: placed.y, type, age: 0, fade: 1 });
+  }
+
+  // Every attempt missed the arena: step minimumDistance from the player toward the arena center
+  // (always inward, so a corner player keeps the minimum distance), then clamp for tiny arenas.
+  #fallbackPlacement(playerX, playerY) {
+    const towardX = this.arenaWidth / 2 - playerX;
+    const towardY = this.arenaHeight / 2 - playerY;
+    const length = Math.hypot(towardX, towardY);
+    const directionX = length === 0 ? 1 : towardX / length;
+    const directionY = length === 0 ? 0 : towardY / length;
+    return {
+      x: Math.min(this.arenaWidth, Math.max(0, playerX + directionX * this.minimumDistance)),
+      y: Math.min(this.arenaHeight, Math.max(0, playerY + directionY * this.minimumDistance)),
+    };
   }
 
   collect(playerX, playerY, radius = 0.35) {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WeaponState, railTurretOffsets } from '../../src/game/weapons.js';
+import { WeaponState, railTurretOffsets, MAXIMUM_SHOTS_PER_UPDATE } from '../../src/game/weapons.js';
 import { WEAPON_TYPES, WEAPON_TYPE_NAMES, PROJECTILE_KINDS, RAIL_TURRET_SPACING_RADIANS, MAXIMUM_RAIL_TURRETS } from '../../src/game/weaponTypes.js';
 
 const STEP = 1 / 60;
@@ -266,4 +266,31 @@ test('dropAll clears the turrets and their tier; expiry keeps them', () => {
   assert.deepEqual([weapons.railTurrets, weapons.railTier], [12, 3]);
   weapons.dropAll();
   assert.deepEqual([weapons.railTurrets, weapons.railTier], [0, 1]);
+});
+
+test('fire on a huge delta spawns at most MAXIMUM_SHOTS_PER_UPDATE volleys', () => {
+  const weapons = makeWeapons();
+  const result = weapons.update(1000, aim);
+  assert.equal(result.spawns.length, MAXIMUM_SHOTS_PER_UPDATE * 3);
+  assert.equal(weapons.accumulator < 0.12, true);
+  const turreted = makeWeapons();
+  turreted.collect('rail');
+  const turretResult = turreted.update(1000, aim);
+  assert.equal(turretResult.turretSpawns.length, MAXIMUM_SHOTS_PER_UPDATE);
+});
+
+test('the volley cap exceeds any real step so ordinary play is unchanged', () => {
+  const weapons = makeWeapons();
+  assert.equal(weapons.update(0.25, aim).spawns.length, 2 * 3);
+  assert.equal(MAXIMUM_SHOTS_PER_UPDATE >= 8, true);
+});
+
+test('zero aim while firing resets the accumulator', () => {
+  const weapons = makeWeapons();
+  weapons.collect('rail');
+  weapons.update(0.05, aim);
+  assert.equal(weapons.accumulator > 0, true);
+  weapons.update(0.05, { ...aim, aimX: 0, aimY: 0 });
+  assert.equal(weapons.accumulator, 0);
+  assert.equal(weapons.railAccumulator, 0);
 });

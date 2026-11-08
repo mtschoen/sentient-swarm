@@ -105,3 +105,11 @@ test('late hit below respawnSequence is rejected after invulnerability expires',
   assert.equal(run.playerHit(50), true);
   assert.equal(run.lives, 1);
 });
+
+test('start resets respawnSequence', () => {
+  const run = playing();
+  run.setRespawnSequence(500);
+  run.start();
+  assert.equal(run.respawnSequence, 0);
+  assert.equal(run.playerHit(1), true);
+});
