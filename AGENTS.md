@@ -21,7 +21,7 @@
 - `npm test`: CPU logic tests via node:test.
 - `npm run smoke`: Playwright browser smoke test.
 - `npm run coverage`: `node --test` with Node's built-in coverage over `src/**/*.js` (no dependency), failing under the line and function floors in `package.json` (92 and 86); `src/sim/grid.js` and `src/render/render-shaders.js` are excluded by exact path (GPU-only modules; `tests/coverage.test.js` rejects wildcards and stale paths).
-- `npm run check:gpu`: `tests/browser/gpu-checks.mjs` runs the small GPU page checks in sequence (`webgpu-probe`, `grid`, `player`, `simulation`, `projectiles`, `bloom`); exit 2 means the probe found no adapter. `WEBGPU_ADAPTER=fallback` forces the software adapter (test side only, never the default). CI: `.github/workflows/check.yml` runs `npm test`, `npm run coverage` and `npm run build` on every push and pull request, plus an advisory software-GPU `npm run check:gpu`; `browser.yml` runs the browser suite on a self-hosted GPU runner (main pushes and manual dispatch only); `tests/workflows.test.js` checks the workflow files by fixed spelling.
+- `npm run check:gpu`: `tests/browser/gpu-checks.mjs` runs the small GPU page checks in sequence (`webgpu-probe`, `grid`, `player`, `simulation`, `projectiles`, `bloom`); exit 2 means the probe found no adapter. `WEBGPU_ADAPTER=fallback` forces the software adapter (test side only, never the default). CI: `.github/workflows/check.yml` runs `npm test`, `npm run coverage` and `npm run build` on every push and pull request, plus a required software-GPU `npm run check:gpu` job; `browser.yml` runs the browser suite on a self-hosted GPU runner (main pushes and manual dispatch only); `tests/workflows.test.js` checks the workflow files by fixed spelling.
 
 ## Audio and probe rules
 

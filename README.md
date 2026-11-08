@@ -15,7 +15,7 @@ Play it at https://mtschoen.com/games/sentient-swarm/ or https://mtschoen.github
 
 ## CI
 
-- `check.yml` runs on every push and pull request: `npm test`, `npm run coverage` and `npm run build`, plus an advisory job that runs `npm run check:gpu` on the software adapter (a missing adapter shows as a failed step, never a pass).
+- `check.yml` runs on every push and pull request: `npm test`, `npm run coverage` and `npm run build`, plus a required job that runs `npm run check:gpu` on the software adapter (a missing adapter shows as a failed step, never a pass).
 - `browser.yml` runs on main pushes and manual dispatch on a self-hosted runner with a real GPU: the smokes, `quality.mjs`, `check:gpu`, `steer.mjs` and `bloom.mjs`. It never runs for pull requests.
 - Local only: `audio-render.mjs`, `render-capture.mjs --compare`, `capture-*.mjs`, the measurements below and the phone checklist in `SMOKE.md`.
 

@@ -30,9 +30,8 @@ jobs:
   gpu-software:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # Advisory until its first green run on a hosted runner; then this flag is removed.
-    # A "no adapter" outcome makes check:gpu exit 2, so it shows as a failed step, never a pass.
-    continue-on-error: true
+    # Required since its first green hosted run (2026-11-08). A "no adapter" outcome makes
+    # check:gpu exit 2, so it shows as a failed step, never a pass.
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
