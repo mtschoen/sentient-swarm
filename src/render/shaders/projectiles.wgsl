@@ -45,6 +45,8 @@ const BEAM_MINIMUM_SWEEP: f32 = 0.002;
 // The fan's brightness at the previous aim and at the current one (times the body brightness).
 const BEAM_FAN_TAIL: f32 = 0.35;
 const BEAM_FAN_HEAD: f32 = 1.0;
+// White added to the fan at the current aim (cubic falloff toward the previous aim).
+const BEAM_FAN_HEAT: f32 = 0.6;
 
 struct ProjectileVaryings {
   @builtin(position) position: vec4f,
@@ -309,7 +311,9 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
         let world = origin + local;
         let inArena = f32(all(world >= vec2f(0.0)) && all(world <= vec2f(ARENA_WIDTH, ARENA_HEIGHT)));
         let ramp = mix(BEAM_FAN_TAIL, BEAM_FAN_HEAD, progress);
-        let fan = neon(input.hue, GLOW_SATURATION) * (fanBody * 0.9 * ripple + fanGlow * 0.5) * ramp * flicker * inArena;
+        // White heat rises toward the current aim so the core blends into the fan instead of leaving comb lines.
+        let heat = vec3f(fanBody * BEAM_FAN_HEAT * progress * progress * progress);
+        let fan = (neon(input.hue, GLOW_SATURATION) * (fanBody * 0.9 * ripple + fanGlow * 0.5) * ramp + heat) * flicker * inArena;
         color = max(color, fan);
       }
     }
