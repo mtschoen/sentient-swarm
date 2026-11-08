@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CpuFrameTimer, TimestampFrameTimer, createFrameTimer, sumSectionNanoseconds } from '../../src/gpu/frame-timer.js';
+import { CpuFrameTimer, TimestampFrameTimer, createFrameTimer, frameTimerKindFromSearch, sumSectionNanoseconds } from '../../src/gpu/frame-timer.js';
 
 globalThis.GPUBufferUsage ??= { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, QUERY_RESOLVE: 512 };
 globalThis.GPUMapMode ??= { READ: 1 };
@@ -106,4 +106,17 @@ test('createFrameTimer uses timestamps only when the device has the feature', ()
   const device = { ...fakeDevice(), queue: {} };
   assert.ok(createFrameTimer({ device, hasTimestampQuery: true }, { now: () => 0, onFrame() {} }) instanceof TimestampFrameTimer);
   assert.ok(createFrameTimer({ device, hasTimestampQuery: false }, { now: () => 0, onFrame() {} }) instanceof CpuFrameTimer);
+});
+
+test('createFrameTimer uses the CPU timer when the kind is cpu, even with timestamps', () => {
+  const device = { ...fakeDevice(), queue: {} };
+  assert.ok(createFrameTimer({ device, hasTimestampQuery: true }, { now: () => 0, onFrame() {}, kind: 'cpu' }) instanceof CpuFrameTimer);
+  assert.ok(createFrameTimer({ device, hasTimestampQuery: true }, { now: () => 0, onFrame() {}, kind: 'auto' }) instanceof TimestampFrameTimer);
+});
+
+test('?timer=cpu forces the CPU timer; anything else picks automatically', () => {
+  assert.equal(frameTimerKindFromSearch('?timer=cpu'), 'cpu');
+  assert.equal(frameTimerKindFromSearch('?probe=on&timer=cpu'), 'cpu');
+  assert.equal(frameTimerKindFromSearch(''), 'auto');
+  assert.equal(frameTimerKindFromSearch('?timer=gpu'), 'auto');
 });

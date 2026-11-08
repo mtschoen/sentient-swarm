@@ -13,7 +13,7 @@ import { PRESETS } from './settings/presets.js';
 import { FrameTimeProbe } from './settings/probe.js';
 import { SettingsStore } from './settings/storage.js';
 import { QualityController, adapterKeyFrom, detectMobile, resolveInitialPreset } from './game/quality.js';
-import { createFrameTimer } from './gpu/frame-timer.js';
+import { createFrameTimer, frameTimerKindFromSearch } from './gpu/frame-timer.js';
 import { installAudio } from './audio/audio-hook.js';
 import { createHud } from './ui/hud.js';
 import { createTouchOverlay, withHaptics } from './ui/touchOverlay.js';
@@ -89,7 +89,7 @@ async function boot() {
   // Frame times reach the quality controller once each frame's GPU work is done (frame-timer.js).
   let quality = null;
   const frameTimer = probeEnabled
-    ? createFrameTimer(gpu, { now: () => performance.now(), onFrame: (milliseconds) => quality?.onFrame(milliseconds, performance.now() / 1000) })
+    ? createFrameTimer(gpu, { kind: frameTimerKindFromSearch(location.search), now: () => performance.now(), onFrame: (milliseconds) => quality?.onFrame(milliseconds, performance.now() / 1000) })
     : null;
   // The game waits in Ready, the swarm running without player contact, until the first gesture.
   const game = await Game.create({ gpu, simulation, renderer, input, capacity: simulation.capacity, effects: withHaptics(audio.cues), frameTimer });

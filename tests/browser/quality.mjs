@@ -7,18 +7,29 @@
 // (the renderer drew each one and the frame counter advanced). Reports the longest frame and the
 // longest time the simulation did not step across the swap. Then applies phoneLow (half
 // simulation rate, interpolated glyphs) and checks 10 more frames render.
+// First, with ?timer=cpu (the CPU fallback forced on this timestamp-capable device), records the
+// milliseconds the CPU frame timer reports over CPU_TIMER_FRAMES frames of idle play (no input
+// after the start click, not forwarded to the controller) and checks their 90th percentile is
+// below the probe's down threshold (FrameTimeProbe defaults: 10 ms x 1.35), so a healthy device
+// is not stepped down by a timer that tracks the vsync interval; it also reports the 'up'
+// threshold (10 ms x 0.6) and the median requestAnimationFrame interval.
 // Writes artifacts/quality-desktop.png and artifacts/quality-phoneLow.png.
 // Usage: node tests/browser/quality.mjs (SMOKE_PORT picks the server port)
 // Exit codes: 0 pass, 1 failure.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
+import { FrameTimeProbe } from '../../src/settings/probe.js';
 
 const CHECK_TIMEOUT_MILLISECONDS = 60_000;
 const START_CLICK_HOLD_FRAMES = 5;
 const PLAY_FRAMES_BEFORE_STEP = 120;
 const FRAMES_AFTER_STEP = 10;
 const ALIVE_TOLERANCE = 0.05;
+const CPU_TIMER_FRAMES = 400;
+const PROBE = new FrameTimeProbe();
+const DOWN_THRESHOLD_MILLISECONDS = PROBE.targetMilliseconds * PROBE.downRatio;
+const UP_THRESHOLD_MILLISECONDS = PROBE.targetMilliseconds * PROBE.upRatio;
 const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
@@ -75,6 +86,56 @@ function feedSlowFrames({ startSeconds, until }) {
   return { frames: -1 };
 }
 
+// Page side: replaces the frame timer's report with a recorder (the controller sees nothing) and
+// records requestAnimationFrame times alongside.
+function installTimerRecorder() {
+  const timer = window.__murmuration.game.frameTimer;
+  window.__timerMilliseconds = [];
+  window.__animationFrameTimes = [];
+  timer.onFrame = (milliseconds) => window.__timerMilliseconds.push(milliseconds);
+  const record = (time) => {
+    window.__animationFrameTimes.push(time);
+    requestAnimationFrame(record);
+  };
+  requestAnimationFrame(record);
+}
+
+function percentile(values, fraction) {
+  const sorted = [...values].sort((first, second) => first - second);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)];
+}
+
+async function clickToStart(page) {
+  const viewport = page.viewportSize();
+  // Held for a few frames, as a person's click is: input samples the button once per step.
+  await page.mouse.move(viewport.width / 2, viewport.height / 2);
+  await page.mouse.down();
+  try {
+    await waitFrames(page, START_CLICK_HOLD_FRAMES);
+  } finally {
+    await page.mouse.up();
+  }
+}
+
+// The CPU frame timer in idle play, against the probe thresholds.
+async function measureCpuTimer(page, url, expect, lines) {
+  await page.goto(url + '?timer=cpu');
+  await page.waitForFunction(() => window.__murmuration?.ready === true, null, { timeout: CHECK_TIMEOUT_MILLISECONDS });
+  const timerName = await page.evaluate(() => window.__murmuration.game.frameTimer?.constructor.name);
+  expect(timerName === 'CpuFrameTimer', `?timer=cpu frame timer ${timerName} (need CpuFrameTimer)`);
+  await clickToStart(page);
+  await page.evaluate(installTimerRecorder);
+  await page.waitForFunction((count) => window.__timerMilliseconds.length >= count, CPU_TIMER_FRAMES, { timeout: CHECK_TIMEOUT_MILLISECONDS });
+  const recorded = await page.evaluate(() => ({ milliseconds: window.__timerMilliseconds, frames: window.__animationFrameTimes, phase: window.__murmuration.stats?.phase }));
+  const values = recorded.milliseconds.slice(0, CPU_TIMER_FRAMES);
+  const intervals = recorded.frames.slice(1).map((time, index) => time - recorded.frames[index]);
+  const p90 = percentile(values, 0.9);
+  expect(p90 < DOWN_THRESHOLD_MILLISECONDS, `CPU timer p90 ${p90.toFixed(2)} ms over ${values.length} frames of idle play (need below the down threshold ${DOWN_THRESHOLD_MILLISECONDS.toFixed(1)} ms)`);
+  lines.push(`MEASURED CPU timer: p50 ${percentile(values, 0.5).toFixed(2)} ms, p90 ${p90.toFixed(2)} ms, maximum ${Math.max(...values).toFixed(2)} ms; up threshold ${UP_THRESHOLD_MILLISECONDS.toFixed(1)} ms ${p90 < UP_THRESHOLD_MILLISECONDS ? 'met (up steps expected)' : 'not met (no up steps)'}; median frame interval ${percentile(intervals, 0.5).toFixed(2)} ms; phase ${recorded.phase}`);
+  // Nothing was applied, so storage holds no preset; clear it anyway for the probe run below.
+  await page.evaluate(() => localStorage.clear());
+}
+
 function analyzeSwap(records, oldCapacity, newCapacity) {
   const installIndex = records.findIndex((entry) => entry.capacity === newCapacity);
   const applyIndex = records.findIndex((entry) => entry.applying);
@@ -124,11 +185,12 @@ async function run() {
     const launched = await launchWebGpuBrowser();
     browser = launched.browser;
     const { page } = launched;
-    await page.goto(server.url);
-    await page.waitForFunction(() => window.__murmuration?.ready === true, null, { timeout: CHECK_TIMEOUT_MILLISECONDS });
     const lines = [];
     const failures = [];
     const expect = (ok, text) => { lines.push(`${ok ? 'PASS' : 'FAIL'} ${text}`); if (!ok) failures.push(text); };
+    await measureCpuTimer(page, server.url, expect, lines);
+    await page.goto(server.url);
+    await page.waitForFunction(() => window.__murmuration?.ready === true, null, { timeout: CHECK_TIMEOUT_MILLISECONDS });
 
     const start = await page.evaluate(() => ({
       preset: window.__murmuration.quality.current,
@@ -137,15 +199,7 @@ async function run() {
     }));
     expect(start.preset === 'desktop' && start.capacity === 524288, `starts at ${start.preset} with capacity ${start.capacity} (need desktop, 524288), frame timer ${start.timestamps}`);
     await page.evaluate(installRecorder);
-    const viewport = page.viewportSize();
-    // Held for a few frames, as a person's click is: input samples the button once per step.
-    await page.mouse.move(viewport.width / 2, viewport.height / 2);
-    await page.mouse.down();
-    try {
-      await waitFrames(page, START_CLICK_HOLD_FRAMES);
-    } finally {
-      await page.mouse.up();
-    }
+    await clickToStart(page);
     await waitFrames(page, PLAY_FRAMES_BEFORE_STEP);
     const phase = await page.evaluate(() => window.__murmuration.stats?.phase);
     expect(phase === 'playing', `phase ${phase} before the step (need playing)`);

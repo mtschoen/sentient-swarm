@@ -6,7 +6,7 @@
 //     queue.onSubmittedWorkDone, so CPU encoding and GPU execution both count.
 //   TimestampFrameTimer (timestamp-query): the GPU time inside every section, summed per frame,
 //     from timestamps written by empty compute passes at each section's edges.
-// createFrameTimer picks the timestamp one when the device has the feature.
+// createFrameTimer picks the timestamp one when the device has the feature, unless ?timer=cpu.
 const MAXIMUM_SECTIONS = 8;
 const QUERY_COUNT = MAXIMUM_SECTIONS * 2;
 const TIMESTAMP_BYTES = 8;
@@ -122,7 +122,13 @@ export class TimestampFrameTimer {
   }
 }
 
-export function createFrameTimer(gpu, { now, onFrame }) {
-  if (gpu.hasTimestampQuery) return new TimestampFrameTimer({ device: gpu.device, onFrame });
+// ?timer=cpu forces the CPU timer on a device with timestamp-query (quality.mjs measures it).
+export function frameTimerKindFromSearch(search) {
+  return new URLSearchParams(search).get('timer') === 'cpu' ? 'cpu' : 'auto';
+}
+
+// kind: 'auto' (timestamps when the device has the feature) or 'cpu'.
+export function createFrameTimer(gpu, { now, onFrame, kind = 'auto' }) {
+  if (gpu.hasTimestampQuery && kind !== 'cpu') return new TimestampFrameTimer({ device: gpu.device, onFrame });
   return new CpuFrameTimer({ queue: gpu.device.queue, now, onFrame });
 }
