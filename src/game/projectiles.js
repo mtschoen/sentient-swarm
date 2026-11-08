@@ -17,7 +17,7 @@
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
-import { SHADER_CONSTANTS, SPECIES_COUNT, WORKGROUP_SIZE } from '../sim/layout.js';
+import { PROJECTILE_FLAG_ALIVE, SHADER_CONSTANTS, SPECIES_COUNT, WORKGROUP_SIZE } from '../sim/layout.js';
 import { SPECIES_FIELDS } from '../sim/species.js';
 import {
   BEAM_SWEEP_MINIMUM_REACH_SCALE, DEFAULT_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, MAXIMUM_BASE_KILL_BUDGET,
@@ -27,9 +27,6 @@ import {
 export const PROJECTILE_STRIDE_BYTES = 48;
 export const DEFAULT_PROJECTILE_CAPACITY = 8192;
 export const BEAM_SLOT = 0;
-// Matches PROJECTILE_KIND_BEAM and PROJECTILE_FLAG_ALIVE in common.wgsl.
-const BEAM_KIND = 6;
-const FLAG_ALIVE = 1;
 // The beam's lifetime is its kill reach scale (the step pass leaves the beam slot alone): 1 is full.
 const FULL_BEAM_REACH = 1;
 const DEGREES_PER_RADIAN = 180 / Math.PI;
@@ -49,7 +46,7 @@ export function packProjectile(view, byteOffset, { x, y, velocityX, velocityY, r
   const floats = [x, y, x, y, velocityX, velocityY, radius, lifetime];
   floats.forEach((value, index) => view.setFloat32(byteOffset + index * BYTES_PER_FLOAT, value, true));
   view.setUint32(byteOffset + 32, kind, true);
-  view.setUint32(byteOffset + 36, FLAG_ALIVE, true);
+  view.setUint32(byteOffset + 36, PROJECTILE_FLAG_ALIVE, true);
   view.setFloat32(byteOffset + 40, seed, true);
   view.setFloat32(byteOffset + 44, extra, true);
 }
@@ -134,7 +131,7 @@ export function beamSpawn(beam, previousDirection = null, sweepThresholdDegrees 
     velocityY,
     radius: beam.halfWidth,
     lifetime: beamReachScale(previousUnit, { x: velocityX, y: velocityY }, sweepThresholdDegrees),
-    kind: BEAM_KIND,
+    kind: PROJECTILE_KINDS.beam,
     seed: hasPrevious ? previousUnit.x : velocityX,
     extra: hasPrevious ? previousUnit.y : velocityY,
   };

@@ -12,11 +12,11 @@
 // - main: the clear is total: spawning agents die too. atomicAnd clears every alive bit and only a
 //   thread that saw the bit set counts the kill, into killsUnscored (these kills never score).
 //   Every kill splashes params.killBurstParticles + params.killFragmentParticles particles in its
-//   species hue (dimmed by killAllParticleValue, a light budget) while the free particle slots (pool size minus
-//   liveCount and the death flood) cover the whole clear; past that each kill's burst is thinned
-//   (thinnedBurstCount, seeded per slot) to an expected free / killAllAlive particles,
-//   so a clear through a full arena spreads the pool evenly over the arena instead of spending it
-//   on the first slots. The step's shared budget (grantedParticleCount) still caps the total, so
+//   species hue (dimmed by killAllParticleValue, a light budget) while the free particle slots
+//   (pool size minus liveCount and the death flood) cover the whole clear; past that each kill's
+//   burst is thinned (thinnedBurstCount, seeded per slot) to an expected free / killAllAlive
+//   particles, so a clear through a full arena spreads the pool evenly over the arena instead
+//   of spending it on the first slots. The step's shared budget (grantedParticleCount) still caps the total, so
 //   the bursts never ask for more particles than were free; slots are reused from the cursor,
 //   oldest first.
 //   Every kill adds 1 / THREAT_KILLS_PER_UNIT of a threat unit to its coarse cell (one unit per

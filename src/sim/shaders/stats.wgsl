@@ -4,10 +4,10 @@
 //   (playerHitSequence, hitLatch, kills).
 // Each workgroup counts its alive agents in workgroup atomics, then thread 0 flushes every
 // nonzero counter with one global atomicAdd (the counters are words 0..SPECIES_COUNT). Global
-// thread 0 stores params.frameSequence. The kill and ring words and the tail are never touched here: the
-// step clears the per-frame prefix at its start and kill passes add to killsUnscored there and to
-// kills, which sits in the tail and is cumulative. Threads past capacity read no agent but still reach the
-// barrier, which must stay in uniform control flow (FXC enforces this).
+// thread 0 stores params.frameSequence. The kill and ring words and the tail are never touched
+// here: the step clears the per-frame prefix at its start and kill passes add to killsUnscored
+// there and to kills, which sits in the tail and is cumulative. Threads past capacity read no
+// agent but still reach the barrier, which must stay in uniform control flow (FXC enforces this).
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read> agents: array<Agent>;

@@ -1,4 +1,6 @@
 // CPU-side layout constants shared by every simulation shader and buffer allocation.
+import { PROJECTILE_KINDS } from '../game/weaponTypes.js';
+
 export const ARENA_WIDTH = 16;
 export const ARENA_HEIGHT = 9;
 export const SPECIES_COUNT = 5;
@@ -14,6 +16,8 @@ export const AGENT_OFFSETS = { position: 0, velocity: 8, species: 16, flags: 20,
 export const AGENT_FLAG_ALIVE = 1;
 export const AGENT_SPAWN_FRAMES_SHIFT = 8;
 export const AGENT_SPAWN_FRAMES_MASK = 0xff00;
+// Projectile struct flags bit 0 (common.wgsl).
+export const PROJECTILE_FLAG_ALIVE = 1;
 
 export function gridDimensions(neighborRadius) {
   const cellSize = neighborRadius;
@@ -66,4 +70,12 @@ export const SHADER_CONSTANTS = {
   STAT_LAST_RING_Y: STATS_INDICES.lastRingY,
   STAT_PLAYER_HIT_SEQUENCE: STATS_INDICES.playerHitSequence,
   STAT_HIT_LATCH: STATS_INDICES.hitLatch,
+  PROJECTILE_KIND_BULLET: PROJECTILE_KINDS.bullet,
+  PROJECTILE_KIND_SCATTER: PROJECTILE_KINDS.scatter,
+  PROJECTILE_KIND_RAIL: PROJECTILE_KINDS.rail,
+  PROJECTILE_KIND_PULSE_ORB: PROJECTILE_KINDS.pulseOrb,
+  PROJECTILE_KIND_PULSE_RING: PROJECTILE_KINDS.pulseRing,
+  PROJECTILE_KIND_SIDEWINDER: PROJECTILE_KINDS.sidewinder,
+  PROJECTILE_KIND_BEAM: PROJECTILE_KINDS.beam,
+  PROJECTILE_FLAG_ALIVE,
 };

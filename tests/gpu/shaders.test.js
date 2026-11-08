@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { loadShader, substituteConstants, prependCommon } from '../../src/gpu/shaders.js';
-import { SHADER_CONSTANTS } from '../../src/sim/layout.js';
+import { PROJECTILE_FLAG_ALIVE, SHADER_CONSTANTS } from '../../src/sim/layout.js';
+import { PROJECTILE_KINDS } from '../../src/game/weaponTypes.js';
 
 test('substituteConstants replaces every token occurrence', () => {
   assert.equal(substituteConstants('a __X__ b __X__ __Y__', { X: 1, Y: 'two' }), 'a 1 b 1 two');
@@ -44,4 +45,31 @@ test('common.wgsl resolves fully with the standard constants', async () => {
   assert.ok(!result.includes('__'));
   assert.ok(result.includes('struct Agent'));
   assert.ok(result.includes('struct SimParams'));
+});
+
+test('projectile kind constants substituted into WGSL equal PROJECTILE_KINDS', async () => {
+  const read = (name) => readFile(new URL(`../../src/sim/shaders/${name}.wgsl`, import.meta.url), 'utf8');
+  const commonSource = await read('common');
+  const common = substituteConstants(commonSource, SHADER_CONSTANTS);
+  const collide = prependCommon(substituteConstants(await read('projectiles_collide'), SHADER_CONSTANTS), common);
+  const names = {
+    bullet: 'PROJECTILE_KIND_BULLET',
+    scatter: 'PROJECTILE_KIND_SCATTER',
+    rail: 'PROJECTILE_KIND_RAIL',
+    pulseOrb: 'PROJECTILE_KIND_PULSE_ORB',
+    pulseRing: 'PROJECTILE_KIND_PULSE_RING',
+    sidewinder: 'PROJECTILE_KIND_SIDEWINDER',
+    beam: 'PROJECTILE_KIND_BEAM',
+  };
+  assert.deepEqual(Object.keys(names).sort(), Object.keys(PROJECTILE_KINDS).sort());
+  for (const [kind, name] of Object.entries(names)) {
+    assert.ok(commonSource.includes(`const ${name}: u32 = __${name}__u;`), `${name} is a substituted token`);
+    assert.ok(collide.includes(`const ${name}: u32 = ${PROJECTILE_KINDS[kind]}u;`), `${name} = ${PROJECTILE_KINDS[kind]}`);
+  }
+  assert.ok(commonSource.includes('const PROJECTILE_FLAG_ALIVE: u32 = __PROJECTILE_FLAG_ALIVE__u;'));
+  assert.ok(collide.includes(`const PROJECTILE_FLAG_ALIVE: u32 = ${PROJECTILE_FLAG_ALIVE}u;`));
+  // Every kind test in the collide entry points compares against a named constant, never a number.
+  const kindTests = collide.match(/\.kind\s*[!=]=\s*\w+/g);
+  assert.ok(kindTests.length >= 4);
+  for (const kindTest of kindTests) assert.match(kindTest, /[!=]=\s*PROJECTILE_KIND_[A-Z_]+$/);
 });

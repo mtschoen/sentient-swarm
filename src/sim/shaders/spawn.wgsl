@@ -150,7 +150,7 @@ fn gatePoint(species: u32, biased: bool, total: f32, spread: f32, randomState: p
 
 fn coarseDensity(position: vec2f) -> f32 {
   let cell = coarseCellIndexFor(position);
-  return dot(field[cell * 2u], vec4f(1.0)) + field[cell * 2u + 1u].x;
+  return dot(field[cell * VECTORS_PER_CELL], vec4f(1.0)) + field[cell * VECTORS_PER_CELL + 1u].x;
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)

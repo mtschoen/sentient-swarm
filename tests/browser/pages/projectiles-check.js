@@ -12,11 +12,11 @@
 // (c) with the block at x = 15.5 pinned against the right wall, a beam for one frame from (8, 3.5)
 //     toward (16, 4.5) kills agents, leaves none within 0.09 of the ray, the frame's submit
 //     completes with the device alive, and the frame after the beam is cleared kills nothing;
-// (d) a pulseOrb fired into the block converts to a pulseRing (its slot reads kind 4); 0.1 s later
-//     kills exist beyond 0.3 of the detonation point and every agent beyond the ring radius plus
-//     0.1 is alive while no agent within the ring radius is (the band sweeps without gaps); the
-//     ring slot is dead after its lifetime; stats ringsThisFrame is 1 in the detonation step only,
-//     with lastRingX and lastRingY at the ring;
+// (d) a pulseOrb fired into the block converts to a pulseRing (its slot reads the pulseRing
+//     kind); 0.1 s later kills exist beyond 0.3 of the detonation point and every agent beyond
+//     the ring radius plus 0.1 is alive while no agent within the ring radius is (the band
+//     sweeps without gaps); the ring slot is dead after its lifetime; stats ringsThisFrame is 1
+//     in the detonation step only, with lastRingX and lastRingY at the ring;
 // (e) a sidewinder flying along the block's lower edge turns toward the block (positive y
 //     velocity) and keeps its speed;
 // (f) swept beam: agents spread uniformly over radii 1 to 6 from the ship at (4, 4.5) and angles
@@ -40,18 +40,17 @@
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
-import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '/src/sim/layout.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, PROJECTILE_FLAG_ALIVE, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES } from '/src/sim/params.js';
 import { defaultSpecies } from '/src/sim/species.js';
-import { WEAPON_TYPES } from '/src/game/weaponTypes.js';
+import { PROJECTILE_KINDS, WEAPON_TYPES } from '/src/game/weaponTypes.js';
 
 const CAPACITY = 65536;
 const AGENT_COUNT = 10000;
 const BLOCK_HALF_SIZE = 1;
 const STEP_SECONDS = 1 / 60;
 const READBACK_ATTEMPTS = 20;
-const KIND = { bullet: 0, rail: 2, pulseOrb: 3, pulseRing: 4 };
 const PROJECTILE_STRIDE_BYTES = 48;
 const PROJECTILE_OFFSETS = { position: 0, velocity: 16, radius: 24, lifetime: 28, kind: 32, flags: 36 };
 const ARENA_INSET = 0.001;
@@ -176,7 +175,7 @@ class Harness {
       radius: view.getFloat32(base + PROJECTILE_OFFSETS.radius, true),
       lifetime: view.getFloat32(base + PROJECTILE_OFFSETS.lifetime, true),
       kind: view.getUint32(base + PROJECTILE_OFFSETS.kind, true),
-      alive: (view.getUint32(base + PROJECTILE_OFFSETS.flags, true) & 1) !== 0,
+      alive: (view.getUint32(base + PROJECTILE_OFFSETS.flags, true) & PROJECTILE_FLAG_ALIVE) !== 0,
     };
   }
 }
@@ -204,7 +203,7 @@ function sweepSpawn(kind) {
 
 async function runRailCase(harness) {
   const positions = harness.seedBlock(CENTER);
-  const slot = harness.projectiles.queueSpawn(sweepSpawn(KIND.rail));
+  const slot = harness.projectiles.queueSpawn(sweepSpawn(PROJECTILE_KINDS.rail));
   const kills = await harness.steps(SWEEP_FRAMES);
   const alive = await harness.aliveFlags();
   const projectile = await harness.projectileSlot(slot);
@@ -220,11 +219,11 @@ async function runRailCase(harness) {
 
 async function runOverlapCase(harness) {
   harness.seedBlock(CENTER);
-  harness.projectiles.queueSpawn(sweepSpawn(KIND.bullet));
+  harness.projectiles.queueSpawn(sweepSpawn(PROJECTILE_KINDS.bullet));
   const single = await harness.steps(SWEEP_FRAMES);
   harness.seedBlock(CENTER);
-  harness.projectiles.queueSpawn(sweepSpawn(KIND.bullet));
-  harness.projectiles.queueSpawn(sweepSpawn(KIND.bullet));
+  harness.projectiles.queueSpawn(sweepSpawn(PROJECTILE_KINDS.bullet));
+  harness.projectiles.queueSpawn(sweepSpawn(PROJECTILE_KINDS.bullet));
   const cursorBefore = await harness.particleCursor();
   const double = await harness.steps(SWEEP_FRAMES);
   const cursorDelta = ((await harness.particleCursor()) - cursorBefore) >>> 0;
@@ -268,17 +267,17 @@ const RING_EXPIRY_FRAMES = 40;
 
 async function runPulseCase(harness) {
   const positions = harness.seedBlock(CENTER);
-  const slot = harness.projectiles.queueSpawn({ x: 5, y: CENTER[1], velocityX: 3, velocityY: 0, radius: 0.05, lifetime: 2, kind: KIND.pulseOrb, extra: 20 });
+  const slot = harness.projectiles.queueSpawn({ x: 5, y: CENTER[1], velocityX: 3, velocityY: 0, radius: 0.05, lifetime: 2, kind: PROJECTILE_KINDS.pulseOrb, extra: 20 });
   let kills = 0;
   let projectile = null;
   let ringsBefore = 0;
   for (let frame = 0; frame < ORB_FRAME_LIMIT; frame += 1) {
     kills += await harness.step();
     projectile = await harness.projectileSlot(slot);
-    if (projectile.kind === KIND.pulseRing) break;
+    if (projectile.kind === PROJECTILE_KINDS.pulseRing) break;
     ringsBefore += harness.lastStats.ringsThisFrame;
   }
-  if (projectile.kind !== KIND.pulseRing) return verdictLine([[false, `(d) orb slot ${slot} still kind ${projectile.kind} after ${ORB_FRAME_LIMIT} frames (need 4)`]]);
+  if (projectile.kind !== PROJECTILE_KINDS.pulseRing) return verdictLine([[false, `(d) orb slot ${slot} still kind ${projectile.kind} after ${ORB_FRAME_LIMIT} frames (need ${PROJECTILE_KINDS.pulseRing})`]]);
   const detonation = projectile.position;
   const ringStats = harness.lastStats;
   const ringAt = [ringStats.lastRingX, ringStats.lastRingY];
@@ -312,7 +311,7 @@ const SIDEWINDER_FRAMES = 10;
 
 async function runSidewinderCase(harness) {
   harness.seedBlock(CENTER);
-  const slot = harness.projectiles.queueSpawn({ x: 7.5, y: 3.3, velocityX: SIDEWINDER_SPEED, velocityY: 0, radius: 0.02, lifetime: 1, kind: 5, extra: 2 });
+  const slot = harness.projectiles.queueSpawn({ x: 7.5, y: 3.3, velocityX: SIDEWINDER_SPEED, velocityY: 0, radius: 0.02, lifetime: 1, kind: PROJECTILE_KINDS.sidewinder, extra: 2 });
   await harness.steps(SIDEWINDER_FRAMES);
   const sidewinder = await harness.projectileSlot(slot);
   const speed = Math.hypot(...sidewinder.velocity);
@@ -425,7 +424,7 @@ async function runEnergyBallCase(harness) {
   const pathEnd = [start[0] + direction[0] * 20, start[1] + direction[1] * 20];
   const slot = harness.projectiles.queueSpawn({
     x: start[0], y: start[1], velocityX: direction[0] * ball.speed, velocityY: direction[1] * ball.speed,
-    radius: ball.radius, lifetime: ball.lifetime, kind: KIND.bullet,
+    radius: ball.radius, lifetime: ball.lifetime, kind: PROJECTILE_KINDS.bullet,
   });
   let kills = 0;
   let frames = 0;
@@ -458,7 +457,7 @@ async function runKillBudgetCase(harness) {
   const direction = [Math.cos(BALL_ANGLE), Math.sin(BALL_ANGLE)];
   const slot = harness.projectiles.queueSpawn({
     x: CENTER[0] - direction[0] * 1.5, y: CENTER[1] - direction[1] * 1.5, velocityX: direction[0] * ball.speed, velocityY: direction[1] * ball.speed,
-    radius: ball.radius, lifetime: ball.lifetime, kind: KIND.bullet,
+    radius: ball.radius, lifetime: ball.lifetime, kind: PROJECTILE_KINDS.bullet,
   });
   let kills = 0;
   let frames = 0;

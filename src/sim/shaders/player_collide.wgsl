@@ -11,8 +11,9 @@
 // touches the player; the first toucher to set the latch (atomicOr returned 0) stores
 // playerHitSequence = frameSequence (atomicMax) and dies: atomicAnd clears its alive bit, the kill
 // counts once into killsUnscored (contact never scores), and it splashes params.killBurstParticles
-// particles in its species hue (from the step's shared particle budget). Later touchers in the same step see the latch and do nothing, so
-// one latch period reports exactly one hit and one contact kill.
+// particles in its species hue (from the step's shared particle budget). Later touchers in the
+// same step see the latch and do nothing, so one latch period reports exactly one hit and one
+// contact kill.
 //
 // Storage buffers: agents, cellCounts, cellOffsets, sortedIndices, stats, particles (pool cursor
 // in its header), species table = 7; uniform: params.

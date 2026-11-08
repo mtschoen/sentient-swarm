@@ -7,6 +7,8 @@ const MAXIMUM_NEIGHBOR_SAMPLES: u32 = __MAXIMUM_NEIGHBOR_SAMPLES__u;
 const COARSE_COLUMNS: u32 = __COARSE_COLUMNS__u;
 const COARSE_ROWS: u32 = __COARSE_ROWS__u;
 const COARSE_CHANNELS: u32 = __COARSE_CHANNELS__u;
+// Coarse field buffers viewed as array<vec4f> hold each cell as a vec4 pair: channels 0..3, then 4..7.
+const VECTORS_PER_CELL: u32 = COARSE_CHANNELS / 4u;
 const THREAT_FIXED_POINT_SCALE: f32 = 256.0;
 
 const ARENA_WIDTH: f32 = 16.0;
@@ -213,8 +215,9 @@ struct ParticlePool {
 // Kill bursts share one per-step budget, the slots that were free after the last particle step
 // (pool size minus liveCount), so the step's bursts never ask for more particles than were free.
 // The budget bounds only the count: slots are reused from the cursor, oldest first, so near a full
-// pool a burst can still overwrite particles in flight at the cursor. A kill asks for requested particles after the step's kills before it asked for
-// claimedBefore in total, and gets what is left of the budget, at most requested.
+// pool a burst can still overwrite particles in flight at the cursor. A kill asks for requested
+// particles after the step's kills before it asked for claimedBefore in total, and gets what is
+// left of the budget, at most requested.
 fn grantedParticleCount(requested: u32, claimedBefore: u32, liveCount: u32, poolSize: u32) -> u32 {
   let free = poolSize - min(liveCount, poolSize);
   if (claimedBefore >= free) {
@@ -257,14 +260,16 @@ struct Projectile {
   extra: f32,
 }
 
-const PROJECTILE_KIND_BULLET: u32 = 0u;
-const PROJECTILE_KIND_SCATTER: u32 = 1u;
-const PROJECTILE_KIND_RAIL: u32 = 2u;
-const PROJECTILE_KIND_PULSE_ORB: u32 = 3u;
-const PROJECTILE_KIND_PULSE_RING: u32 = 4u;
-const PROJECTILE_KIND_SIDEWINDER: u32 = 5u;
-const PROJECTILE_KIND_BEAM: u32 = 6u;
-const PROJECTILE_FLAG_ALIVE: u32 = 1u;
+// Kind numbers come from PROJECTILE_KINDS (weaponTypes.js) and the flag from PROJECTILE_FLAG_ALIVE
+// (layout.js), through SHADER_CONSTANTS.
+const PROJECTILE_KIND_BULLET: u32 = __PROJECTILE_KIND_BULLET__u;
+const PROJECTILE_KIND_SCATTER: u32 = __PROJECTILE_KIND_SCATTER__u;
+const PROJECTILE_KIND_RAIL: u32 = __PROJECTILE_KIND_RAIL__u;
+const PROJECTILE_KIND_PULSE_ORB: u32 = __PROJECTILE_KIND_PULSE_ORB__u;
+const PROJECTILE_KIND_PULSE_RING: u32 = __PROJECTILE_KIND_PULSE_RING__u;
+const PROJECTILE_KIND_SIDEWINDER: u32 = __PROJECTILE_KIND_SIDEWINDER__u;
+const PROJECTILE_KIND_BEAM: u32 = __PROJECTILE_KIND_BEAM__u;
+const PROJECTILE_FLAG_ALIVE: u32 = __PROJECTILE_FLAG_ALIVE__u;
 
 fn pcgHash(value: u32) -> u32 {
   let state = value * 747796405u + 2891336453u;

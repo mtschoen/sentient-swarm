@@ -23,8 +23,6 @@
 @group(0) @binding(2) var<storage, read> field: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> stats: array<atomic<u32>, STATS_WORD_COUNT>;
 
-// field holds COARSE_CHANNELS floats per cell as vec4 pairs: channels 0..3, then 4..7.
-const VECTORS_PER_CELL: u32 = COARSE_CHANNELS / 4u;
 const RING_START_RADIUS: f32 = 0.05;
 const RING_LIFETIME: f32 = 0.5;
 // World units per second.
@@ -47,7 +45,8 @@ fn isInsideArena(position: vec2f) -> bool {
   return all(position >= vec2f(0.0, 0.0)) && all(position <= vec2f(ARENA_WIDTH, ARENA_HEIGHT));
 }
 
-// Rotates velocity toward the density gradient by at most maximumTurn radians.
+// Rotates velocity toward the density gradient by at most maximumTurn radians. totalDensity clamps
+// to the field, so on the edge cells the difference is one-sided.
 fn steerTowardDensity(position: vec2f, velocity: vec2f, maximumTurn: f32) -> vec2f {
   let cell = coarseCellCoordinate(position);
   let gradient = vec2f(

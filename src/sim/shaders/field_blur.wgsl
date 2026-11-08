@@ -6,8 +6,7 @@
 @group(0) @binding(0) var<storage, read> raw: array<vec4f>;
 @group(0) @binding(1) var<storage, read_write> blurred: array<vec4f>;
 
-// raw and blurred hold COARSE_CHANNELS floats per cell as vec4 pairs: channels 0..3, then 4..7.
-const VECTORS_PER_CELL: u32 = COARSE_CHANNELS / 4u;
+// raw and blurred hold each cell as VECTORS_PER_CELL vec4s (common.wgsl): channels 0..3, then 4..7.
 
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn blur(@builtin(global_invocation_id) globalId: vec3u) {

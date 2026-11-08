@@ -7,8 +7,8 @@
 // at 0. Its thread is the only one walking it, so a private counter is exact.
 //
 // Entry main, one thread per projectile slot (the beam slot is skipped):
-// - bullet, scatter, rail, pulseOrb, sidewinder: that thread walks the capsule from previousPosition to position
-//   with reach radius + CAPSULE_KILL_MARGIN. Its cells are walked along the segment's major axis:
+// - bullet, scatter, rail, pulseOrb, sidewinder: that thread walks the capsule from
+//   previousPosition to position with reach radius + CAPSULE_KILL_MARGIN. Its cells are walked along the segment's major axis:
 //   for every grid column (or row) the capsule touches, the minor-axis cell span is the
 //   segment's minor range over that column widened by the reach on both sides, then by the reach
 //   along the major axis for the end caps. At most CAPSULE_CELL_BUDGET cells. An agent dies when

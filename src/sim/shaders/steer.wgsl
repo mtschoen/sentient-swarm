@@ -14,8 +14,8 @@
 //   other species' gradients; flee down the threat gradient; pressure down the total-density
 //   gradient with weight min(pressure * (density - targetDensity), PRESSURE_MAXIMUM_MULTIPLE) once
 //   density exceeds targetDensity (only while params.coarseFieldPressure is 1, the default; the
-//   lab's coarse-field toggle turns it off). The clamp is one-sided: negative pressure is not valid (species
-//   defaults are non-negative). Like the other field terms its direction saturates
+//   lab's coarse-field toggle turns it off). The clamp is one-sided: negative pressure is not
+//   valid (species defaults are non-negative). Like the other field terms its direction saturates
 //   (saturatedDirection), so float noise in a flat over-dense interior pushes weakly instead of at
 //   full strength in a random direction.
 //
@@ -52,9 +52,6 @@ const ARRIVAL_BRAKING: f32 = 0.7;
 // desired velocity the turn clamp has to absorb.
 const PRESSURE_MAXIMUM_MULTIPLE: f32 = 2.0;
 const MINIMUM_LENGTH: f32 = 0.000001;
-
-// raw and blurred hold COARSE_CHANNELS floats per cell as vec4 pairs: channels 0..3, then 4..7.
-const VECTORS_PER_CELL: u32 = COARSE_CHANNELS / 4u;
 
 struct CoarseSample {
   low: vec4f,
@@ -216,7 +213,9 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   let previousColumn = coarseSample(coordinate - vec2i(1, 0));
   let nextRow = coarseSample(coordinate + vec2i(0, 1));
   let previousRow = coarseSample(coordinate - vec2i(0, 1));
-  // Central differences in agents per coarse cell per cell, held in CoarseSample layout.
+  // Central differences in agents per coarse cell per cell, held in CoarseSample layout. On the
+  // edge cells coarseSample clamps the outside neighbor to the cell itself, so the difference
+  // there is one-sided and still halved.
   let gradientLowX = (nextColumn.low - previousColumn.low) * 0.5;
   let gradientLowY = (nextRow.low - previousRow.low) * 0.5;
   let gradientHighX = (nextColumn.high - previousColumn.high) * 0.5;
