@@ -12,6 +12,8 @@ function createFakeDocument() {
     return {
       tagName, textContent: '', children: [], style, hidden: false,
       classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name), contains: (name) => classes.has(name) },
+      attributes: {},
+      setAttribute(name, value) { this.attributes[name] = value; },
       append(...nodes) { this.children.push(...nodes); },
       addEventListener(type, listener) { (listeners[type] ??= []).push(listener); },
       fire(type, event = {}) { (listeners[type] ?? []).forEach((listener) => listener(event)); },
@@ -59,7 +61,7 @@ test('base gun reads BASE', () => {
 test('layout uses the bands when both fit the band text, else the top edge', () => {
   const { hud } = setup();
   const arena = (x, width) => ({ x, y: 0, width, height: 400 });
-  assert.equal(hud.layout(arena(100, 800), { width: 1000, height: 400 }), 'bands');
+  assert.equal(hud.layout(arena(150, 700), { width: 1000, height: 400 }), 'bands');
   assert.equal(hud.layout(arena(20, 960), { width: 1000, height: 540 }), 'top');
   assert.equal(hud.layout(arena(100, 840), { width: 1000, height: 400 }), 'top');
 });
@@ -71,11 +73,11 @@ function windowLayout(width, height) {
   return [{ x: (width - arenaWidth) / 2, y: (height - arenaHeight) / 2, width: arenaWidth, height: arenaHeight }, { width, height }];
 }
 
-test('band text is sized to fit its band: 1920x970 and 1366x650 keep bands, phone landscape uses the top row', () => {
+test('band text is sized to fit its band: 1920x900 and 2560x1300 keep bands, phone landscape uses the top row', () => {
   const { hud, root } = setup();
   const { BAND_TEXT, BAND_PADDING_CSS_PIXELS, MINIMUM_BAND_FONT_CSS_PIXELS } = hudModule;
   assert.ok(BAND_TEXT, 'hud.js exports the band text widths');
-  for (const [width, height] of [[1920, 970], [1366, 650], [2560, 1300]]) {
+  for (const [width, height] of [[1920, 900], [2560, 1300], [1600, 700]]) {
     const [arena, viewport] = windowLayout(width, height);
     assert.equal(hud.layout(arena, viewport), 'bands', `${width}x${height}`);
     const contentWidth = arena.x - BAND_PADDING_CSS_PIXELS;
@@ -89,7 +91,7 @@ test('band text is sized to fit its band: 1920x970 and 1366x650 keep bands, phon
       }
     }
   }
-  for (const [width, height] of [[932, 430], [844, 390], [1280, 720]]) {
+  for (const [width, height] of [[932, 430], [844, 390], [1280, 720], [1920, 970], [1366, 650]]) {
     assert.equal(hud.layout(...windowLayout(width, height)), 'top', `${width}x${height}`);
   }
   // Wide bands get the full sizes.

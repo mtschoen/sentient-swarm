@@ -19,10 +19,11 @@ function isWebGpuError(text) {
   return lowered.includes('webgpu') && lowered.includes('error');
 }
 
-export async function launchWebGpuBrowser({ measuring = false } = {}) {
+// contextOptions (viewport, hasTouch, isMobile, deviceScaleFactor) opens the page in its own context.
+export async function launchWebGpuBrowser({ measuring = false, contextOptions = null } = {}) {
   const argumentsList = measuring ? [...WEBGPU_FLAGS, ...UNCAPPED_FRAME_FLAGS] : WEBGPU_FLAGS;
   const browser = await chromium.launch({ headless: true, args: argumentsList });
-  const page = await browser.newPage();
+  const page = contextOptions ? await (await browser.newContext(contextOptions)).newPage() : await browser.newPage();
   page.consoleErrors = [];
   page.on('console', (message) => {
     const text = message.text();

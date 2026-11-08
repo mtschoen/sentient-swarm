@@ -38,3 +38,19 @@
 .hud-final-score { font-size: clamp(24px, 6vmin, 48px); color: #19e6ff; text-shadow: 0 0 10px #19e6ff; font-variant-numeric: tabular-nums; }
 .hud-play-again { font: inherit; font-size: clamp(16px, 4vmin, 28px); padding: 10px 28px; color: #05060a; background: #ffe84a;
   border: 0; border-radius: 6px; box-shadow: 0 0 18px #ffe84a; cursor: pointer; text-transform: uppercase; }
+
+/* Touch overlay (touchOverlay.js): floating stick visuals and the bomb button. */
+#touch-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 6; font-family: system-ui, sans-serif; font-weight: 800; }
+.touch-stick-base, .touch-stick-knob { position: fixed; left: 0; top: 0; border-radius: 50%; pointer-events: none; }
+.touch-stick-base { width: 120px; height: 120px; border: 2px solid rgba(25, 230, 255, 0.45); background: rgba(25, 230, 255, 0.06); }
+.touch-stick-knob { width: 52px; height: 52px; background: rgba(25, 230, 255, 0.35); box-shadow: 0 0 14px rgba(25, 230, 255, 0.6); }
+.touch-stick-aim.touch-stick-base { border-color: rgba(255, 47, 208, 0.5); background: rgba(255, 47, 208, 0.06); }
+.touch-stick-aim.touch-stick-knob { background: rgba(255, 47, 208, 0.35); box-shadow: 0 0 14px rgba(255, 47, 208, 0.6); }
+.touch-stick-base[hidden], .touch-stick-knob[hidden], .touch-bomb[hidden] { display: none; }
+/* Lower right side band, clear of both thumbs; coarse pointers only. */
+.touch-bomb { display: none; position: fixed; right: max(8px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom));
+  width: 64px; height: 64px; box-sizing: border-box; border-radius: 50%; align-items: center; justify-content: center;
+  font-size: 12px; letter-spacing: 1px; color: #ff8a1f; border: 2px solid #ff8a1f; background: rgba(255, 138, 31, 0.14);
+  box-shadow: 0 0 12px rgba(255, 138, 31, 0.6); pointer-events: auto; touch-action: none; user-select: none; }
+.touch-bomb-empty { opacity: 0.35; }
+@media (pointer: coarse) { .touch-bomb:not([hidden]) { display: flex; } }

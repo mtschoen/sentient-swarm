@@ -13,9 +13,9 @@ export const BAND_TEXT = Object.freeze({
 // hud.css .hud-panel horizontal padding, both sides.
 export const BAND_PADDING_CSS_PIXELS = 16;
 // Bands are used only when no band text would shrink below this; narrower bands (phones in
-// landscape) use the top row. A maximized 1080p browser (98 px bands) keeps the bands with the
-// weapon name at about 10.6 px and the multiplier at about 41 px.
-export const MINIMUM_BAND_FONT_CSS_PIXELS = 10;
+// landscape) use the top row. The floor is 13 px (owner ruling R8): the weapon name needs bands
+// about 116 px wide, so a maximized 1080p browser (98 px bands) now uses the top row too.
+export const MINIMUM_BAND_FONT_CSS_PIXELS = 13;
 const TOP_OPACITY = '0.6';
 const RESTART_GUARD_MILLISECONDS = 700;
 const ROMAN = ['', 'I', 'II', 'III'];
@@ -70,6 +70,9 @@ export function createHud(rootElement, {
   const playAgain = make('button', 'hud-play-again', 'Play again');
   const gameOver = row('hud-gameover', [make('div', 'hud-gameover-title', 'GAME OVER'), finalScore, playAgain]);
   gameOver.hidden = true;
+  // The panels are display-only: a thumb that lands on one must not start a touch stick (touch.js
+  // skips touches inside data-touch-exclusive rectangles). Their rectangles are just the content.
+  for (const panel of [leftPanel, rightPanel]) panel.setAttribute('data-touch-exclusive', '');
   rootElement.append(leftPanel, rightPanel, gameOver);
 
   // Skip DOM writes for unchanged text: update runs every rendered frame.

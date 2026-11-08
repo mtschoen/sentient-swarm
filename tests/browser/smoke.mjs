@@ -14,6 +14,9 @@
 // must be positive, the box around the ship (captured 60 frames into the fire, while the ship is
 // alive) brighter than the arena mean, the first death after fire frame 300 or never, a run of at
 // least 1800 frames must still kill and score after fire frame 900, and no console errors.
+// --pulse instead arms the pulse weapon through the debug panel's arm select, fires toward the arena
+// center with the synthetic gamepad, and writes artifacts/pulse-ring.png, captured the moment the
+// stats report a ring detonation (ringsThisFrame), so a ring is expanding on screen.
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 // Liveness: every page.evaluate is bounded by EVALUATE_TIMEOUT_MILLISECONDS (a capture resolves only
 // on a later rendered frame, so a renderer that throws or stops would leave it pending forever),
@@ -181,6 +184,33 @@ async function checkStartClear(page) {
   return page.consoleErrors.length > 0 ? `smoke: console errors after the start: ${page.consoleErrors.join(' | ')}` : null;
 }
 
+const PULSE_TIMEOUT_MILLISECONDS = 60_000;
+
+// Arms the pulse weapon (tier 3) from the debug panel, fires right from 2 units left of center, and
+// captures the frame right after the first ring detonation shows in the stats. Returns a failure
+// message, or null.
+async function checkPulse(page) {
+  const begin = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
+  await setSticks(page, [-1, 0, 0, 0]);
+  await waitForFrame(page, begin + PLAY_MOVE_FRAMES);
+  await page.keyboard.press('Backquote');
+  await page.locator('select', { has: page.locator('option[value="pulse"]') }).selectOption('pulse');
+  await page.keyboard.press('Backquote');
+  await page.evaluate(() => document.activeElement?.blur());
+  await setSticks(page, [0, 0, 1, 0]);
+  const captured = await withTimeout(page.evaluate(() => new Promise((resolve) => {
+    const watch = () => {
+      if ((window.__murmuration.stats?.ringsThisFrame ?? 0) > 0) resolve(window.__murmuration.capture());
+      else requestAnimationFrame(watch);
+    };
+    requestAnimationFrame(watch);
+  })), PULSE_TIMEOUT_MILLISECONDS, 'waiting for a pulse ring');
+  await setSticks(page, [0, 0, 0, 0]);
+  await writeDataUrl('pulse-ring.png', captured.pngDataUrl);
+  console.log(`smoke: pulse ring captured, arena mean ${captured.meanLuminance.toFixed(4)}`);
+  return page.consoleErrors.length > 0 ? `smoke: console errors during the pulse capture: ${page.consoleErrors.join(' | ')}` : null;
+}
+
 // Replaces navigator.getGamepads, before any page script runs, with one standard pad whose axes
 // the smoke sets through window.__smokeGamepad.
 function installSyntheticGamepad() {
@@ -305,7 +335,8 @@ async function run(resources) {
     const launched = await launchWebGpuBrowser();
     resources.browser = launched.browser;
     const { page } = launched;
-    if (playFrames !== null) await page.addInitScript(installSyntheticGamepad);
+    const pulseMode = process.argv.includes('--pulse');
+    if (playFrames !== null || pulseMode) await page.addInitScript(installSyntheticGamepad);
 
     await page.goto(url);
     const adapterAvailable = await evaluateWithin(page, 'the adapter probe', async () => {
@@ -335,6 +366,15 @@ async function run(resources) {
       console.error('smoke: console errors:');
       page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
+    }
+    if (pulseMode) {
+      const pulseFailure = await checkPulse(page);
+      if (pulseFailure) {
+        console.error(pulseFailure);
+        return EXIT_FAILURE;
+      }
+      console.log('smoke: ok (pulse)');
+      return EXIT_OK;
     }
     if (playFrames !== null) {
       const playFailure = await checkPlay(page, playFrames);

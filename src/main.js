@@ -16,6 +16,7 @@ import { QualityController, adapterKeyFrom, detectMobile, resolveInitialPreset }
 import { createFrameTimer } from './gpu/frame-timer.js';
 import { installAudio } from './audio/audio-hook.js';
 import { createHud } from './ui/hud.js';
+import { createTouchOverlay, withHaptics } from './ui/touchOverlay.js';
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
 
@@ -76,6 +77,8 @@ async function boot() {
     : { capacity: preset.capacity, neighborRadius: preset.neighborRadius, particleCapacity: preset.particleCapacity });
   renderer = await Renderer.create(gpu, { simulation, viewport });
   const input = createInput(canvas, viewport);
+  // Read by the browser checks (the mobile smoke asserts on the aim vector).
+  window.__murmuration.input = input;
   const audio = installAudio();
   window.__murmuration.audio = audio;
   // Frame times reach the quality controller once each frame's GPU work is done (frame-timer.js).
@@ -84,7 +87,7 @@ async function boot() {
     ? createFrameTimer(gpu, { now: () => performance.now(), onFrame: (milliseconds) => quality?.onFrame(milliseconds, performance.now() / 1000) })
     : null;
   // The game waits in Ready, the swarm running without player contact, until the first gesture.
-  const game = await Game.create({ gpu, simulation, renderer, input, capacity: simulation.capacity, effects: audio.effects, frameTimer });
+  const game = await Game.create({ gpu, simulation, renderer, input, capacity: simulation.capacity, effects: withHaptics(audio.effects), frameTimer });
   quality = new QualityController({ game, store, probe: new FrameTimeProbe(), adapterKey, ceiling: initialPreset.ceiling });
   if (pinnedCapacity === null) quality.start(initialPreset.name, { allowUp: initialPreset.allowUp });
   window.__murmuration.quality = quality;
@@ -98,11 +101,13 @@ async function boot() {
     audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity });
   };
 
+  const touchOverlay = createTouchOverlay(document.getElementById('touch-overlay'), { touch: input.touch, canvas });
   let gameOverShown = false;
   const render = (alpha, deltaSeconds) => {
     game.render(alpha, deltaSeconds);
     const state = game.state;
     hud.update(state);
+    touchOverlay.update(state);
     const isGameOver = state.phase === 'gameOver';
     if (isGameOver && !gameOverShown) hud.showGameOver(state.score, () => game.restart());
     else if (!isGameOver && gameOverShown) hud.hideGameOver();
