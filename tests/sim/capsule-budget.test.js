@@ -90,12 +90,12 @@ test('CAPSULE_CELL_BUDGET covers every capsule kind and tier at every preset', a
   assert.deepEqual(failures, [], `budget ${budget}; worst ${JSON.stringify(worstSeen)}`);
 });
 
-test('CAPSULE_CELL_BUDGET covers the brief reference ball: radius 0.18 at speed 10, cell size 0.08 to 0.12', async () => {
+test('CAPSULE_CELL_BUDGET covers a reference ball of radius 0.2 at speed 10, cell size 0.08 to 0.12', async () => {
   const budget = await shaderConstant('CAPSULE_CELL_BUDGET');
   const margin = await shaderConstant('CAPSULE_KILL_MARGIN');
   for (const cellSize of [0.08, 0.1, 0.12]) {
     for (const stepSeconds of [FIXED_STEP_SECONDS, 2 * FIXED_STEP_SECONDS]) {
-      const cells = worstCellCount(10 * stepSeconds, 0.18 + margin, cellSize);
+      const cells = worstCellCount(10 * stepSeconds, 0.2 + margin, cellSize);
       assert.ok(cells <= budget, `cell size ${cellSize}, step ${stepSeconds.toFixed(4)} s: ${cells} cells against budget ${budget}`);
     }
   }

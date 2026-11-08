@@ -43,12 +43,12 @@ function tiers(shared, perTier) {
 }
 
 export const WEAPON_TYPES = Object.freeze({
-  // Energy balls (owner ruling R19): wide, slow and long lived (the wall usually ends them), so
+  // Energy balls (owner rulings R19, R23): big, slow enough to read and lived out to the wall, so
   // every shot carves a tunnel the swarm cannot close at once; every kind pierces.
   base: Object.freeze({
     kind: PROJECTILE_KINDS.bullet,
     tiers: tiers(
-      { fireInterval: 0.12, projectilesPerShot: 3, spreadRadians: 0.25, speed: 9, radius: 0.15, lifetime: 2 },
+      { fireInterval: 0.12, projectilesPerShot: 3, spreadRadians: 0.35, speed: 10, radius: 0.2, lifetime: 3 },
       [{}, {}, {}],
     ),
   }),

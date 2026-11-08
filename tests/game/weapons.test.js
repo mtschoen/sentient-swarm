@@ -43,7 +43,7 @@ test('spread is centered on the aim direction and uses bullet kind', () => {
   assert.equal(spawns[0].kind, PROJECTILE_KINDS.bullet);
   assert.ok(Math.abs(spawns[1].velocityY) < 1e-9);
   assert.ok(Math.abs(spawns[0].velocityY + spawns[2].velocityY) < 1e-9);
-  assert.ok(Math.abs(Math.atan2(spawns[2].velocityY, spawns[2].velocityX) - 0.125) < 1e-9);
+  assert.ok(Math.abs(Math.atan2(spawns[2].velocityY, spawns[2].velocityX) - WEAPON_TYPES.base.tiers[0].spreadRadians / 2) < 1e-9);
   assert.equal(spawns[0].x, 2);
   assert.equal(spawns[0].seed, 0.5);
 });
@@ -161,16 +161,13 @@ test('type tables satisfy the brief', () => {
 // their Plan B values.
 test('energy ball tables: base and scatter orbs, rail thin and fast, pulse and sidewinders unchanged', () => {
   for (const tier of WEAPON_TYPES.base.tiers) {
-    assert.deepEqual(
-      { fireInterval: tier.fireInterval, projectilesPerShot: tier.projectilesPerShot, spreadRadians: tier.spreadRadians, speed: tier.speed, radius: tier.radius, lifetime: tier.lifetime },
-      { fireInterval: 0.12, projectilesPerShot: 3, spreadRadians: 0.25, speed: 9, radius: 0.15, lifetime: 2 },
-    );
-    assert.ok(tier.radius >= 0.12 && tier.radius <= 0.18, `base ball radius ${tier.radius}`);
+    // Tuned by play (owner ruling R23 relaxes exact pins): large, slow enough to read, wall to wall.
+    assert.ok(tier.radius >= 0.15 && tier.radius <= 0.2, `base ball radius ${tier.radius}`);
     assert.ok(tier.speed >= 8 && tier.speed <= 10, `base ball speed ${tier.speed}`);
+    assert.ok(tier.speed * tier.lifetime >= 16, `base ball reaches the far wall (${tier.speed * tier.lifetime} units)`);
   }
   for (const tier of WEAPON_TYPES.scatter.tiers) {
-    assert.deepEqual({ speed: tier.speed, radius: tier.radius, lifetime: tier.lifetime }, { speed: 10, radius: 0.08, lifetime: 0.5 });
-    assert.ok(tier.radius < WEAPON_TYPES.base.tiers[0].radius);
+    assert.ok(tier.radius >= 0.06 && tier.radius < WEAPON_TYPES.base.tiers[0].radius, `scatter ball radius ${tier.radius}`);
   }
   for (const tier of WEAPON_TYPES.rail.tiers) assert.deepEqual({ speed: tier.speed, radius: tier.radius }, { speed: 40, radius: 0.05 });
   for (const tier of WEAPON_TYPES.pulse.tiers) assert.deepEqual({ speed: tier.speed, radius: tier.radius, lifetime: tier.lifetime }, { speed: 6, radius: 0.12, lifetime: 1 });
