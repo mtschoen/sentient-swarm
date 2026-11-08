@@ -1,0 +1,44 @@
+name: Browser
+
+# Runs only on trusted events (never pull requests) on a self-hosted runner with a real GPU.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-gpu
+  cancel-in-progress: false
+
+jobs:
+  browser:
+    # A fork's owner differs, so a fork never reaches the self-hosted runner.
+    if: github.repository_owner == 'mtschoen'
+    runs-on: [self-hosted, gpu]
+    timeout-minutes: 60
+    env:
+      SMOKE_PORT: 5290
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run smoke
+      - run: node tests/browser/smoke.mjs --play 600
+      - run: node tests/browser/smoke-menu.mjs
+      - run: node tests/browser/smoke-lab.mjs
+      - run: node tests/browser/mobile-smoke.mjs
+      - run: node tests/browser/quality.mjs
+      - run: npm run check:gpu
+      - run: node tests/browser/steer.mjs
+      - run: node tests/browser/bloom.mjs

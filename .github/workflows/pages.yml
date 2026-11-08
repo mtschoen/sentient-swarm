@@ -1,4 +1,5 @@
-name: Publish ${{ github.event.repository.name }}
+name: Publish Pages
+run-name: Publish ${{ github.event.repository.name }}
 
 on:
   push:
