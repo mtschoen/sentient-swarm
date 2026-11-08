@@ -139,3 +139,12 @@ test('a touch tap on Play again (pointerdown, then click) restarts once', () => 
   find(root, 'hud-play-again').fire('click');
   assert.equal(restarts, 2);
 });
+
+test('showToast sets the text and restarts the fade; the settings button is touch exclusive', () => {
+  const { hud, root } = setup();
+  hud.showToast('Gamepad connected: pad');
+  const toast = find(root, 'hud-toast');
+  assert.equal(toast.textContent, 'Gamepad connected: pad');
+  assert.ok(toast.classList.contains('hud-toast-show'));
+  assert.equal(hud.settingsButton.attributes['data-touch-exclusive'], '');
+});

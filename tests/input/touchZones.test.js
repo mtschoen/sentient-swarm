@@ -91,3 +91,16 @@ test('the bomb button press survives a release before the next input sample', ()
   assert.deepEqual(input.state.aim, { x: 0, y: 0 });
   assert.equal(input.state.firing, false);
 });
+
+test('setTuning applies the stick dead zone and radius', () => {
+  const canvas = createFakeCanvas();
+  const source = createTouchSource(canvas);
+  source.setTuning({ deadZone: 0.25, radius: 100 });
+  canvas.dispatchEvent(touchEvent('touchstart', [{ identifier: 1, clientX: 800, clientY: 250 }]));
+  canvas.dispatchEvent(touchEvent('touchmove', [{ identifier: 1, clientX: 810, clientY: 250 }]));
+  assert.deepEqual(source.aim, { x: 0, y: 0 });
+  canvas.dispatchEvent(touchEvent('touchmove', [{ identifier: 1, clientX: 900, clientY: 250 }]));
+  assert.equal(source.aim.x, 1);
+  canvas.dispatchEvent(touchEvent('touchmove', [{ identifier: 1, clientX: 850, clientY: 250 }]));
+  assert.ok(source.aim.x > 0.3 && source.aim.x < 0.4, String(source.aim.x));
+});

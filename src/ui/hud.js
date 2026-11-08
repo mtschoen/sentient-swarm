@@ -73,7 +73,12 @@ export function createHud(rootElement, {
   // The panels are display-only: a thumb that lands on one must not start a touch stick (touch.js
   // skips touches inside data-touch-exclusive rectangles). Their rectangles are just the content.
   for (const panel of [leftPanel, rightPanel]) panel.setAttribute('data-touch-exclusive', '');
-  rootElement.append(leftPanel, rightPanel, gameOver);
+  // The settings button (bottom left, reachable on a phone) and the short gamepad toast.
+  const settingsButton = make('button', 'settings-open', 'Settings');
+  settingsButton.setAttribute('data-touch-exclusive', '');
+  settingsButton.setAttribute('aria-label', 'Settings');
+  const toast = make('div', 'hud-toast');
+  rootElement.append(leftPanel, rightPanel, settingsButton, toast, gameOver);
 
   // Skip DOM writes for unchanged text: update runs every rendered frame.
   const lastText = new Map();
@@ -101,6 +106,15 @@ export function createHud(rootElement, {
   });
 
   return {
+    settingsButton,
+    // A short message at the top center; hud.css fades it out (no timer needed).
+    showToast(text) {
+      toast.textContent = text;
+      toast.classList.remove('hud-toast-show');
+      void toast.offsetWidth;
+      toast.classList.add('hud-toast-show');
+    },
+
     update(state) {
       setText(score, groupDigits(state.score ?? 0));
       setText(multiplier, `x${state.multiplier ?? 1}`);

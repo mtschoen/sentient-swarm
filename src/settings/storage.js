@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   reducedMotion: false,
   stickDeadZone: 0.15,
   stickRadius: 1.0,
+  rumble: true,
 });
 
 // preset and adapterKey are nullable strings (preset only a known PRESETS name, so an unknown one

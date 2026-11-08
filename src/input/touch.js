@@ -12,11 +12,19 @@ export function createTouchSource(canvas) {
     touching: false,
     // Where each floating stick started, in canvas-local pixels, or null; read by the overlay.
     origins: { move: null, aim: null },
+    // The settings panel's stick dead zone (a fraction of the radius) and radius in pixels.
+    radius: STICK_RADIUS,
+    deadZone: 0,
+    setTuning,
     pressBomb,
     releaseBomb,
     consumeBomb,
     dispose,
   };
+  function setTuning({ deadZone = source.deadZone, radius = source.radius }) {
+    source.deadZone = deadZone;
+    source.radius = radius;
+  }
   // The bomb button: held while a thumb is on it, plus a latch so a tap shorter than one input
   // sample still counts as one press.
   let bombHeld = false;
@@ -37,10 +45,13 @@ export function createTouchSource(canvas) {
   }
 
   function stickValue(entry, position) {
-    const horizontalDisplacement = (position.x - entry.originX) / STICK_RADIUS;
-    const verticalDisplacement = (position.y - entry.originY) / STICK_RADIUS;
+    const horizontalDisplacement = (position.x - entry.originX) / source.radius;
+    const verticalDisplacement = (position.y - entry.originY) / source.radius;
     const length = Math.hypot(horizontalDisplacement, verticalDisplacement);
-    const scale = length > 1 ? 1 / length : 1;
+    if (length < source.deadZone || length === 0) return { x: 0, y: 0 };
+    // Past the dead zone the response is rescaled so it still reaches 1 at the full radius.
+    const rescaled = Math.min(1, (length - source.deadZone) / (1 - source.deadZone));
+    const scale = rescaled / length;
     return { x: horizontalDisplacement * scale, y: verticalDisplacement * scale };
   }
 

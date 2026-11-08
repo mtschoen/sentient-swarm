@@ -13,7 +13,7 @@ function fakeStorage(initial = {}) {
 test('defaults carry every documented key', () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
     preset: null, adapterKey: null, effects: 100, shake: 100, trails: 100, music: 80,
-    effectsVolume: 80, reducedMotion: false, stickDeadZone: 0.15, stickRadius: 1.0,
+    effectsVolume: 80, reducedMotion: false, stickDeadZone: 0.15, stickRadius: 1.0, rumble: true,
   });
 });
 
@@ -30,7 +30,7 @@ test('garbage JSON and non-objects yield defaults', () => {
 
 test('save then load round-trips', () => {
   const storage = fakeStorage();
-  const settings = { preset: 'phoneHigh', adapterKey: 'vendor:arch', effects: 150, shake: 20, trails: 250, music: 10, effectsVolume: 90, reducedMotion: true, stickDeadZone: 0.3, stickRadius: 1.4 };
+  const settings = { preset: 'phoneHigh', adapterKey: 'vendor:arch', effects: 150, shake: 20, trails: 250, music: 10, effectsVolume: 90, reducedMotion: true, stickDeadZone: 0.3, stickRadius: 1.4, rumble: false };
   new SettingsStore({ storage }).save(settings);
   assert.deepEqual(new SettingsStore({ storage }).load(), settings);
 });

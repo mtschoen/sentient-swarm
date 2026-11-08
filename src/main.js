@@ -17,6 +17,15 @@ import { createFrameTimer, frameTimerKindFromSearch } from './gpu/frame-timer.js
 import { installAudio } from './audio/audio-hook.js';
 import { createHud } from './ui/hud.js';
 import { createTouchOverlay, withHaptics } from './ui/touchOverlay.js';
+import { STICK_RADIUS } from './input/touch.js';
+import { setGamepadDeadZone } from './input/gamepad.js';
+import { createLifeWatcher, createRumble } from './input/rumble.js';
+import {
+  bloomStrengthFor, createSettingsPanel, killBurstParticlesFor, shakeMultiplierFor, trailDecayFor,
+} from './ui/settings.js';
+
+const SETTINGS_KEY_CODE = 'KeyO';
+const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
 
@@ -92,11 +101,62 @@ async function boot() {
     ? createFrameTimer(gpu, { kind: frameTimerKindFromSearch(location.search), now: () => performance.now(), onFrame: (milliseconds) => quality?.onFrame(milliseconds, performance.now() / 1000) })
     : null;
   // The game waits in Ready, the swarm running without player contact, until the first gesture.
-  const game = await Game.create({ gpu, simulation, renderer, input, capacity: simulation.capacity, effects: withHaptics(audio.cues), frameTimer });
+  // Gamepad rumble follows the stored setting (read live); extra lives have no cue, so a watcher
+  // on the game state rumbles them.
+  let liveSettings = settings;
+  const rumble = createRumble({ isEnabled: () => liveSettings.rumble });
+  const lifeWatcher = createLifeWatcher(rumble);
+  const game = await Game.create({ gpu, simulation, renderer, input, capacity: simulation.capacity, effects: withHaptics(audio.cues, undefined, rumble), frameTimer });
   quality = new QualityController({ game, store, probe: new FrameTimeProbe(), adapterKey, ceiling: initialPreset.ceiling });
   if (pinnedCapacity === null) quality.start(initialPreset.name, { allowUp: initialPreset.allowUp });
   window.__murmuration.quality = quality;
   window.__murmuration.game = game;
+
+  // The settings panel applies every stored setting live: volumes, renderer effects, shake, trails,
+  // kill-burst particles (Effects and reduced motion), and the stick tuning for touch and gamepad.
+  const applySettings = (current) => {
+    liveSettings = current;
+    audio.engine.setMusicVolume(current.music / 100);
+    audio.engine.setEffectsVolume(current.effectsVolume / 100);
+    renderer.settings.trailDecay = trailDecayFor(current);
+    renderer.settings.bloomStrength = bloomStrengthFor(current);
+    renderer.impulses.strengthMultiplier = shakeMultiplierFor(current);
+    game.simulation.setKillBurstParticles(killBurstParticlesFor(current));
+    input.touch.setTuning({ deadZone: current.stickDeadZone, radius: STICK_RADIUS * current.stickRadius });
+    setGamepadDeadZone(current.stickDeadZone);
+  };
+  applySettings(settings);
+  // The select shows the preset in effect (the stored one is null until the probe settles).
+  const panelStore = { load: () => ({ ...store.load(), preset: quality.current ?? store.load().preset }), save: (value) => store.save(value) };
+  let lastPreset = quality.current;
+  const settingsPanel = createSettingsPanel({
+    store: panelStore,
+    presets: Object.entries(PRESETS).map(([name, value]) => ({ name, ...value })),
+    canChangePreset: pinnedCapacity === null,
+    onRerunProbe: () => quality.rerunProbe(),
+    onChange: (current) => {
+      applySettings(current);
+      if (current.preset && current.preset !== lastPreset && pinnedCapacity === null) {
+        lastPreset = current.preset;
+        // A capacity swap carries the burst size over, but re-apply once it has settled.
+        quality.apply(current.preset).then(() => applySettings(current), () => {});
+      }
+    },
+  });
+  document.body.append(settingsPanel.element);
+  hud.settingsButton.addEventListener('click', () => settingsPanel.open());
+  window.addEventListener('keydown', (event) => {
+    const tag = event.target?.tagName;
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    if (event.code === SETTINGS_KEY_CODE && !event.repeat) {
+      if (settingsPanel.isOpen) settingsPanel.close();
+      else settingsPanel.open();
+    } else if (event.code === 'Escape') settingsPanel.close();
+  });
+  window.addEventListener('gamepadconnected', (event) => {
+    hud.showToast(`Gamepad connected: ${String(event.gamepad?.id ?? 'controller').slice(0, GAMEPAD_TOAST_MAXIMUM_ID_LENGTH)}`);
+  });
+  window.__murmuration.settings = settingsPanel;
 
   // The game steps the simulation; stats carry the latest read-back frame plus the game state. The
   // audio follows the run: phase, multiplier and the kills read this update drive the intensity.
@@ -113,6 +173,7 @@ async function boot() {
     const state = game.state;
     hud.update(state);
     touchOverlay.update(state);
+    lifeWatcher.update(state);
     const isGameOver = state.phase === 'gameOver';
     if (isGameOver && !gameOverShown) hud.showGameOver(state.score, () => {
       audio.unlock();

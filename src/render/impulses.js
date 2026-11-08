@@ -14,6 +14,8 @@ export class ImpulseSet {
     this.capacity = capacity;
     this.durationSeconds = durationSeconds;
     this.impulses = [];
+    // The shake setting: scales every packed strength.
+    this.strengthMultiplier = 1;
   }
 
   get count() { return this.impulses.length; }
@@ -46,7 +48,7 @@ export class ImpulseSet {
   toUniformArray(time) {
     const packed = new Float32Array(this.capacity * FLOATS_PER_IMPULSE);
     this.impulses.forEach((impulse, slot) => {
-      const strength = this.isAlive(impulse, time) ? impulse.strength : 0;
+      const strength = this.isAlive(impulse, time) ? impulse.strength * this.strengthMultiplier : 0;
       packed.set([impulse.x, impulse.y, time - impulse.time, strength], slot * FLOATS_PER_IMPULSE);
     });
     return packed;

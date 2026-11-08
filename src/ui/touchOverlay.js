@@ -4,13 +4,13 @@
 // captures its own touches, so the aim stick never starts under it (touch.js also skips touches
 // that start on it). The button is shown only on coarse-pointer devices (hud.css) and only while
 // playing.
-import { STICK_RADIUS } from '../input/touch.js';
 
 const VIBRATE_MILLISECONDS = 10;
 
 // Wraps the effects the game calls so the bomb and the death also buzz the phone, where the
-// platform supports it. Everything else passes through untouched.
-export function withHaptics(effects, navigatorObject = typeof navigator === 'undefined' ? {} : navigator) {
+// platform supports it, and rumble the gamepad (src/input/rumble.js) on bomb, death and pickup.
+// Everything else passes through untouched.
+export function withHaptics(effects, navigatorObject = typeof navigator === 'undefined' ? {} : navigator, rumble = null) {
   const buzz = () => navigatorObject.vibrate?.(VIBRATE_MILLISECONDS);
   return new Proxy(effects, {
     get(target, property) {
@@ -19,6 +19,13 @@ export function withHaptics(effects, navigatorObject = typeof navigator === 'und
       if (property === 'bomb' || property === 'death') {
         return (...args) => {
           buzz();
+          rumble?.[property]();
+          return value.apply(target, args);
+        };
+      }
+      if (property === 'pickup') {
+        return (...args) => {
+          rumble?.pickup();
           return value.apply(target, args);
         };
       }
@@ -81,7 +88,7 @@ export function createTouchOverlay(rootElement, { touch, canvas, documentObject 
         if (origin === null) continue;
         const value = touch[role];
         place(base, bounds.left + origin.x, bounds.top + origin.y);
-        place(knob, bounds.left + origin.x + value.x * STICK_RADIUS, bounds.top + origin.y + value.y * STICK_RADIUS);
+        place(knob, bounds.left + origin.x + value.x * touch.radius, bounds.top + origin.y + value.y * touch.radius);
       }
       bombButton.hidden = state.phase !== 'playing';
       bombButton.classList.toggle('touch-bomb-empty', (state.bombs ?? 0) <= 0);

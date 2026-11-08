@@ -18,3 +18,15 @@ test('withHaptics works when vibrate is unavailable', () => {
   wrapped.bomb();
   assert.deepEqual(calls, ['bomb']);
 });
+
+test('withHaptics also rumbles the gamepad on bomb, death and pickup', () => {
+  const calls = [];
+  const rumble = { bomb: () => calls.push('rumble bomb'), death: () => calls.push('rumble death'), pickup: () => calls.push('rumble pickup') };
+  const effects = { bomb() {}, death() {}, pickup() {}, kills() {} };
+  const wrapped = withHaptics(effects, {}, rumble);
+  wrapped.bomb();
+  wrapped.death();
+  wrapped.pickup();
+  wrapped.kills(2);
+  assert.deepEqual(calls, ['rumble bomb', 'rumble death', 'rumble pickup']);
+});

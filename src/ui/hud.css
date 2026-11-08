@@ -54,3 +54,9 @@
   box-shadow: 0 0 12px rgba(255, 138, 31, 0.6); pointer-events: auto; touch-action: none; user-select: none; }
 .touch-bomb-empty { opacity: 0.35; }
 @media (pointer: coarse) { .touch-bomb:not([hidden]) { display: flex; } }
+
+/* Gamepad connected toast (hud.js showToast): visible for about 3 seconds, then faded out by the animation. */
+.hud-toast { position: absolute; left: 50%; top: 56px; transform: translateX(-50%); padding: 6px 14px; border-radius: 6px; opacity: 0;
+  font-size: 13px; color: #05060a; background: #7dff6b; box-shadow: 0 0 14px #7dff6b; text-transform: none; white-space: nowrap; }
+.hud-toast-show { animation: hud-toast-fade 3.2s ease-out forwards; }
+@keyframes hud-toast-fade { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }

@@ -66,3 +66,10 @@ test('adding an impulse stamped earlier than a live one keeps the later one', ()
   assert.equal(packed[3], 1);
   close(packed[7], 0.15);
 });
+
+test('strengthMultiplier scales packed strength', () => {
+  const impulses = new ImpulseSet({ capacity: 2, durationSeconds: 1.2 });
+  impulses.strengthMultiplier = 2.5;
+  impulses.add({ x: 0, y: 0, strength: 0.4 }, 1);
+  assert.equal(impulses.toUniformArray(1)[3], 1);
+});
