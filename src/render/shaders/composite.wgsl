@@ -11,7 +11,7 @@ struct CompositeUniform {
   arenaRect: vec4f,
   bloomStrength: f32,
   // Scene radiance scale ahead of the tonemap (composite.js BASE_EXPOSURE times the renderer's
-  // exposure setting): trails at decay 0.9 hold about ten frames of glyphs.
+  // exposure setting).
   exposure: f32,
   padding1: f32,
   padding2: f32,

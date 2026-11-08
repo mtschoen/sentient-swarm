@@ -16,6 +16,8 @@ function createFakeDocument() {
       classList: { add: (name) => classes.add(name), remove: (name) => classes.delete(name), contains: (name) => classes.has(name) },
       attributes: {},
       setAttribute(name, value) { this.attributes[name] = value; },
+      blurs: 0,
+      blur() { this.blurs += 1; },
       append(...nodes) { this.children.push(...nodes); },
       addEventListener(type, listener) { (listeners[type] ??= []).push(listener); },
       fire(type, event = {}) { (listeners[type] ?? []).forEach((listener) => listener({ preventDefault() {}, stopPropagation() {}, ...event })); },
@@ -39,7 +41,7 @@ const readout = (root, name) => {
   return found;
 };
 
-function setup({ stored = {}, canChangePreset = true } = {}) {
+function setup({ stored = {}, canChangePreset = true, documentObject = createFakeDocument() } = {}) {
   const saves = [];
   const changes = [];
   const probeRuns = [];
@@ -47,7 +49,7 @@ function setup({ stored = {}, canChangePreset = true } = {}) {
   const store = { load: () => ({ ...state }), save: (settings) => { saves.push(settings); Object.assign(state, settings); } };
   const panel = createSettingsPanel({
     store, onChange: (settings) => changes.push(settings), presets: PRESET_ORDER.map((name) => ({ name, ...PRESETS[name] })),
-    onRerunProbe: () => probeRuns.push(true), canChangePreset, documentObject: createFakeDocument(),
+    onRerunProbe: () => probeRuns.push(true), canChangePreset, documentObject,
   });
   return { panel, saves, changes, probeRuns };
 }
@@ -130,4 +132,24 @@ test('mappings read 100% as the tuned default', () => {
   assert.equal(shakeMultiplierFor({ ...DEFAULT_SETTINGS, reducedMotion: true }), 0.5);
   assert.equal(bloomStrengthFor(DEFAULT_SETTINGS), 0.8);
   assert.ok(Math.abs(bloomStrengthFor({ ...DEFAULT_SETTINGS, effects: 150 }) - 1.2) < 1e-9);
+});
+
+test('every control gives up focus once changed, so Escape and O reach the window again', () => {
+  const { panel } = setup();
+  for (const name of ['preset', 'effects', 'reducedMotion']) {
+    const control = byName(panel.element, name);
+    control.fire('change');
+    assert.equal(control.blurs, 1, name);
+  }
+});
+
+test('close blurs the focused element', () => {
+  const documentObject = createFakeDocument();
+  const { panel } = setup({ documentObject });
+  panel.open();
+  const focused = byName(panel.element, 'rerunProbe');
+  documentObject.activeElement = focused;
+  panel.close();
+  assert.equal(panel.isOpen, false);
+  assert.equal(focused.blurs, 1);
 });

@@ -114,7 +114,7 @@ function soloLayers(music, solo) {
 
 // Section starts and per-phrase note counts by voice, from the onNote events.
 function summarize(events) {
-  const sections = events.filter((event) => event.voice === 'section').map((event) => ({ bar: event.bar, name: event.name, key: event.key, progression: event.progression }));
+  const sections = events.filter((event) => event.voice === 'section').map((event) => ({ bar: event.bar, name: event.name, transpose: event.transpose, progression: event.progression }));
   const phrases = new Map();
   for (const event of events) {
     if (event.voice === 'section') continue;

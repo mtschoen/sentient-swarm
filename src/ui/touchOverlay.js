@@ -90,7 +90,10 @@ export function createTouchOverlay(rootElement, { touch, canvas, documentObject 
         place(base, bounds.left + origin.x, bounds.top + origin.y);
         place(knob, bounds.left + origin.x + value.x * touch.radius, bounds.top + origin.y + value.y * touch.radius);
       }
-      bombButton.hidden = state.phase !== 'playing';
+      // A hidden button never sees its touchend, so a thumb held on it as the phase changes lets go here.
+      const playing = state.phase === 'playing';
+      if (!playing) touch.releaseBomb();
+      bombButton.hidden = !playing;
       bombButton.classList.toggle('touch-bomb-empty', (state.bombs ?? 0) <= 0);
     },
   };

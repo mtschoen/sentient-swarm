@@ -297,3 +297,43 @@ test('LabMode: leaving restores the state from entering, Play inside the lab kee
   game.simulation.neighborRadius = 0.1;
   assert.deepEqual(captureLabState(lab.context), before);
 });
+
+test('LabMode marks the game as in the lab, so the quality probe skips lab runs', () => {
+  const { lab, game } = createLab();
+  lab.enter();
+  assert.equal(game.labActive, true);
+  lab.setMode('play');
+  assert.equal(game.labActive, true, 'a lab Play run is still the lab');
+  lab.leave();
+  assert.equal(game.labActive, false);
+});
+
+test('LabMode calls onLeave after restoring the entry state, so the live settings go back on top', () => {
+  const context = createContext();
+  const menu = { show() {}, hide() {} };
+  const viewport = { setInspectZoomEnabled() {} };
+  const seen = [];
+  const lab = new LabMode({
+    game: context.game, renderer: context.renderer, viewport, menu,
+    onLeave: () => seen.push(context.renderer.settings.trailDecay),
+  });
+  context.renderer.settings.trailDecay = 0.3;
+  lab.enter();
+  context.renderer.settings.trailDecay = 0.9;
+  lab.leave();
+  assert.deepEqual(seen, [0.3], 'called once, after the restore');
+});
+
+test('LabMode.canEnter: only from the title (Ready, not paused)', () => {
+  const { lab, game } = createLab();
+  game.run = { phase: 'ready' };
+  game.paused = false;
+  assert.equal(lab.canEnter, true);
+  game.paused = true;
+  assert.equal(lab.canEnter, false, 'paused');
+  game.paused = false;
+  for (const phase of ['playing', 'dying', 'respawning', 'gameOver']) {
+    game.run = { phase };
+    assert.equal(lab.canEnter, false, phase);
+  }
+});

@@ -1,5 +1,6 @@
-/* Settings panel (settings.js): a centered overlay that fits a phone in landscape (844 x 390). */
-.settings-panel { position: fixed; z-index: 20; left: 50%; top: 50%; transform: translate(-50%, -50%); box-sizing: border-box;
+/* Settings panel (settings.js): a centered overlay that fits a phone in landscape (844 x 390). It sits
+   above the title and pause menus (z-index 20 and 21) and below the rotate overlay (40). */
+.settings-panel { position: fixed; z-index: 22; left: 50%; top: 50%; transform: translate(-50%, -50%); box-sizing: border-box;
   width: min(640px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; padding: 10px 14px;
   background: rgba(5, 6, 10, 0.94); color: #e8f6ff; border: 1px solid #19e6ff; border-radius: 8px;
   box-shadow: 0 0 24px rgba(25, 230, 255, 0.35); font: 600 13px/1.3 system-ui, sans-serif; pointer-events: auto; touch-action: pan-y; }

@@ -9,10 +9,10 @@ export function midiToFrequency(note) {
 }
 
 // Attack then exponential decay to silence on a gain parameter.
-export function pluckEnvelope(param, time, peak, attackSeconds, decaySeconds) {
-  param.setValueAtTime(SILENT, time);
-  param.linearRampToValueAtTime(peak, time + attackSeconds);
-  param.exponentialRampToValueAtTime(SILENT, time + attackSeconds + decaySeconds);
+export function pluckEnvelope(parameter, time, peak, attackSeconds, decaySeconds) {
+  parameter.setValueAtTime(SILENT, time);
+  parameter.linearRampToValueAtTime(peak, time + attackSeconds);
+  parameter.exponentialRampToValueAtTime(SILENT, time + attackSeconds + decaySeconds);
 }
 
 // A deterministic offset into the shared noise buffer so repeated hits do not sound identical.

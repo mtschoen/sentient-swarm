@@ -129,6 +129,8 @@ export class Game {
     this.firingHeld = false;
     this.paused = false;
     this.startsOnGesture = true;
+    // Set by LabMode while the lab is open (Watch or Play); lab mixes are not real play.
+    this.labActive = false;
     // Game time spent in GameOver, for the restart guard.
     this.gameOverSeconds = 0;
     this.pendingImpulses = [];
@@ -288,9 +290,10 @@ export class Game {
     return this.simulationStepInterval === 2 ? 'half' : 'full';
   }
 
-  // The quality probe measures only real play: Playing, with no capacity change in flight.
+  // The quality probe measures only real play: Playing outside the lab, with no capacity change in
+  // flight (so a lab mix never steps or persists a preset, and the lab-leave rate restore holds).
   get acceptsProbeFrames() {
-    return this.run.phase === RunPhase.Playing && !this.paused && !this.capacitySwap.pending;
+    return this.run.phase === RunPhase.Playing && !this.paused && !this.labActive && !this.capacitySwap.pending;
   }
 
   update(deltaSeconds) {

@@ -111,3 +111,10 @@ test('saveMix tolerates a storage that throws', () => {
   const storage = { getItem: () => null, setItem: () => { throw new Error('full'); } };
   assert.equal(saveMix(storage, 'mine', BUNDLED_MIXES.default), false);
 });
+
+test('decodeMix rejects shares past the finite cap, which would normalize to NaN in a Float32Array', () => {
+  const good = BUNDLED_MIXES.default;
+  assert.equal(decodeMix(encodeRaw({ ...good, shares: [3.5e38, 1, 1, 1, 1] })), null);
+  assert.equal(decodeMix(encodeRaw({ ...good, shares: [1e7, 1, 1, 1, 1] })), null);
+  assert.notEqual(decodeMix(encodeRaw({ ...good, shares: [1e6, 1, 1, 1, 1] })), null, 'the cap itself is valid');
+});

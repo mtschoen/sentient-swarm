@@ -811,6 +811,15 @@ test('probe frames are accepted only while Playing', async () => {
   assert.equal(game.acceptsProbeFrames, true);
 });
 
+test('probe frames are refused during a lab run', async () => {
+  const { game } = await createGame();
+  game.labActive = true;
+  game.start();
+  assert.equal(game.acceptsProbeFrames, false);
+  game.labActive = false;
+  assert.equal(game.acceptsProbeFrames, true);
+});
+
 test('the frame timer brackets each simulation step and the render, and closes the frame after it', async () => {
   const { game } = await createGame();
   const calls = [];

@@ -1,6 +1,7 @@
 // Settings panel: preset select, calibrated sliders, reduced motion, rumble, stick tuning and a
 // probe re-run, as plain DOM. Every change is applied live through onChange(settings) and saved
-// to the store once. The pure mappings below turn the stored percentages into the values the
+// to the store once. Each control gives up focus once changed (as in labPanel.js) and close() blurs
+// whatever has it, so Escape, O and the gameplay keys reach the window again. The pure mappings below turn the stored percentages into the values the
 // renderer, simulation and input use (100 percent is the tuned default; reduced motion disables
 // trails and halves particles and shake).
 import { DEFAULT_KILL_BURST_PARTICLES, MAXIMUM_KILL_BURST_PARTICLES } from '../sim/params.js';
@@ -97,7 +98,10 @@ export function createSettingsPanel({
     option.value = preset.name;
     presetSelect.append(option);
   }
-  presetSelect.addEventListener('change', () => commit('preset', presetSelect.value));
+  presetSelect.addEventListener('change', () => {
+    commit('preset', presetSelect.value);
+    presetSelect.blur();
+  });
   labelled('Quality preset', presetSelect);
   controls.set('preset', () => { presetSelect.value = settings.preset ?? ''; });
 
@@ -120,6 +124,7 @@ export function createSettingsPanel({
       readout.textContent = `${displayed}%`;
       commit(spec.key, displayed / spec.scale);
     });
+    slider.addEventListener('change', () => slider.blur());
     labelled(spec.label, slider, readout);
     controls.set(spec.key, show);
   }
@@ -128,7 +133,10 @@ export function createSettingsPanel({
     const box = make('input', 'settings-input');
     box.type = 'checkbox';
     box.setAttribute('data-setting', spec.key);
-    box.addEventListener('change', () => commit(spec.key, Boolean(box.checked)));
+    box.addEventListener('change', () => {
+      commit(spec.key, Boolean(box.checked));
+      box.blur();
+    });
     labelled(spec.label, box);
     controls.set(spec.key, () => { box.checked = Boolean(settings[spec.key]); });
   }
@@ -147,6 +155,7 @@ export function createSettingsPanel({
   const close = () => {
     open = false;
     root.hidden = true;
+    documentObject.activeElement?.blur?.();
   };
   closeButton.addEventListener('click', close);
 

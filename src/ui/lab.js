@@ -11,8 +11,12 @@
 // applies every knob it leaves out at its shipped default (LAB_KNOB_DEFAULTS), so a bundled mix
 // (no knobs map) plays the same however the knobs were set before. Leaving the lab restores the
 // state captured on entering it (captureLabState), so a run from the title plays the shipped game;
-// inside the lab, Play keeps the lab mix.
+// inside the lab, Play keeps the lab mix. game.labActive is set while the lab is open, so the
+// quality probe skips lab runs; onLeave (main.js) then re-applies the player's live settings, so a
+// Settings change made inside the lab survives the restore. The backquote key may enter the lab
+// only from the title (canEnter).
 import { DEFAULT_PICKUP_BLAST_RADIUS } from '../game/game.js';
+import { RunPhase } from '../game/run.js';
 import { DEFAULT_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES } from '../game/weaponTypes.js';
 import { PARTICLE_DEVICE_PIXELS } from '../render/particles.js';
 import { DEFAULT_RENDER_SETTINGS } from '../render/renderer.js';
@@ -234,12 +238,13 @@ export function hashForMix(encoded) {
 // switch; audio (optional): unlocked on Play; panel: { open(), close(), refresh(), setMode(mode),
 // showStatus(text) } from labPanel.js, attached later with attachPanel.
 export class LabMode {
-  constructor({ game, renderer, viewport, menu, audio = null }) {
+  constructor({ game, renderer, viewport, menu, audio = null, onLeave = () => {} }) {
     this.context = { game, renderer, lab: { watchAliveFraction: DEFAULT_WATCH_ALIVE_FRACTION } };
     this.game = game;
     this.viewport = viewport;
     this.menu = menu;
     this.audio = audio;
+    this.onLeave = onLeave;
     this.panel = null;
     this.active = false;
     this.mode = 'watch';
@@ -251,9 +256,15 @@ export class LabMode {
     this.panel = panel;
   }
 
+  // The title: Ready, not paused, no run in progress.
+  get canEnter() {
+    return this.active || (this.game.run.phase === RunPhase.Ready && !this.game.paused);
+  }
+
   enter() {
     if (!this.active) {
       this.active = true;
+      this.game.labActive = true;
       this.enteredState = captureLabState(this.context);
       this.menu.hide();
       this.viewport.setInspectZoomEnabled(true);
@@ -269,9 +280,11 @@ export class LabMode {
   leave() {
     if (!this.active) return;
     this.active = false;
+    this.game.labActive = false;
     this.game.setWatch(null);
     restoreLabState(this.context, this.enteredState).catch(() => {});
     this.enteredState = null;
+    this.onLeave();
     this.game.quitToTitle();
     this.viewport.setInspectZoomEnabled(false);
     this.panel?.close();

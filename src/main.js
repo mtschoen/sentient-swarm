@@ -24,12 +24,13 @@ import { createLifeWatcher, createRumble } from './input/rumble.js';
 import {
   bloomStrengthFor, createSettingsPanel, killBurstParticlesFor, shakeMultiplierFor, trailDecayFor,
 } from './ui/settings.js';
-
-const SETTINGS_KEY_CODE = 'KeyO';
-const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
 import { createMenu, createPauseMenu } from './ui/menu.js';
 import { createRotateOverlay } from './ui/rotateOverlay.js';
 import { createMenuInput } from './input/menuInput.js';
+import { routeMenuActions } from './ui/menuRouting.js';
+
+const SETTINGS_KEY_CODE = 'KeyO';
+const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
 
@@ -133,7 +134,6 @@ async function boot() {
   applySettings(settings);
   // The select shows the preset in effect (the stored one is null until the probe settles).
   const panelStore = { load: () => ({ ...store.load(), preset: quality.current ?? store.load().preset }), save: (value) => store.save(value) };
-  let lastPreset = quality.current;
   const settingsPanel = createSettingsPanel({
     store: panelStore,
     presets: Object.entries(PRESETS).map(([name, value]) => ({ name, ...value })),
@@ -141,22 +141,25 @@ async function boot() {
     onRerunProbe: () => quality.rerunProbe(),
     onChange: (current) => {
       applySettings(current);
-      if (current.preset && current.preset !== lastPreset && pinnedCapacity === null) {
-        lastPreset = current.preset;
-        // A capacity swap carries the burst size over, but re-apply once it has settled.
-        quality.apply(current.preset).then(() => applySettings(current), () => {});
+      // quality.current follows the probe's steps too, so a slider move never re-applies the preset.
+      if (current.preset && current.preset !== quality.current && pinnedCapacity === null) {
+        // A capacity swap carries the burst size over, but re-apply the live settings (sliders may
+        // have moved during the swap's prepare) once it has settled.
+        quality.apply(current.preset).then(() => applySettings(liveSettings), () => {});
       }
     },
   });
   document.body.append(settingsPanel.element);
-  hud.settingsButton.addEventListener('click', () => settingsPanel.open());
+  hud.settingsButton.addEventListener('click', () => openSettings());
+  // O toggles the panel. Escape (and the gamepad's back and Options) close it through the menu
+  // action path in render (menuRouting.js), so that press never also pauses or resumes the run.
   window.addEventListener('keydown', (event) => {
     const tag = event.target?.tagName;
     if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
     if (event.code === SETTINGS_KEY_CODE && !event.repeat) {
       if (settingsPanel.isOpen) settingsPanel.close();
-      else settingsPanel.open();
-    } else if (event.code === 'Escape') settingsPanel.close();
+      else openSettings();
+    }
   });
   window.addEventListener('gamepadconnected', (event) => {
     hud.showToast(`Gamepad connected: ${String(event.gamepad?.id ?? 'controller').slice(0, GAMEPAD_TOAST_MAXIMUM_ID_LENGTH)}`);
@@ -179,18 +182,27 @@ async function boot() {
   // not start the run), and the swarm keeps running behind it. The pause menu (Escape, the HUD
   // button, Options, blur, a hidden tab) freezes the run and ducks the music; the rotate overlay
   // pauses the run too, without a menu, and resumes it when the phone turns back.
-  const settingsOpen = () => window.__murmuration.settings?.isOpen === true;
-  const openSettings = () => window.__murmuration.settings?.open?.();
+  // Opening Settings mid-run (O, the HUD button) pauses it under the pause menu first, so gameplay
+  // keys never act behind the panel and closing it returns to the pause menu; from the title or the
+  // pause menu it just opens over them (pauseForMenu does nothing in Ready, GameOver or when paused).
+  const settingsOpen = () => settingsPanel.isOpen;
+  function openSettings() {
+    pauseForMenu();
+    settingsPanel.open();
+  }
   // The lab mode (task C6b) is created with the menus below; the title menu's Lab button enters it.
   const openLab = () => lab.enter();
   const startRun = () => {
     if (game.run.phase !== 'ready') return;
     audio.unlock();
+    audio.restartRun();
     game.start();
     menu.hide();
   };
+  // Also the pause menu's Restart run, which goes Playing to Playing.
   const restartFromGameOver = () => {
     audio.unlock();
+    audio.restartRun();
     game.restart();
   };
   const resumeGame = () => {
@@ -272,7 +284,13 @@ async function boot() {
     game.startsOnGesture = !menu.visible;
     // Gamepad edges and key presses are consumed every frame so none go stale; only a free screen acts on them.
     const actions = menuInput.poll();
-    if (!rotating && !settingsOpen()) actions.forEach((action) => dispatchMenuAction(action, state.phase));
+    if (!rotating) {
+      routeMenuActions(actions, {
+        settingsOpen,
+        closeSettings: () => settingsPanel.close(),
+        dispatch: (action) => dispatchMenuAction(action, state.phase),
+      });
+    }
 
     window.__murmuration.frame = loop.frameCount;
     window.__murmuration.ready = true;
@@ -284,7 +302,8 @@ async function boot() {
   // go through the game, one at a time (the panel also disables its controls meanwhile); play
   // continues on the old simulation until the new one is in place. The capacity choices stop at
   // the quality probe's ceiling (plus the current one, which a ?capacity= pin may put above it).
-  const lab = new LabMode({ game, renderer, viewport, menu, audio });
+  // Leaving restores the state captured on entry; the live settings then go back on top of it.
+  const lab = new LabMode({ game, renderer, viewport, menu, audio, onLeave: () => applySettings(liveSettings) });
   const ceilingCapacity = PRESETS[initialPreset.ceiling]?.capacity ?? null;
   const capacityOptions = [...new Set([...capacityOptionsUpTo(ceilingCapacity), simulation.capacity])].sort((first, second) => first - second);
   createLabPanel({

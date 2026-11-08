@@ -155,9 +155,12 @@ export function installAudio({ windowObject = window, documentObject = document,
 
   // The pause menu ducks the music (a lowpass and a gain ramp, about 150 ms); false restores it.
   const setPaused = (paused) => music.setPaused(paused);
+  // Every run start and restart (title, game over, the pause menu's Restart run) starts the build
+  // over; update() alone misses a restart that goes Playing to Playing while paused.
+  const restartRun = () => intensity.reset();
 
   return {
-    engine, music, effects, intensity, cues, unlock, update, setMuted, setPaused, dispose,
+    engine, music, effects, intensity, cues, unlock, update, setMuted, setPaused, restartRun, dispose,
     get muted() { return engine.muted; },
     get listening() { return listening; },
   };

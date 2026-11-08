@@ -109,16 +109,32 @@ export function createTouchSource(canvas) {
     source.touching = active.size > 0;
   }
 
+  // A blurred window may never deliver the touchend: every touch, both sticks and the bomb button
+  // let go, so nothing stays held (keyboard.js and pointer.js do the same).
+  function onBlur() {
+    active.clear();
+    source.move = { x: 0, y: 0 };
+    source.aim = { x: 0, y: 0 };
+    source.origins.move = null;
+    source.origins.aim = null;
+    source.firing = false;
+    source.touching = false;
+    bombHeld = false;
+  }
+
+  const windowObject = canvas.ownerDocument?.defaultView ?? null;
   canvas.addEventListener('touchstart', onStart);
   canvas.addEventListener('touchmove', onMove);
   canvas.addEventListener('touchend', onEnd);
   canvas.addEventListener('touchcancel', onEnd);
+  windowObject?.addEventListener?.('blur', onBlur);
 
   function dispose() {
     canvas.removeEventListener('touchstart', onStart);
     canvas.removeEventListener('touchmove', onMove);
     canvas.removeEventListener('touchend', onEnd);
     canvas.removeEventListener('touchcancel', onEnd);
+    windowObject?.removeEventListener?.('blur', onBlur);
   }
 
   return source;

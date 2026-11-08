@@ -1,10 +1,14 @@
 // Menu browser smoke (Plan C task C4, owner ruling R17). Serves the page with the Vite dev server
 // (server.mjs; SMOKE_PORT picks the port) and checks, on a desktop viewport:
 //   - the title menu shows, and a click on the arena behind its buttons starts the run (exactly one
-//     input), after which 600 frames of fire score above zero;
+//     input), after which the ship steps left (KeyA for 20 frames, off the gate aim lane) and 600
+//     frames of fire score above zero;
 //   - Escape pauses mid-run: the menu shows, state.phase reads paused, the render frame counter keeps
 //     advancing, the score and the simulation step counter stay frozen; arrow keys move the focus
-//     ring; Escape again resumes; the gamepad Options button (button 9) pauses as well;
+//     ring; Settings opens over the pause menu (a slider is the top element at its own center), and
+//     Escape, then the gamepad back button, close it back to the still paused pause menu; Escape
+//     again resumes; O mid-run pauses under the panel; the gamepad Options button (button 9) pauses
+//     as well;
 //   - Quit to title (keyboard only) returns to the title menu in phase ready.
 // and on a phone: a portrait load (390 by 844, mobile user agent) shows the rotate overlay and a tap
 // does not start the run; a landscape run that rotates to portrait pauses behind the overlay and
@@ -26,6 +30,9 @@ const EXIT_NO_ADAPTER = 2;
 const PLAY_FRAMES = 600;
 const PAUSED_FRAMES = 30;
 const HOLD_FRAMES = 3;
+// The ship steps left before firing so its fire lane is not the one the gates keep clear.
+const STEP_LEFT_FRAMES = 20;
+const SETTLE_FRAMES = 4;
 const DESKTOP_VIEWPORT = { width: 1280, height: 720 };
 const PHONE_PORTRAIT = { width: 390, height: 844 };
 const PHONE_LANDSCAPE = { width: 844, height: 390 };
@@ -48,6 +55,15 @@ const isShown = (page, selector) => page.evaluate((query) => {
   const element = document.querySelector(query);
   return element !== null && !element.hidden && getComputedStyle(element).display !== 'none';
 }, selector);
+// Whether the settings panel is open and a slider is the topmost element at its own center.
+const settingsOnTop = (page) => page.evaluate(() => {
+  const panel = document.querySelector('.settings-panel');
+  const slider = panel?.querySelector('input[type="range"]');
+  if (!panel || panel.hidden || !slider) return false;
+  const bounds = slider.getBoundingClientRect();
+  return document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2) === slider;
+});
+const settingsShown = (page) => page.evaluate(() => window.__murmuration.settings.isOpen);
 const focusedLabel = (page) => page.evaluate(() => document.querySelector('.menu:not([hidden]) .menu-focused')?.textContent ?? null);
 
 function waitForFrame(page, target) {
@@ -104,7 +120,10 @@ async function checkDesktop(url) {
     await waitForPhase(page, 'playing');
     expect(!(await isShown(page, '.menu-title-screen')), 'the title menu should hide once the run starts');
 
-    // Fire toward the swarm for PLAY_FRAMES frames.
+    // Step left, then fire toward the swarm for PLAY_FRAMES frames.
+    await page.keyboard.down('KeyA');
+    await waitForFrame(page, (await readFrame(page)) + STEP_LEFT_FRAMES);
+    await page.keyboard.up('KeyA');
     await page.mouse.move(DESKTOP_VIEWPORT.width * 0.8, DESKTOP_VIEWPORT.height * 0.5);
     await page.mouse.down();
     await waitForFrame(page, (await readFrame(page)) + PLAY_FRAMES);
@@ -132,11 +151,39 @@ async function checkDesktop(url) {
     await page.keyboard.press('ArrowDown');
     await waitForFrame(page, (await readFrame(page)) + 2);
     expect((await focusedLabel(page)) === 'Settings', `ArrowDown should focus Settings, got ${await focusedLabel(page)}`);
+    // Settings from the pause menu sits on top of it; Escape closes only the panel.
+    await page.keyboard.press('Enter');
+    await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
+    expect(await settingsOnTop(page), 'Settings opened from the pause menu should be on top (a slider at its own center)');
+    await page.keyboard.press('Escape');
+    await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
+    expect(!(await settingsShown(page)), 'Escape should close Settings');
+    expect(await isShown(page, '.menu-pause'), 'closing Settings should return to the pause menu');
+    expect((await readStats(page)).phase === 'paused' && (await readSteps(page)) === stepsAtPause, 'closing Settings must leave the run paused');
+    // The gamepad back button closes it too.
+    await page.keyboard.press('Enter');
+    await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
+    expect(await settingsShown(page), 'Enter on Settings should open it again');
+    await pressButton(page, 1);
+    await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
+    expect(!(await settingsShown(page)) && (await isShown(page, '.menu-pause')), 'the gamepad back button should close Settings to the pause menu');
+    expect((await readStats(page)).phase === 'paused', 'the back button must leave the run paused');
+    console.log('smoke-menu: Settings over the pause menu is on top and closes back to it, still paused');
     await page.keyboard.press('Escape');
     await waitForPhase(page, 'playing');
     expect(!(await isShown(page, '.menu-pause')), 'the pause menu should hide on resume');
     await waitForFrame(page, (await readFrame(page)) + PAUSED_FRAMES);
     expect((await readSteps(page)) > stepsAtPause, 'the simulation should step again after resume');
+
+    // O mid-run pauses under the panel; Escape closes the panel to the pause menu, Escape resumes.
+    await page.keyboard.press('KeyO');
+    await waitForPhase(page, 'paused');
+    expect((await settingsShown(page)) && (await isShown(page, '.menu-pause')), 'O mid-run should open Settings over the pause menu');
+    await page.keyboard.press('Escape');
+    await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
+    expect(!(await settingsShown(page)) && (await readStats(page)).phase === 'paused', 'Escape should close Settings and stay paused');
+    await page.keyboard.press('Escape');
+    await waitForPhase(page, 'playing');
 
     // The gamepad Options button (9) pauses; face button A (0) on Resume resumes.
     await pressButton(page, 9);

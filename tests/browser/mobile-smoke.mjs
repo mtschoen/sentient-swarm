@@ -73,8 +73,8 @@ function createTouchDriver(client) {
 async function measureBombButton(page, label, viewport) {
   const button = await read(page, 'measuring the bomb button', () => {
     const element = document.querySelector('.touch-bomb');
-    const rect = element.getBoundingClientRect();
-    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, visible: getComputedStyle(element).display !== 'none' && !element.hidden };
+    const rectangle = element.getBoundingClientRect();
+    return { x: rectangle.x, y: rectangle.y, width: rectangle.width, height: rectangle.height, visible: getComputedStyle(element).display !== 'none' && !element.hidden };
   });
   const small = button.width < MINIMUM_BUTTON_CSS_PIXELS || button.height < MINIMUM_BUTTON_CSS_PIXELS;
   if (!button.visible || small) throw new Error(`${label}: bomb button not visible or too small ${JSON.stringify(button)}`);

@@ -1,3 +1,4 @@
+// Over 500 lines: every smoke mode (default, --play, --pulse, --sweep, --corridor, --bursts, --blast) shares one browser harness here.
 // Browser smoke test. Serves the page with the Vite dev server (see server.mjs).
 // SMOKE_URL, when set, skips spawning and uses that URL instead. Either way the page gets
 // ?probe=off&capacity=262144 (unless the URL already sets them), so the quality probe cannot

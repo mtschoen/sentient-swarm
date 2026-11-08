@@ -293,11 +293,11 @@ export function createLabPanel({
     }
   }
 
-  // Backquote (a developer shortcut) enters the lab, then folds and unfolds the panel.
+  // Backquote (a developer shortcut) enters the lab from the title only, then folds and unfolds the panel.
   const onKeyDown = (event) => {
     if (event.code !== TOGGLE_CODE || event.repeat || TYPING_TAGS.includes(event.target?.tagName)) return;
-    if (!lab.active) lab.enter();
-    else setOpen(root.hidden);
+    if (lab.active) setOpen(root.hidden);
+    else if (lab.canEnter) lab.enter();
   };
   windowObject.addEventListener('keydown', onKeyDown);
   documentObject.body.append(tab, root);

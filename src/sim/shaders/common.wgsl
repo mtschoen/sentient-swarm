@@ -211,8 +211,9 @@ struct ParticlePool {
 }
 
 // Kill bursts share one per-step budget, the slots that were free after the last particle step
-// (pool size minus liveCount), so one step's kills never overwrite each other or the particles
-// still flying. A kill asks for requested particles after the step's kills before it asked for
+// (pool size minus liveCount), so the step's bursts never ask for more particles than were free.
+// The budget bounds only the count: slots are reused from the cursor, oldest first, so near a full
+// pool a burst can still overwrite particles in flight at the cursor. A kill asks for requested particles after the step's kills before it asked for
 // claimedBefore in total, and gets what is left of the budget, at most requested.
 fn grantedParticleCount(requested: u32, claimedBefore: u32, liveCount: u32, poolSize: u32) -> u32 {
   let free = poolSize - min(liveCount, poolSize);

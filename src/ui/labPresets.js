@@ -67,9 +67,13 @@ function validRules(rules) {
     Array.isArray(row) && row.length === RULE_FIELDS.length && row.every((value, index) => inRange(value, RULE_RANGES[RULE_FIELDS[index]])));
 }
 
+// Shares are normalized in a Float32Array (species.js), so a share past about 3.4e38 would become
+// Infinity and the swarm NaN; any finite bound far above a real mix keeps them representable.
+const MAXIMUM_SHARE = 1e6;
+
 function validShares(shares) {
   return Array.isArray(shares) && shares.length === SPECIES_COUNT
-    && shares.every((share) => inRange(share, [0, Number.MAX_VALUE])) && shares.some((share) => share > 0);
+    && shares.every((share) => inRange(share, [0, MAXIMUM_SHARE])) && shares.some((share) => share > 0);
 }
 
 export function isValidMix(mix) {

@@ -173,6 +173,19 @@ test('update drives the intensity from multiplier, kills and survival, and kills
   assert.ok(audio.intensity.survivalSeconds < 0.1, 'a new run starts the build over');
 });
 
+test('restartRun starts the build over, as the pause menu Restart run (Playing to Playing) needs', () => {
+  const { canvas, audio } = install(() => new FakeAudioContext());
+  canvas.dispatch('pointerdown');
+  const frame = (kills) => audio.update({ fixedStep: 1 / 60, freshStats: { killsSinceLastRead: kills }, capacity: 262144, phase: 'playing', multiplier: 2 });
+  for (let index = 0; index < 600; index += 1) frame(index % 20 === 0 ? 4 : 0);
+  assert.ok(audio.intensity.survivalSeconds > 9);
+  assert.ok(audio.intensity.killRate > 0);
+  audio.restartRun();
+  frame(0);
+  assert.ok(audio.intensity.survivalSeconds < 0.1, `survival ${audio.intensity.survivalSeconds}`);
+  assert.ok(audio.intensity.killRate < 0.01, `kill rate ${audio.intensity.killRate}`);
+});
+
 test('setPaused ducks the music and works before the first unlock', () => {
   const { audio } = install(() => new FakeAudioContext());
   audio.setPaused(true);

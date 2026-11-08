@@ -104,3 +104,26 @@ test('setTuning applies the stick dead zone and radius', () => {
   canvas.dispatchEvent(touchEvent('touchmove', [{ identifier: 1, clientX: 850, clientY: 250 }]));
   assert.ok(source.aim.x > 0.3 && source.aim.x < 0.4, String(source.aim.x));
 });
+
+test('a window blur lets go of both sticks and the bomb button; dispose removes the listener', () => {
+  const canvas = createFakeCanvas();
+  const windowObject = new EventTarget();
+  canvas.ownerDocument.defaultView = windowObject;
+  const source = createTouchSource(canvas);
+  canvas.dispatchEvent(touchEvent('touchstart', [{ identifier: 1, clientX: 200, clientY: 250 }, { identifier: 2, clientX: 800, clientY: 250 }]));
+  canvas.dispatchEvent(touchEvent('touchmove', [{ identifier: 1, clientX: 240, clientY: 250 }]));
+  source.pressBomb();
+  assert.equal(source.consumeBomb(), true);
+  windowObject.dispatchEvent(new Event('blur'));
+  assert.equal(source.consumeBomb(), false, 'bomb released');
+  assert.equal(source.firing, false);
+  assert.equal(source.touching, false);
+  assert.deepEqual(source.move, { x: 0, y: 0 });
+  assert.deepEqual(source.origins, { move: null, aim: null });
+  canvas.dispatchEvent(touchEvent('touchstart', [{ identifier: 3, clientX: 200, clientY: 250 }]));
+  assert.equal(source.touching, true, 'a new touch starts a stick again');
+  source.pressBomb();
+  source.dispose();
+  windowObject.dispatchEvent(new Event('blur'));
+  assert.equal(source.consumeBomb(), true, 'no blur listener after dispose');
+});

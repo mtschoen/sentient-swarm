@@ -85,7 +85,8 @@ export function createHud(rootElement, {
   const gameOver = row('hud-gameover', [make('div', 'hud-gameover-title', 'GAME OVER'), finalScore, playAgain]);
   gameOver.hidden = true;
   // The panels are display-only: a thumb that lands on one must not start a touch stick (touch.js
-  // skips touches inside data-touch-exclusive rectangles). Their rectangles are just the content.
+  // skips touches inside data-touch-exclusive rectangles). Their rectangles are the full panel
+  // strips (the whole letterbox band, or half the arena width along the top edge), not just the text.
   for (const panel of [leftPanel, rightPanel]) panel.setAttribute('data-touch-exclusive', '');
   // The settings button (bottom left, reachable on a phone) and the short gamepad toast.
   const settingsButton = make('button', 'settings-open', 'Settings');

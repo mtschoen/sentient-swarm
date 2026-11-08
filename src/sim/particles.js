@@ -2,7 +2,9 @@
 // claimedThisStep and killAllAlive u32 words), then a fixed ring of 32-byte particles (the
 // ParticlePool struct in common.wgsl). Passes that kill agents ask the step's shared budget for
 // their burst (the slots free after the last particle step), claim the granted slots with an
-// atomicAdd on the cursor (wrapping modulo capacity) and write particles directly.
+// atomicAdd on the cursor (wrapping modulo capacity) and write particles directly. The budget
+// bounds the count only: the step's bursts never ask for more particles than were free; slots
+// are reused from the cursor, oldest first.
 // encodeBeginStep zeroes the step's claims before any kill pass; encodeStep ages, moves and drags
 // the live ones and recounts liveCount (particles_step.wgsl).
 // Folding the cursor into the particles buffer keeps the collide pass at 8 storage buffers.
