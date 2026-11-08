@@ -137,3 +137,33 @@ test('decodeMix clamps rules into RULE_RANGES', () => {
   const outOfRange = good.rules.map((row, rowIndex) => (rowIndex === 0 ? row.map((value, index) => (index === 0 ? 99 : value)) : row));
   assert.equal(decodeMix(encodeRaw({ ...good, rules: outOfRange })), null);
 });
+
+// JSON text cannot carry Infinity or NaN, but 1e999 parses to Infinity; each spot a mix holds a
+// number must refuse it while every other field (rule rows, matrix, shares) has its full valid length.
+test('decodeMix rejects a non-finite number in any field of an otherwise full-length mix', () => {
+  const good = BUNDLED_MIXES.default;
+  const placeholder = '"__INFINITE__"';
+  const encodeWith = (mix) => Buffer.from(JSON.stringify(mix).replace(placeholder, '1e999')).toString('base64url');
+  const infinite = '__INFINITE__';
+  assert.equal(decodeMix(encodeWith(good)) === null, false, 'the untouched mix is valid');
+  const cases = {
+    share: { ...good, shares: [infinite, 1, 1, 1, 1] },
+    ruleValue: { ...good, rules: good.rules.map((row, rowIndex) => (rowIndex === 3 ? row.map((value, index) => (index === 4 ? infinite : value)) : row)) },
+    matrixValue: { ...good, matrix: good.matrix.map((value, index) => (index === 12 ? infinite : value)) },
+    neighborRadius: { ...good, neighborRadius: infinite },
+    knob: { ...good, knobs: { rampSeconds: infinite } },
+  };
+  for (const [name, mix] of Object.entries(cases)) {
+    assert.equal(mix.rules.length, 5, name);
+    assert.equal(mix.matrix.length, 25, name);
+    assert.equal(decodeMix(encodeWith(mix)), null, name);
+  }
+});
+
+test('decodeMix rejects NaN-like and string numbers in a full-length mix', () => {
+  const good = BUNDLED_MIXES.default;
+  for (const bad of [null, 'NaN', '1', true, {}]) {
+    assert.equal(decodeMix(encodeRaw({ ...good, matrix: good.matrix.map((value, index) => (index === 0 ? bad : value)) })), null, String(bad));
+    assert.equal(decodeMix(encodeRaw({ ...good, shares: [bad, 1, 1, 1, 1] })), null, String(bad));
+  }
+});

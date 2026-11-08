@@ -57,3 +57,21 @@ test('reset restarts warmup', () => {
   probe.reset();
   assert.ok(feed(probe, clock, 120, 16).every((result) => result === null));
 });
+
+test('a window shorter than the cooldown still steps at most once per cooldown', () => {
+  // 60 frames at 60 hertz fill in 1 s, a third of the 3 s minimum between steps.
+  const probe = new FrameTimeProbe({ warmupFrames: 0, windowFrames: 60, minimumSecondsBetweenSteps: 3 });
+  assert.ok(probe.windowFrames * FRAME_SECONDS < probe.minimumSecondsBetweenSteps);
+  const clock = { now: 0 };
+  const stepTimes = [];
+  for (let index = 0; index < 60 * 10; index += 1) {
+    clock.now += FRAME_SECONDS;
+    if (probe.recordFrame(16, clock.now) === 'down') stepTimes.push(clock.now);
+  }
+  assert.ok(stepTimes.length >= 3, `steps ${stepTimes.length}`);
+  for (let index = 1; index < stepTimes.length; index += 1) {
+    assert.ok(stepTimes[index] - stepTimes[index - 1] >= 3 - 1e-9, `gap ${stepTimes[index] - stepTimes[index - 1]}`);
+  }
+  // The first step lands as soon as the window is full, not after the cooldown.
+  assert.ok(stepTimes[0] < 1.1, `first step at ${stepTimes[0]}`);
+});

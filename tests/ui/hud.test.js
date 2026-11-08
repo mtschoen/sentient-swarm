@@ -226,3 +226,62 @@ test('the time warp offer reads NEXT TIME WARP', () => {
   hud.update({ ...STATE, offeredType: 'timewarp' });
   assert.equal(find(root, 'hud-offer').textContent, 'NEXT TIME WARP');
 });
+
+test('the charge bar shows for an armed weapon, fills to the clamped charge and hides on the base gun', () => {
+  const { hud, root } = setup();
+  const charge = find(root, 'hud-charge');
+  const fill = find(root, 'hud-charge-fill');
+  hud.update({ ...STATE, charge: 0.5 });
+  assert.equal(charge.style.visibility, 'visible');
+  assert.equal(fill.style.width, '50%');
+  hud.update({ ...STATE, charge: 1.7 });
+  assert.equal(fill.style.width, '100%');
+  hud.update({ ...STATE, charge: -2 });
+  assert.equal(fill.style.width, '0%');
+  hud.update({ ...STATE, charge: undefined });
+  assert.equal(fill.style.width, '0%');
+  hud.update({ ...STATE, armed: 'base', charge: 0.4 });
+  assert.equal(charge.style.visibility, 'hidden', 'the row stays reserved but invisible');
+  hud.update({ ...STATE, armed: undefined });
+  assert.equal(charge.style.visibility, 'hidden');
+});
+
+test('layout switches the panels between the hud-bands and hud-top classes, never both', () => {
+  const { hud, root } = setup();
+  const panels = [find(root, 'hud-left'), find(root, 'hud-right')];
+  const arena = (x, width) => ({ x, y: 10, width, height: 400 });
+  assert.equal(hud.layout(arena(150, 700), { width: 1000, height: 420 }), 'bands');
+  for (const panel of panels) {
+    assert.equal(panel.classList.contains('hud-bands'), true);
+    assert.equal(panel.classList.contains('hud-top'), false);
+    assert.equal(panel.style.opacity, '1');
+    assert.equal(panel.style.top, '10px');
+  }
+  assert.equal(panels[0].style.left, '0px');
+  assert.equal(panels[0].style.width, '150px');
+  assert.equal(panels[1].style.left, '850px');
+  assert.equal(panels[1].style.width, '150px');
+  assert.equal(hud.layout(arena(20, 960), { width: 1000, height: 540 }), 'top');
+  for (const panel of panels) {
+    assert.equal(panel.classList.contains('hud-top'), true);
+    assert.equal(panel.classList.contains('hud-bands'), false);
+    assert.equal(panel.style.opacity, '0.6');
+  }
+  // Top mode: the two panels share the arena width, left half then right half.
+  assert.equal(panels[0].style.left, '20px');
+  assert.equal(panels[0].style.width, '480px');
+  assert.equal(panels[1].style.left, '500px');
+  assert.equal(panels[1].style.width, '480px');
+  // Going back to bands drops the top class again.
+  assert.equal(hud.layout(arena(150, 700), { width: 1000, height: 420 }), 'bands');
+  assert.equal(panels[0].classList.contains('hud-top'), false);
+  assert.equal(panels[0].classList.contains('hud-bands'), true);
+});
+
+test('layout centres the pause button on the arena top edge', () => {
+  const { hud, root } = setup();
+  hud.layout({ x: 100, y: 30, width: 800, height: 450 }, { width: 1000, height: 510 });
+  const pause = find(root, 'hud-pause');
+  assert.equal(pause.style.left, '483px');
+  assert.equal(pause.style.top, '34px');
+});

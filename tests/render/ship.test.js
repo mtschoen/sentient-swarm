@@ -86,3 +86,34 @@ test('ship.wgsl takes the turret spacing, cap and rail hue from the game tables'
   });
   assert.doesNotThrow(() => substituteConstants(source, SHIP_SHADER_CONSTANTS));
 });
+
+test('mid-turn the drawn facing lags the aim at the finite rate, follows a changing aim and then lands', () => {
+  const ship = new ShipRenderer(fakeGpu, { viewport, common: '' });
+  const frame = 1 / 60;
+  let time = 0;
+  assert.equal(ship.easedFacing(0, time), 0);
+  // Half a turn away: after 6 frames the ship has turned 6 steps and is still short of the aim.
+  let previous = 0;
+  for (let index = 0; index < 6; index += 1) {
+    time += frame;
+    const drawn = ship.easedFacing(Math.PI, time);
+    assert.ok(Math.abs(drawn - previous - SHIP_TURN_RATE * frame) < 1e-9, `step ${index}`);
+    previous = drawn;
+  }
+  assert.ok(Math.PI - previous > 1, `lag ${Math.PI - previous}`);
+  // The aim swings back across the ship mid-turn: the drawn facing reverses without a snap.
+  time += frame;
+  const reversed = ship.easedFacing(-1, time);
+  assert.ok(Math.abs(reversed - (previous - SHIP_TURN_RATE * frame)) < 1e-9);
+  // A steady aim is reached in a bounded number of frames and then stays put.
+  let frames = 0;
+  while (ship.renderedFacing !== -1 && frames < 600) {
+    time += frame;
+    ship.easedFacing(-1, time);
+    frames += 1;
+  }
+  assert.equal(ship.renderedFacing, -1);
+  assert.ok(frames <= Math.ceil((reversed + 1) / (SHIP_TURN_RATE * frame)) + 1, `frames ${frames}`);
+  time += frame;
+  assert.equal(ship.easedFacing(-1, time), -1);
+});

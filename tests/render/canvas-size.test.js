@@ -96,3 +96,53 @@ test('a pure device pixel ratio change re-reports the size and re-arms the resol
   fixture.queries[0].dispatchEvent(new Event('change'));
   assert.equal(fixture.sizes.length, 2);
 });
+
+test('observeCanvasSize reports a size once: an unchanged size and ratio fires nothing more', () => {
+  const fixture = createObserverFixture({ ratio: 2 });
+  fixture.deliver(deviceEntry(1280, 720));
+  fixture.deliver(deviceEntry(1280, 720));
+  fixture.sizeNow();
+  assert.equal(fixture.sizes.length, 1, 'the same device size from the entry and from the initial read is one report');
+  // Changing only one axis is a change.
+  fixture.deliver(deviceEntry(1280, 721));
+  assert.equal(fixture.sizes.length, 2);
+  // A ratio change event with the ratio unchanged reports nothing.
+  fixture.queries[0].dispatchEvent(new Event('change'));
+  assert.equal(fixture.sizes.length, 2);
+  // A ratio change before any size arrived has no size to re-report.
+  const fresh = createObserverFixture({ ratio: 1 });
+  fresh.ratio = 3;
+  fresh.queries[0].dispatchEvent(new Event('change'));
+  assert.deepEqual(fresh.sizes, []);
+});
+
+test('observeCanvasSize uses only the last entry of a batch, so a trailing empty entry reports nothing', () => {
+  const fixture = createObserverFixture();
+  fixture.deliver(deviceEntry(640, 360), deviceEntry(0, 0));
+  assert.deepEqual(fixture.sizes, []);
+  fixture.deliver(deviceEntry(0, 0), deviceEntry(640, 360));
+  assert.deepEqual(fixture.sizes, [{ width: 640, height: 360, devicePixelRatio: 1 }]);
+});
+
+test('observeCanvasSize works without matchMedia and the initial read of an unsized canvas reports nothing', () => {
+  const sizes = [];
+  let instance = null;
+  class FakeResizeObserver {
+    constructor(callback) { this.callback = callback; instance = this; }
+    observe() {}
+  }
+  const canvas = { clientWidth: 0, clientHeight: 0 };
+  const sizeNow = observeCanvasSize(canvas, (size) => sizes.push(size), {
+    ResizeObserverClass: FakeResizeObserver,
+    getDevicePixelRatio: () => 1,
+    matchMediaFunction: null,
+  });
+  sizeNow();
+  assert.deepEqual(sizes, []);
+  canvas.clientWidth = 300.4;
+  canvas.clientHeight = 200;
+  sizeNow();
+  assert.deepEqual(sizes, [{ width: 300, height: 200, devicePixelRatio: 1 }]);
+  instance.callback([deviceEntry(300, 200)]);
+  assert.equal(sizes.length, 1);
+});
