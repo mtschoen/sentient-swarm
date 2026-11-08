@@ -27,6 +27,12 @@ const SUB_SHELF_HERTZ = 90;
 const SUB_SHELF_DECIBELS = -5;
 const PRESENCE_HERTZ = 2500;
 const PRESENCE_DECIBELS = 3;
+// Air: a high shelf on the bus so the mix is not all below 3 kHz (owner note 2026-11-08: the music
+// sounded "like it's happening in the next room"); the layer cutoffs below were raised with it.
+const AIR_SHELF_HERTZ = 6000;
+const AIR_SHELF_DECIBELS = 4;
+const PAD_CUTOFF_HERTZ = 2400;
+const HIT_CUTOFF_HERTZ = 9000;
 // Pause duck (owner ruling R17): the music bus passes through a lowpass and a gain that close to
 // these values while the game is paused and reopen on resume; the time constant settles in about
 // 150 ms (three constants). The open lowpass sits at Nyquist, where it passes everything.
@@ -62,8 +68,8 @@ export function levelsForIntensity(intensity) {
     crash: 0.4,
     repeatCrash: intensity >= 0.6,
     bassCutoff: 420 + 1800 * intensity ** 1.5,
-    leadCutoff: 900 + 6000 * intensity,
-    melodyCutoff: 2400 + 3600 * intensity,
+    leadCutoff: 1400 + 7000 * intensity,
+    melodyCutoff: 3200 + 5200 * intensity,
   };
 }
 
@@ -215,12 +221,13 @@ export class ProceduralMusic {
       return node;
     };
     // Laptop and phone speakers cannot play the sub below about 90 Hz, where it only eats the
-    // output compressor's headroom: the bus trims it and lifts the presence band instead.
+    // output compressor's headroom: the bus trims it and lifts the presence band and the air instead.
     const duckGain = context.createGain();
     duckGain.connect(this.engine.musicOutput);
     const duckFilter = filter('lowpass', context.sampleRate / 2, 0.7, duckGain);
     const lowShelf = filter('lowshelf', SUB_SHELF_HERTZ, 0.7, duckFilter, SUB_SHELF_DECIBELS);
-    const presence = filter('peaking', PRESENCE_HERTZ, 0.8, lowShelf, PRESENCE_DECIBELS);
+    const airShelf = filter('highshelf', AIR_SHELF_HERTZ, 0.7, lowShelf, AIR_SHELF_DECIBELS);
+    const presence = filter('peaking', PRESENCE_HERTZ, 0.8, airShelf, PRESENCE_DECIBELS);
     const bus = context.createGain();
     bus.connect(presence);
     const toBus = (node) => { node.connect(bus); return node; };
@@ -237,8 +244,8 @@ export class ProceduralMusic {
     const effects = toBus(context.createGain());
     const leadFilter = filter('lowpass', 2000, 4, lead);
     const melodyFilter = filter('lowpass', 3000, 2, melody);
-    const padFilter = filter('lowpass', 1400, 1, chords);
-    const hitFilter = filter('lowpass', 6500, 1, hits);
+    const padFilter = filter('lowpass', PAD_CUTOFF_HERTZ, 1, chords);
+    const hitFilter = filter('lowpass', HIT_CUTOFF_HERTZ, 1, hits);
     const delay = context.createDelay(1);
     const feedback = context.createGain();
     feedback.gain.setValueAtTime(0.38, 0);
