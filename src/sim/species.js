@@ -45,7 +45,7 @@ export function packSpeciesTable(rows, matrix) {
 }
 
 export function normalizeShares(shares) {
-  const clamped = Float32Array.from(shares, (share) => Math.max(0, share));
+  const clamped = Float32Array.from(shares, (share) => (Number.isFinite(share) ? Math.max(0, share) : 0));
   const total = clamped.reduce((sum, share) => sum + share, 0);
   if (total === 0) return new Float32Array(clamped.length).fill(1 / clamped.length);
   return clamped.map((share) => share / total);

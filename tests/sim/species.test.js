@@ -32,3 +32,10 @@ test('packSpeciesTable packs each row hue at field index 10', () => {
   const table = packSpeciesTable(defaultSpecies(), defaultMatrix());
   defaultSpecies().forEach((row, index) => assert.equal(table[index * 12 + 10], Math.fround(row.hue)));
 });
+
+test('normalizeShares treats NaN and non-finite shares as zero and falls back to equal shares when all are zero', () => {
+  const mixed = normalizeShares([NaN, 1, Infinity, 3, -Infinity]);
+  assert.deepEqual(Array.from(mixed), [0, 0.25, 0, 0.75, 0]);
+  assert.deepEqual(Array.from(normalizeShares([NaN, Infinity, -Infinity, NaN, undefined])), Array(5).fill(Math.fround(0.2)));
+  assert.deepEqual(Array.from(normalizeShares([0, 0, 0, 0, 0])), Array(5).fill(Math.fround(0.2)));
+});

@@ -10,9 +10,10 @@
 //
 // Sidewinders turn toward the gradient of total species density in the blurred coarse field,
 // at most extra radians per second, keeping their speed, and weave (see weave).
-// A pulseOrb detonates after moving when its lifetime ran out, it left the arena (clamped back
-// to the edge), or the total density at its coarse cell exceeds extra: it becomes a pulseRing
-// at that point with zero velocity, radius RING_START_RADIUS, lifetime RING_LIFETIME and
+// A pulseOrb that moves into a detonation (its lifetime ran out, it left the arena, or the total
+// density at its coarse cell exceeds extra) keeps its kind for that step, so the collide pass
+// still walks the segment it just flew, and converts at the start of the next step, before it
+// moves: it becomes a pulseRing at its position (clamped back to the arena) with zero velocity, radius RING_START_RADIUS, lifetime RING_LIFETIME and
 // extra RING_GROWTH_SPEED. Each detonation adds 1 to stats ringsThisFrame; the one that took
 // count 0 also stores its position as f32 bits in lastRingX and lastRingY, so the pair is always
 // one ring's (the CPU turns it into one warp grid impulse per frame).
@@ -109,6 +110,15 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
     projectiles[slot] = projectile;
     return;
   }
+  if (projectile.kind == PROJECTILE_KIND_PULSE_ORB && projectile.lifetime <= 0.0) {
+    projectile = detonate(projectile);
+    if (atomicAdd(&stats[STAT_RINGS_THIS_FRAME], 1u) == 0u) {
+      atomicStore(&stats[STAT_LAST_RING_X], bitcast<u32>(projectile.position.x));
+      atomicStore(&stats[STAT_LAST_RING_Y], bitcast<u32>(projectile.position.y));
+    }
+    projectiles[slot] = projectile;
+    return;
+  }
   if (projectile.kind != PROJECTILE_KIND_PULSE_ORB && (projectile.lifetime <= 0.0 || !isInsideArena(projectile.position))) {
     projectile.flags = projectile.flags & ~PROJECTILE_FLAG_ALIVE;
     projectiles[slot] = projectile;
@@ -126,11 +136,9 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
       || !isInsideArena(projectile.position)
       || totalDensity(coarseCellCoordinate(projectile.position)) > projectile.extra;
     if (detonates) {
-      projectile = detonate(projectile);
-      if (atomicAdd(&stats[STAT_RINGS_THIS_FRAME], 1u) == 0u) {
-        atomicStore(&stats[STAT_LAST_RING_X], bitcast<u32>(projectile.position.x));
-        atomicStore(&stats[STAT_LAST_RING_Y], bitcast<u32>(projectile.position.y));
-      }
+      // Marked, not converted: the collide pass still capsule-walks this step's segment (it
+      // skips rings), and the next step converts the orb before it moves.
+      projectile.lifetime = 0.0;
     }
   }
   projectiles[slot] = projectile;

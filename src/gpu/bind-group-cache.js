@@ -7,6 +7,7 @@ export class BindGroupCache {
     this.identities = new WeakMap();
     this.nextIdentity = 0;
     this.entries = new Map();
+    this.entryIdentities = new Map();
     this.creationCount = 0;
   }
 
@@ -22,13 +23,28 @@ export class BindGroupCache {
   // the old bind groups then become garbage instead of being held for the page's lifetime.
   clear() {
     this.entries.clear();
+    this.entryIdentities.clear();
     this.identities = new WeakMap();
     this.nextIdentity = 0;
   }
 
+  // Drops every entry that names the buffer, for an owner that destroyed and replaced it (a
+  // resized particle pool) while its other buffers live on.
+  evict(buffer) {
+    if (!this.identities.has(buffer)) return;
+    const identity = this.identities.get(buffer);
+    this.entryIdentities.forEach((members, key) => {
+      if (!members.includes(identity)) return;
+      this.entries.delete(key);
+      this.entryIdentities.delete(key);
+    });
+  }
+
   get(buffers) {
-    const key = buffers.map((buffer) => this.identityOf(buffer)).join(',');
+    const members = buffers.map((buffer) => this.identityOf(buffer));
+    const key = members.join(',');
     if (!this.entries.has(key)) {
+      this.entryIdentities.set(key, members);
       this.entries.set(key, this.create(buffers));
       this.creationCount += 1;
     }

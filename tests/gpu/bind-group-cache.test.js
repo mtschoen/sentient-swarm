@@ -38,3 +38,16 @@ test('BindGroupCache tells apart distinct buffers that share a label', () => {
   cache.get([{ label: 'same' }]);
   assert.equal(cache.creationCount, 2);
 });
+
+test('BindGroupCache.evict drops only the entries that name the buffer', () => {
+  const cache = new BindGroupCache((buffers) => ({ buffers }));
+  const params = { label: 'params' };
+  const oldParticles = { label: 'particles' };
+  const newParticles = { label: 'particles' };
+  const keptEntry = cache.get([params, newParticles]);
+  cache.get([params, oldParticles]);
+  cache.get([oldParticles]);
+  cache.evict(oldParticles);
+  assert.equal(cache.entries.size, 1);
+  assert.equal(cache.get([params, newParticles]), keptEntry);
+});

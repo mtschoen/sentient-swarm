@@ -28,6 +28,7 @@ export class ParticlePool {
     this.capacity = capacity;
     this.common = common;
     this.pipeline = null;
+    this.dependentCaches = [];
     this.buffers = {
       particles: createStorageBuffer(this.device, PARTICLE_HEADER_BYTES + capacity * PARTICLE_STRIDE_BYTES, 'particles'),
     };
@@ -44,6 +45,12 @@ export class ParticlePool {
     this.pipeline = await this.device.createComputePipelineAsync({ label: 'particles-step', layout: 'auto', compute: { module, entryPoint: 'main' } });
   }
 
+  // Other passes cache bind groups that name this pool's buffer; resize evicts the replaced
+  // buffer's entries from each registered cache so they do not hold it after destroy.
+  registerBindGroupCache(cache) {
+    this.dependentCaches.push(cache);
+  }
+
   // Replaces the ring with an empty one of capacity slots (live particles are dropped). Every
   // shader takes the slot count from arrayLength, and every other bind group cache keys on the
   // buffer, so only this pool's own cache (keyed on the params buffer) needs clearing. The old
@@ -54,6 +61,7 @@ export class ParticlePool {
     this.capacity = capacity;
     this.buffers.particles = createStorageBuffer(this.device, PARTICLE_HEADER_BYTES + capacity * PARTICLE_STRIDE_BYTES, 'particles');
     this.bindGroupCache.clear();
+    this.dependentCaches.forEach((cache) => cache.evict(previous));
     previous.destroy();
   }
 
