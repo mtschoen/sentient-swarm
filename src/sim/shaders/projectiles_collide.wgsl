@@ -2,60 +2,59 @@
 // Projectile collision against the spatial grid, run after projectiles_step.wgsl on the freshly
 // integrated agents. The grid was built from the step's input agents, so cell membership is one
 // step stale while distances use current positions. Every kind pierces except the sidewinder, which
-// detonates on its first kill (below); a base bullet (kind
-// bullet) with extra of 1 or more (the lab's base gun kill budget, task C6b; 0 is unlimited, the
-// default) stops killing once it has spent extra kills, writes the rest back into extra and dies
-// at 0. Its thread is the only one walking it, so a private counter is exact.
+// detonates on its first kill (below); a base bullet (kind bullet) with extra of 1 or more (the
+// lab's base gun kill budget, task C6b; 0 is unlimited, the default) stops killing once it has
+// spent extra kills, writes the rest back into extra and dies at 0. Its thread is the only one
+// walking it, so a private counter is exact.
 //
 // Entry main, one thread per projectile slot (the beam slot is skipped):
 // - bullet, scatter, rail, pulseOrb, sidewinder: that thread walks the capsule from
 //   previousPosition to position with reach radius + CAPSULE_KILL_MARGIN. Its cells are walked
 //   along the segment's major axis: for every grid column (or row) the capsule touches, the
-//   minor-axis cell span is the segment's minor range over that column widened by the reach on
-//   both sides, then by the reach along the major axis for the end caps. At most
-//   CAPSULE_CELL_BUDGET cells. An agent dies when
-//   its distance to the segment is at most the reach. The budget covers a radius 0.2 energy ball
-//   at speed 10 on every preset grid (cell size 0.08 to 0.12) at full and half simulation rate:
-//   at most 89 cells, worst at cell size 0.08 with a half-rate step (tests/sim/capsule-budget.test.js).
+//   minor-axis cell span is the segment's minor range over that column widened by the reach on both
+//   sides, then by the reach along the major axis for the end caps. At most CAPSULE_CELL_BUDGET
+//   cells. An agent dies when its distance to the segment is at most the reach. The budget covers a
+//   radius 0.2 energy ball at speed 10 on every preset grid (cell size 0.08 to 0.12) at full and
+//   half simulation rate: at most 89 cells, worst at cell size 0.08 with a half-rate step
+//   (tests/sim/capsule-budget.test.js).
 // - sidewinder: walked with a kill budget of 1. If it killed, its slot is rewritten in place as a
 //   pulse ring (flag PROJECTILE_FLAG_MISSILE_RING, lifetime MISSILE_RING_LIFETIME, so it grows to
 //   half a pulse ring) at its position clamped to the arena, counted in stats ringsThisFrame and
 //   lastRingX/Y as an orb's detonation is; the rings entry then collides it. A miss flies on.
 // - pulseRing: skipped here, see rings.
-// Entry rings, a few workgroups (RING_WORKGROUP_COUNT in projectiles.js): every workgroup scans
-// the slots for alive pulse rings (at most MAXIMUM_LISTED_RINGS), then all the dispatch's threads
-// walk every ring's cells together, interleaved so consecutive cells land in different
-// workgroups. A ring in a dense mass covers hundreds of crowded cells: walked by one thread it
-// cost about 9 ms per frame at 262144 agents with 3 rings, and by one workgroup about 2.4 ms. The
-// band is [radius - max(RING_MINIMUM_BAND, extra * dt), radius] around position, so a ring
-// growing faster than the minimum band per step still sweeps without gaps. Only cells
-// intersecting the annulus are walked: per grid row, the column span of the outer circle minus
-// the columns lying wholly inside the inner circle, in row-major order. At most RING_CELL_BUDGET
-// cells per ring. Each cell's agents are still looped by one thread, as for capsules: the work
-// is bounded by cell count, not by agent count.
-// Entry beam, one workgroup: slot 0 when it is an alive beam. The beam kills the sector swept
-// since the previous step: from position, between the previous direction (seed, extra) and the
-// current one (velocity), both unit, over the shortest arc, out to the arena edge, padded by the
-// half width (radius) around both edge rays, so a fast turn leaves no gaps between steps. A first
-// step has both directions equal, which is the plain capsule. The shortest arc is never wider
-// than 180 degrees, so no clamp is needed; an exact reversal takes the counterclockwise half
-// disc from the previous direction. Only the grid cells of the sector's bounding box (its origin,
-// the two edge ray ends and the arena corners inside it, widened by the reach) are visited, in
-// row-major order interleaved across the workgroup; a cell is collided when its center is within
-// the reach plus its half diagonal of the sector, at most BEAM_CELL_BUDGET collided cells per
-// thread. The beam slot's lifetime is its kill reach scale (task C6b, the lab's beam sweep budget):
-// below 1 the sector is also cut at scale times the current ray's length to the edge (the reach
-// limit), and the threat trench stops there; at 1 (the default) every path is the full sector.
-// Every major-axis step of the current ray also adds BEAM_THREAT_UNITS threat at the
-// ray's coarse cell so the trench shows where nothing dies.
+// Entry rings, a few workgroups (RING_WORKGROUP_COUNT in projectiles.js): every workgroup scans the
+// slots for alive pulse rings (at most MAXIMUM_LISTED_RINGS), then all the dispatch's threads walk
+// every ring's cells together, interleaved so consecutive cells land in different workgroups. A
+// ring in a dense mass covers hundreds of crowded cells: walked by one thread it cost about 9 ms
+// per frame at 262144 agents with 3 rings, and by one workgroup about 2.4 ms. The band is [radius -
+// max(RING_MINIMUM_BAND, extra * dt), radius] around position, so a ring growing faster than the
+// minimum band per step still sweeps without gaps. Only cells intersecting the annulus are walked:
+// per grid row, the column span of the outer circle minus the columns lying wholly inside the inner
+// circle, in row-major order. At most RING_CELL_BUDGET cells per ring. Each cell's agents are still
+// looped by one thread, as for capsules: the work is bounded by cell count, not by agent count.
+// Entry beam, one workgroup: slot 0 when it is an alive beam. The beam kills the sector swept since
+// the previous step: from position, between the previous direction (seed, extra) and the current
+// one (velocity), both unit, over the shortest arc, out to the arena edge, padded by the half width
+// (radius) around both edge rays, so a fast turn leaves no gaps between steps. A first step has
+// both directions equal, which is the plain capsule. The shortest arc is never wider than 180
+// degrees, so no clamp is needed; an exact reversal takes the counterclockwise half disc from the
+// previous direction. Only the grid cells of the sector's bounding box (its origin, the two edge
+// ray ends and the arena corners inside it, widened by the reach) are visited, in row-major order
+// interleaved across the workgroup; a cell is collided when its center is within the reach plus its
+// half diagonal of the sector, at most BEAM_CELL_BUDGET collided cells per thread. The beam slot's
+// lifetime is its kill reach scale (task C6b, the lab's beam sweep budget): below 1 the sector is
+// also cut at scale times the current ray's length to the edge (the reach limit), and the threat
+// trench stops there; at 1 (the default) every path is the full sector. Every major-axis step of
+// the current ray also adds BEAM_THREAT_UNITS threat at the ray's coarse cell so the trench shows
+// where nothing dies.
 //
-// A kill is the Plan A kill: the agent must be alive and past its spawn-in frames; atomicAnd
-// clears the alive bit and only the thread that saw it set counts the kill, so overlapping
-// projectiles never double count. A counted kill adds 1 to the workgroup kill count (one global
-// atomicAdd into stats from thread 0), asks for params.killBurstParticles particles in the species
-// hue (from the hues uniform) from the step's shared particle budget, which grants them first come
-// first served until the free slots run out (a beam through a dense crowd), and adds one threat
-// unit at the agent's coarse cell.
+// A kill is the Plan A kill: the agent must be alive and past its spawn-in frames; atomicAnd clears
+// the alive bit and only the thread that saw it set counts the kill, so overlapping projectiles
+// never double count. A counted kill adds 1 to the workgroup kill count (one global atomicAdd into
+// stats from thread 0), asks for params.killBurstParticles particles in the species hue (from the
+// hues uniform) from the step's shared particle budget, which grants them first come first served
+// until the free slots run out (a beam through a dense crowd), and adds one threat unit at the
+// agent's coarse cell.
 // Barriers sit outside every branch.
 //
 // Storage buffers: projectiles, agents, cellCounts, cellOffsets, sortedIndices, particles (pool
