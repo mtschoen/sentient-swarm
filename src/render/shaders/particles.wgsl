@@ -1,6 +1,9 @@
 // Kill particles: one instance per pool slot, a 4-vertex triangle strip pulled from the particle
-// buffer, particleDevicePixels wide. Dead slots collapse to a degenerate quad. The color is the
-// packed rgba8 particle color, faded by 1 - age / lifetime, with a soft round falloff.
+// buffer, particleDevicePixels times the particle's size wide. Dead slots collapse to a degenerate
+// quad. The color is the packed rgba8 particle color, faded by 1 - age / lifetime, with a soft
+// round falloff. Chunky bursts (owner ruling R21, task C0b2): sparks and fragments start
+// EARLY_SIZE_MULTIPLE times larger and EARLY_BRIGHTNESS_MULTIPLE times brighter and shrink back
+// over EARLY_SECONDS; the death flash (size FLASH_MINIMUM_SIZE and up) keeps its size.
 // Common header prepended.
 
 // Uniform layout (byte offsets), total 32 bytes; packParticleView in particles.js writes it.
@@ -30,6 +33,10 @@ struct ParticlePoolView {
 @group(0) @binding(1) var<storage, read> pool: ParticlePoolView;
 
 const PARTICLE_INTENSITY: f32 = 1.0;
+const EARLY_SECONDS: f32 = 0.1;
+const EARLY_SIZE_MULTIPLE: f32 = 2.5;
+const EARLY_BRIGHTNESS_MULTIPLE: f32 = 1.5;
+const FLASH_MINIMUM_SIZE: f32 = 8.0;
 
 struct ParticleVaryings {
   @builtin(position) position: vec4f,
@@ -49,11 +56,15 @@ fn particleVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_ind
   }
   let corner = vec2f(f32(vertexIndex & 1u), f32(vertexIndex >> 1u)) * 2.0 - vec2f(1.0);
   let center = particle.position * view.worldToClipScale + view.worldToClipOffset;
-  let offsetDevicePixels = corner * (0.5 * view.particleDevicePixels);
+  let early = 1.0 - smoothstep(0.0, EARLY_SECONDS, particle.age);
+  let size = max(particle.size, 1.0);
+  let growth = select(mix(1.0, EARLY_SIZE_MULTIPLE, early), 1.0, size >= FLASH_MINIMUM_SIZE);
+  let offsetDevicePixels = corner * (0.5 * view.particleDevicePixels * size * growth);
   output.position = vec4f(center + offsetDevicePixels * view.devicePixelToClip * vec2f(1.0, -1.0), 0.0, 1.0);
   output.local = corner;
   let fade = 1.0 - clamp(particle.age / particle.lifetime, 0.0, 1.0);
-  output.color = unpack4x8unorm(particle.color).rgb * fade * PARTICLE_INTENSITY * view.emissionScale;
+  let brightness = mix(1.0, EARLY_BRIGHTNESS_MULTIPLE, early);
+  output.color = unpack4x8unorm(particle.color).rgb * fade * brightness * PARTICLE_INTENSITY * view.emissionScale;
   return output;
 }
 

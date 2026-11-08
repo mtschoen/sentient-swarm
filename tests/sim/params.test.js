@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, MAXIMUM_KILL_BURST_PARTICLES, SIM_PARAMS_BYTES,
-  packSimParams, validatedKillBurstParticles, validatedSpawnBandWidth, validatedSpawnDensityBias,
+  DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS,
+  MAXIMUM_DEATH_FLOOD_PARTICLES, MAXIMUM_KILL_BURST_PARTICLES, MAXIMUM_KILL_FRAGMENT_PARTICLES, SIM_PARAMS_BYTES, packSimParams,
+  validatedDeathFloodParticles, validatedKillBurstParticles, validatedKillFragmentParticles, validatedSpawnBandWidth,
+  validatedSpawnDensityBias,
 } from '../../src/sim/params.js';
 
-test('packSimParams produces the 128-byte uniform layout', () => {
+test('packSimParams produces the 224-byte uniform layout', () => {
   const buffer = packSimParams({
     dt: 0.5,
     gridColumns: 160,
@@ -15,7 +17,7 @@ test('packSimParams produces the 128-byte uniform layout', () => {
     playerPosition: [3, 4],
     spawnPerSpecies: [1, 2, 3, 4, 5],
   });
-  assert.equal(SIM_PARAMS_BYTES, 128);
+  assert.equal(SIM_PARAMS_BYTES, 224);
   assert.equal(buffer.byteLength, SIM_PARAMS_BYTES);
   const view = new DataView(buffer);
   assert.equal(view.getFloat32(0, true), 0.5);
@@ -38,6 +40,7 @@ test('packSimParams defaults missing fields to zero', () => {
     else if (offset === 112) assert.equal(view.getUint32(offset, true), DEFAULT_KILL_BURST_PARTICLES);
     else if (offset === 116) assert.equal(view.getFloat32(offset, true), Math.fround(DEFAULT_SPAWN_BAND_WIDTH));
     else if (offset === 120) assert.equal(view.getFloat32(offset, true), Math.fround(DEFAULT_SPAWN_DENSITY_BIAS));
+    else if (offset === 124) assert.equal(view.getUint32(offset, true), DEFAULT_KILL_FRAGMENT_PARTICLES);
     else assert.equal(view.getUint32(offset, true), offset === 88 ? 1 : 0);
   }
 });
@@ -82,7 +85,35 @@ test('packSimParams writes spawnBandWidth and spawnDensityBias as f32 at byte of
   const view = new DataView(packSimParams({ spawnBandWidth: 1.5, spawnDensityBias: 0.25 }));
   assert.equal(view.getFloat32(116, true), 1.5);
   assert.equal(view.getFloat32(120, true), 0.25);
-  assert.equal(view.getUint32(124, true), 0);
+});
+
+test('packSimParams writes killFragmentParticles at 124 and deathFloodParticles at 216 as u32', () => {
+  const view = new DataView(packSimParams({ killFragmentParticles: 5, deathFloodParticles: 300 }));
+  assert.equal(view.getUint32(124, true), 5);
+  assert.equal(view.getUint32(216, true), 300);
+  assert.equal(view.getUint32(220, true), 0);
+});
+
+test('packSimParams writes the gate table: rows from 128, species from 192, count at 208, bias at 212', () => {
+  const view = new DataView(packSimParams({
+    spawnGates: {
+      gates: [{ x: 1, y: 2, radius: 0.5, emit: 1, species: 3 }, { x: 4, y: 5, radius: 0.75, emit: 0, species: 1 }],
+      speciesBias: 0.5,
+    },
+  }));
+  assert.deepEqual([128, 132, 136, 140, 144, 148, 152, 156].map((offset) => view.getFloat32(offset, true)), [1, 2, 0.5, 1, 4, 5, 0.75, 0]);
+  assert.deepEqual([192, 196].map((offset) => view.getUint32(offset, true)), [3, 1]);
+  assert.equal(view.getUint32(208, true), 2);
+  assert.equal(view.getFloat32(212, true), 0.5);
+  assert.throws(() => packSimParams({ spawnGates: { gates: new Array(5).fill({ x: 0, y: 0, radius: 1, emit: 1, species: 0 }) } }), /at most 4/);
+});
+
+test('the fragment and death flood setters accept their ranges and reject the rest', () => {
+  assert.equal(validatedKillFragmentParticles(0), 0);
+  assert.equal(validatedKillFragmentParticles(MAXIMUM_KILL_FRAGMENT_PARTICLES), MAXIMUM_KILL_FRAGMENT_PARTICLES);
+  for (const bad of [-1, 1.5, MAXIMUM_KILL_FRAGMENT_PARTICLES + 1]) assert.throws(() => validatedKillFragmentParticles(bad), RangeError);
+  assert.equal(validatedDeathFloodParticles(MAXIMUM_DEATH_FLOOD_PARTICLES), MAXIMUM_DEATH_FLOOD_PARTICLES);
+  for (const bad of [-1, 0.5, MAXIMUM_DEATH_FLOOD_PARTICLES + 1]) assert.throws(() => validatedDeathFloodParticles(bad), RangeError);
 });
 
 test('the spawn and burst setters accept their ranges and reject the rest', () => {

@@ -53,15 +53,22 @@ const SHRINK_FIRST_SLOT = 100000;
 const SHRINK_AGENT_COUNT = 1000;
 const SWAP_PARTICLE_CAPACITY = 32768;
 const CADENCE_FRAMES = 300;
+// Gate check (task C0b2): two emitting gates, each favoring one species with full bias, so every
+// species 0 spawn lands at the first gate and every species 1 spawn at the second; a spawn moves
+// by its outward ejection (at most 1.6 world units per second) for one step before the readback.
+const GATE_CHECK_CAPACITY = 16384;
+const GATE_CHECK_GATES = [{ x: 3, y: 2, radius: 0.6, emit: 1, species: 0 }, { x: 13, y: 7, radius: 0.6, emit: 1, species: 1 }];
+const GATE_CHECK_SPAWNS = 400;
+const GATE_EJECT_REACH = 1.6 * STEP_SECONDS + 1e-4;
 const CADENCE_BURST_INTERVAL = 50;
 const CADENCE_BURST_STEPS = 4;
 const CADENCE_MAXIMUM_RATIO = 1.05;
 const CADENCE_MINIMUM_LAG = 2;
 
 // Steps once, submits, and waits for the GPU so the stats ring can map; returns the frame's step.
-async function submitStep(device, simulation, spawnPerSpecies) {
+async function submitStep(device, simulation, spawnPerSpecies, spawnGates = null) {
   const encoder = device.createCommandEncoder({ label: 'simulation-check-frame' });
-  simulation.step(encoder, STEP_SECONDS, spawnPerSpecies);
+  simulation.step(encoder, STEP_SECONDS, spawnPerSpecies, spawnGates);
   device.queue.submit([encoder.finish()]);
   simulation.afterSubmit();
   await device.queue.onSubmittedWorkDone();
@@ -374,11 +381,39 @@ async function runCheck() {
   const swapKillResult = await runSwapKillCheck(gpu);
   if (lostReason !== null) return { pass: false, detail: `device lost during the swap kill check: ${lostReason}` };
   details.push(swapKillResult.detail);
+  const gateResult = await runGateCheck(gpu);
+  if (lostReason !== null) return { pass: false, detail: `device lost during the gate check: ${lostReason}` };
+  details.push(gateResult.detail);
   const cadenceResult = await runCadenceCheck(gpu);
   if (lostReason !== null) return { pass: false, detail: `device lost during the cadence check: ${lostReason}` };
   details.push(cadenceResult.detail);
-  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass && swapKillResult.pass && cadenceResult.pass;
+  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass && swapKillResult.pass && gateResult.pass && cadenceResult.pass;
   return { pass, detail: details.join('; ') };
+}
+
+// Steps once with GATE_CHECK_GATES and GATE_CHECK_SPAWNS of species 0 and 1 each, then checks
+// every alive agent lies within its species' gate radius plus one step of ejection.
+async function runGateCheck(gpu) {
+  const { device } = gpu;
+  const simulation = await Simulation.create(gpu, { capacity: GATE_CHECK_CAPACITY });
+  simulation.setPlayer(ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+  const spawnPerSpecies = Uint32Array.from({ length: SPECIES_COUNT }, (unused, species) => (species < 2 ? GATE_CHECK_SPAWNS : 0));
+  await submitStep(device, simulation, spawnPerSpecies, { gates: GATE_CHECK_GATES, speciesBias: 1 });
+  const view = new DataView(await readBuffer(device, simulation.agentsBuffer));
+  simulation.destroy();
+  const counts = [0, 0];
+  let farthest = 0;
+  for (let base = 0; base < view.byteLength; base += AGENT_STRIDE_BYTES) {
+    if ((view.getUint32(base + AGENT_OFFSETS.flags, true) & AGENT_FLAG_ALIVE) === 0) continue;
+    const species = view.getUint32(base + AGENT_OFFSETS.species, true);
+    const gate = GATE_CHECK_GATES[species];
+    if (gate === undefined) return { pass: false, detail: `FAIL gate spawn of species ${species}, only 0 and 1 were requested` };
+    const distance = Math.hypot(view.getFloat32(base + AGENT_OFFSETS.position, true) - gate.x, view.getFloat32(base + AGENT_OFFSETS.position + 4, true) - gate.y);
+    farthest = Math.max(farthest, distance - gate.radius);
+    counts[species] += 1;
+  }
+  const pass = counts[0] === GATE_CHECK_SPAWNS && counts[1] === GATE_CHECK_SPAWNS && farthest <= GATE_EJECT_REACH;
+  return { pass, detail: `${pass ? 'PASS' : 'FAIL'} gate spawns ${counts.join(' and ')} of ${GATE_CHECK_SPAWNS} per species, farthest ${Math.max(0, farthest).toFixed(4)} past its own gate's radius (need <= ${GATE_EJECT_REACH.toFixed(4)})` };
 }
 
 runCheck().then(

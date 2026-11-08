@@ -20,9 +20,21 @@
 // the band-deep square at the corner farthest from the player; with bands up to about 0.9 that
 // square lies more than half the arena width from any player position, so every spawn distance
 // up to SpawnPressure's 0.5 maximum still places. If that draw is too close as well the slot
-// stays dead and the unit goes back with atomicAdd. The agent gets zero velocity,
+// stays dead and the unit goes back with atomicAdd. The agent gets zero velocity (a gate spawn its
+// outward ejection),
 // SPAWN_IN_FRAMES spawn-in frames (the harmless pulse), the alive bit, the species, a random
 // phase in [0, tau) and a random hueJitter in [-1, 1].
+// Spawn gates (owner ruling R14, task C0b2): while params.spawnGateCount > 0 and some gate emits,
+// the agent instead lands uniformly in the disc of one gate, picked per attempt with weight
+// emission times (1 for the gate's favored species, 1 - spawnGateSpeciesBias for the others; the
+// plain emission weights when that leaves nothing), clamped into the arena and still at least the
+// minimum distance from the player. A gate overflows instead of piling up: a draw whose coarse
+// cell (the previous step's field) already holds GATE_OVERFLOW_DENSITY agents is redrawn with the
+// disc grown by GATE_OVERFLOW_GROWTH per attempt (the last attempt takes its draw anyway), so a big
+// wave pours out around the gate. A gate spawn leaves radially at up to GATE_EJECT_SPEED (it
+// moves through its spawn-in, so a wave visibly bursts out of the gate). After POSITION_ATTEMPTS
+// unplaceable draws it falls back to the wall band below. No gate emits only between waves, when
+// SpawnPressure requests nothing.
 // Randomness: a PCG hash (Jarzynski and Olano, "Hash Functions for GPU Rendering", 2020) seeded
 // by the slot index and params.frameSequence, then re-hashed for every draw
 // (pcgHash and nextRandom live in common.wgsl, shared with the kill pass).
@@ -36,6 +48,15 @@
 const POSITION_ATTEMPTS: u32 = 16u;
 const DENSITY_CANDIDATES: u32 = 4u;
 const NO_SPECIES: u32 = 0xffffffffu;
+const GATE_WALL_MARGIN: f32 = 0.05;
+const GATE_OVERFLOW_DENSITY: f32 = 48.0;
+const GATE_OVERFLOW_GROWTH: f32 = 0.35;
+const GATE_EJECT_SPEED: f32 = 1.6;
+
+struct GateDraw {
+  position: vec2f,
+  outward: vec2f,
+}
 
 fn claimUnit(species: u32) -> bool {
   if (atomicLoad(&spawnBudget[species]) <= 0) {
@@ -87,6 +108,46 @@ fn farCornerPoint(randomState: ptr<function, u32>) -> vec2f {
   return vec2f(select(offset.x, ARENA_WIDTH - offset.x, farX), select(offset.y, ARENA_HEIGHT - offset.y, farY));
 }
 
+// Gate pick weights for species: emission, scaled down for gates that favor another species.
+fn gateWeight(gate: u32, species: u32, biased: bool) -> f32 {
+  let emission = max(params.spawnGates[gate].w, 0.0);
+  if (!biased || params.spawnGateSpecies[gate] == species) {
+    return emission;
+  }
+  return emission * (1.0 - clamp(params.spawnGateSpeciesBias, 0.0, 1.0));
+}
+
+fn gateWeightTotal(species: u32, biased: bool) -> f32 {
+  var total = 0.0;
+  for (var gate = 0u; gate < min(params.spawnGateCount, 4u); gate = gate + 1u) {
+    total = total + gateWeight(gate, species, biased);
+  }
+  return total;
+}
+
+// A uniform point in the disc of a gate drawn by weight (total is gateWeightTotal), its radius
+// times spread, kept a little inside the walls; outward is the unit direction from the gate center.
+fn gatePoint(species: u32, biased: bool, total: f32, spread: f32, randomState: ptr<function, u32>) -> GateDraw {
+  var remaining = nextRandom(randomState) * total;
+  var chosen = 0u;
+  for (var gate = 0u; gate < min(params.spawnGateCount, 4u); gate = gate + 1u) {
+    let weight = gateWeight(gate, species, biased);
+    if (weight > 0.0) {
+      chosen = gate;
+      if (remaining < weight) {
+        break;
+      }
+      remaining = remaining - weight;
+    }
+  }
+  let row = params.spawnGates[chosen];
+  let angle = nextRandom(randomState) * TAU;
+  let reach = sqrt(nextRandom(randomState)) * row.z * spread;
+  let direction = vec2f(cos(angle), sin(angle));
+  let position = clamp(row.xy + direction * reach, vec2f(GATE_WALL_MARGIN), vec2f(ARENA_WIDTH, ARENA_HEIGHT) - vec2f(GATE_WALL_MARGIN));
+  return GateDraw(position, direction * (reach / max(row.z * spread, 0.001)));
+}
+
 fn coarseDensity(position: vec2f) -> f32 {
   let cell = coarseCellIndexFor(position);
   return dot(field[cell * 2u], vec4f(1.0)) + field[cell * 2u + 1u].x;
@@ -108,10 +169,28 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   var randomState = pcgHash(slot ^ pcgHash(params.frameSequence));
   let minimumDistance = ARENA_WIDTH * params.spawnDistanceFraction;
-  let wanted = select(1u, DENSITY_CANDIDATES, nextRandom(&randomState) < params.spawnDensityBias);
   var position = vec2f(0.0, 0.0);
-  var bestDensity = -1.0;
+  var velocity = vec2f(0.0, 0.0);
   var found = 0u;
+  var biased = true;
+  var gateTotal = gateWeightTotal(species, true);
+  if (gateTotal <= 0.0) {
+    biased = false;
+    gateTotal = gateWeightTotal(species, false);
+  }
+  if (gateTotal > 0.0) {
+    for (var attempt = 0u; attempt < POSITION_ATTEMPTS && found == 0u; attempt = attempt + 1u) {
+      let draw = gatePoint(species, biased, gateTotal, 1.0 + f32(attempt) * GATE_OVERFLOW_GROWTH, &randomState);
+      let crowded = coarseDensity(draw.position) >= GATE_OVERFLOW_DENSITY && attempt + 1u < POSITION_ATTEMPTS;
+      if (!crowded && distance(draw.position, params.playerPosition) >= minimumDistance) {
+        position = draw.position;
+        velocity = draw.outward * GATE_EJECT_SPEED;
+        found = 1u;
+      }
+    }
+  }
+  let wanted = select(select(1u, DENSITY_CANDIDATES, nextRandom(&randomState) < params.spawnDensityBias), 0u, found > 0u);
+  var bestDensity = -1.0;
   for (var attempt = 0u; attempt < POSITION_ATTEMPTS && found < wanted; attempt = attempt + 1u) {
     let candidate = bandPoint(&randomState);
     if (distance(candidate, params.playerPosition) >= minimumDistance) {
@@ -137,7 +216,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   var agent: Agent;
   agent.position = position;
-  agent.velocity = vec2f(0.0, 0.0);
+  agent.velocity = velocity;
   agent.species = species;
   agent.flags = FLAG_ALIVE | (SPAWN_IN_FRAMES << SPAWN_FRAMES_SHIFT);
   agent.phase = nextRandom(&randomState) * TAU;

@@ -44,7 +44,7 @@ struct Agent {
   hueJitter: f32,
 }
 
-// Uniform layout (byte offsets), total 128 bytes:
+// Uniform layout (byte offsets), total 224 bytes:
 //   0 dt                 f32
 //   4 time               f32
 //   8 playerPosition     vec2f
@@ -68,7 +68,13 @@ struct Agent {
 // 112 killBurstParticles u32 (particles per kill before pool scaling)
 // 116 spawnBandWidth     f32 (depth in world units of the wall band where spawns land)
 // 120 spawnDensityBias   f32 (0 to 1: chance a spawn takes its densest candidate)
-// 124 paramsPadding      u32
+// 124 killFragmentParticles u32 (heavy fragments per kill, beside killBurstParticles sparks)
+// 128 spawnGates         array<vec4f, 4> (x, y, radius, emission weight; SpawnDirector)
+// 192 spawnGateSpecies   vec4u (favored species per gate)
+// 208 spawnGateCount     u32 (rows in use; 0 spawns in the wall band)
+// 212 spawnGateSpeciesBias f32 (0 to 1: how strongly a gate keeps to its favored species)
+// 216 deathFloodParticles u32 (player death flood size, nonzero only in the death clear's step)
+// 220 paramsPadding      u32
 struct SimParams {
   dt: f32,
   time: f32,
@@ -93,6 +99,12 @@ struct SimParams {
   killBurstParticles: u32,
   spawnBandWidth: f32,
   spawnDensityBias: f32,
+  killFragmentParticles: u32,
+  spawnGates: array<vec4f, 4>,
+  spawnGateSpecies: vec4u,
+  spawnGateCount: u32,
+  spawnGateSpeciesBias: f32,
+  deathFloodParticles: u32,
   paramsPadding: u32,
 }
 
@@ -159,14 +171,15 @@ fn matrixWeightIndex(species: u32, other: u32) -> u32 {
 }
 
 // 32 bytes. color is packed rgba8 with r in the low byte. A slot with lifetime <= 0 or
-// age >= lifetime is dead.
+// age >= lifetime is dead. size multiplies the drawn quad (1 a spark, about 2.6 a heavy fragment,
+// tens for the death flash; 0 draws as 1).
 struct Particle {
   position: vec2f,
   velocity: vec2f,
   color: u32,
   age: f32,
   lifetime: f32,
-  padding: f32,
+  size: f32,
 }
 
 fn isParticleAlive(particle: Particle) -> bool {
@@ -269,16 +282,33 @@ fn packColor(rgb: vec3f) -> u32 {
 }
 
 // Kill splash particles, shared by every pass that kills agents: the agent's species hue shifted
-// by its hueJitter, radiating at a random speed with a random lifetime.
+// by its hueJitter. Sparks radiate fast and die young; heavy fragments (owner ruling R21, task
+// C0b2) are larger, slower and live longer. value scales the color (kill-all floods use less, so a
+// bomb through a full arena stays bright without washing out).
 const KILL_PARTICLE_MINIMUM_SPEED: f32 = 1.5;
 const KILL_PARTICLE_SPEED_RANGE: f32 = 1.5;
 const KILL_PARTICLE_MINIMUM_LIFETIME: f32 = 0.4;
 const KILL_PARTICLE_LIFETIME_RANGE: f32 = 0.3;
+const KILL_FRAGMENT_MINIMUM_SPEED: f32 = 0.35;
+const KILL_FRAGMENT_SPEED_RANGE: f32 = 0.6;
+const KILL_FRAGMENT_MINIMUM_LIFETIME: f32 = 0.8;
+const KILL_FRAGMENT_LIFETIME_RANGE: f32 = 0.5;
+const KILL_FRAGMENT_SIZE: f32 = 2.6;
 const KILL_PARTICLE_HUE_JITTER_SPREAD: f32 = 0.05;
-const KILL_PARTICLE_SATURATION: f32 = 0.5;
+const KILL_PARTICLE_SATURATION: f32 = 0.65;
+// Kill-all bursts (bombs and the death clear) share a light budget: a clear that emits more than
+// KILL_ALL_LIGHT_PARTICLES particles dims each one to that over the particles emitted (never under
+// KILL_ALL_MINIMUM_VALUE), so a clear stays bright but its total light, and the arena mean, stays
+// bounded whatever the crowd and pool size (task C0b2, finding 3).
+const KILL_ALL_LIGHT_PARTICLES: f32 = 12000.0;
+const KILL_ALL_MINIMUM_VALUE: f32 = 0.12;
 
-fn killParticleColor(hue: f32, hueJitter: f32) -> u32 {
-  return packColor(hsvToRgb(fract(hue + KILL_PARTICLE_HUE_JITTER_SPREAD * hueJitter), KILL_PARTICLE_SATURATION, 1.0));
+fn killAllParticleValue(emitted: f32) -> f32 {
+  return clamp(KILL_ALL_LIGHT_PARTICLES / max(emitted, 1.0), KILL_ALL_MINIMUM_VALUE, 1.0);
+}
+
+fn killParticleColor(hue: f32, hueJitter: f32, value: f32) -> u32 {
+  return packColor(hsvToRgb(fract(hue + KILL_PARTICLE_HUE_JITTER_SPREAD * hueJitter), KILL_PARTICLE_SATURATION, value));
 }
 
 fn killParticle(position: vec2f, angle: f32, color: u32, randomState: ptr<function, u32>) -> Particle {
@@ -288,7 +318,54 @@ fn killParticle(position: vec2f, angle: f32, color: u32, randomState: ptr<functi
   particle.color = color;
   particle.age = 0.0;
   particle.lifetime = KILL_PARTICLE_MINIMUM_LIFETIME + KILL_PARTICLE_LIFETIME_RANGE * nextRandom(randomState);
-  particle.padding = 0.0;
+  particle.size = 1.0;
+  return particle;
+}
+
+fn killFragment(position: vec2f, color: u32, randomState: ptr<function, u32>) -> Particle {
+  var particle: Particle;
+  let angle = nextRandom(randomState) * TAU;
+  particle.position = position;
+  particle.velocity = vec2f(cos(angle), sin(angle)) * (KILL_FRAGMENT_MINIMUM_SPEED + KILL_FRAGMENT_SPEED_RANGE * nextRandom(randomState));
+  particle.color = color;
+  particle.age = 0.0;
+  particle.lifetime = KILL_FRAGMENT_MINIMUM_LIFETIME + KILL_FRAGMENT_LIFETIME_RANGE * nextRandom(randomState);
+  particle.size = KILL_FRAGMENT_SIZE;
+  return particle;
+}
+
+// Heavy fragments in a granted burst of count particles: the requested fragments, but at most a
+// quarter of the burst, so a thinned burst keeps mostly sparks.
+fn fragmentsIn(count: u32, fragments: u32) -> u32 {
+  return min(fragments, count / 4u);
+}
+
+// Player death flood (R21), from kill_all.wgsl in the death clear's step: particle 0 is a large
+// white flash, particle 1 a smaller longer one, the rest a wide fast spray of hot white and warm
+// particles of mixed sizes.
+const DEATH_FLASH_SIZE: f32 = 70.0;
+const DEATH_FLASH_LIFETIME: f32 = 0.22;
+const DEATH_AFTERGLOW_SIZE: f32 = 28.0;
+const DEATH_AFTERGLOW_LIFETIME: f32 = 0.5;
+
+fn deathFloodParticle(index: u32, seed: u32, position: vec2f) -> Particle {
+  var randomState = pcgHash(seed + index * 7919u + 3u);
+  var particle: Particle;
+  particle.position = position;
+  particle.age = 0.0;
+  if (index < 2u) {
+    particle.velocity = vec2f(0.0, 0.0);
+    particle.color = packColor(vec3f(1.0, 0.97, 0.92) * select(0.6, 1.0, index == 0u));
+    particle.lifetime = select(DEATH_AFTERGLOW_LIFETIME, DEATH_FLASH_LIFETIME, index == 0u);
+    particle.size = select(DEATH_AFTERGLOW_SIZE, DEATH_FLASH_SIZE, index == 0u);
+    return particle;
+  }
+  let angle = nextRandom(&randomState) * TAU;
+  let speedRandom = nextRandom(&randomState);
+  particle.velocity = vec2f(cos(angle), sin(angle)) * (0.8 + 7.0 * speedRandom * speedRandom);
+  particle.color = packColor(hsvToRgb(0.06 + 0.08 * nextRandom(&randomState), 0.45 * nextRandom(&randomState), 1.0));
+  particle.lifetime = 0.6 + 1.0 * nextRandom(&randomState);
+  particle.size = 1.0 + 2.0 * nextRandom(&randomState);
   return particle;
 }
 
@@ -302,18 +379,24 @@ struct AtomicAgent {
   hueJitter: f32,
 }
 
-// One kill splash is `count` particles evenly spaced around a circle from a random rotation.
-// Storage pointers cannot be function parameters, so each pass keeps a thin wrapper that claims
-// slots on its own pool binding and fills them from this: seed comes from killBurstSeed and
-// particle index of count is derived from it alone, so the particles are independent.
+// One kill splash is `count` particles: the first fragmentsIn(count, fragments) are heavy
+// fragments at random angles, the rest sparks evenly spaced around a circle from a random
+// rotation. Storage pointers cannot be function parameters, so each pass keeps a thin wrapper
+// that claims slots on its own pool binding and fills them from this: seed comes from
+// killBurstSeed and particle index of count is derived from it alone, so the particles are
+// independent.
 fn killBurstSeed(agentIndex: u32, frameSequence: u32) -> u32 {
   return pcgHash(agentIndex ^ pcgHash(frameSequence * 2u + 1u));
 }
 
-fn killBurstParticle(index: u32, count: u32, seed: u32, position: vec2f, color: u32) -> Particle {
+fn killBurstParticle(index: u32, count: u32, fragments: u32, seed: u32, position: vec2f, color: u32) -> Particle {
   var rotationState = seed;
   let rotation = nextRandom(&rotationState) * TAU;
   var randomState = pcgHash(seed + index + 1u);
-  let angle = rotation + f32(index) * TAU / f32(count);
+  let heavy = fragmentsIn(count, fragments);
+  if (index < heavy) {
+    return killFragment(position, color, &randomState);
+  }
+  let angle = rotation + f32(index - heavy) * TAU / f32(count - heavy);
   return killParticle(position, angle, color, &randomState);
 }

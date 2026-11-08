@@ -34,10 +34,10 @@ fn emitKillParticles(slot: u32, position: vec2f, species: u32, hueJitter: f32, r
     return;
   }
   let first = atomicAdd(&pool.cursor, count) % capacity;
-  let color = killParticleColor(speciesTable[speciesFieldIndex(species, SPECIES_FIELD_HUE)], hueJitter);
+  let color = killParticleColor(speciesTable[speciesFieldIndex(species, SPECIES_FIELD_HUE)], hueJitter, 1.0);
   let seed = killBurstSeed(slot, params.frameSequence);
   for (var index = 0u; index < count; index = index + 1u) {
-    pool.particles[(first + index) % capacity] = killBurstParticle(index, count, seed, position, color);
+    pool.particles[(first + index) % capacity] = killBurstParticle(index, count, params.killFragmentParticles, seed, position, color);
   }
 }
 
@@ -54,7 +54,7 @@ fn main(
       let previousFlags = atomicAnd(&agents[slot].flags, ~FLAG_ALIVE);
       if (isAlive(previousFlags)) {
         atomicAdd(&workgroupKills, 1u);
-        emitKillParticles(slot, position, min(agents[slot].species, SPECIES_COUNT - 1u), agents[slot].hueJitter, params.killBurstParticles);
+        emitKillParticles(slot, position, min(agents[slot].species, SPECIES_COUNT - 1u), agents[slot].hueJitter, params.killBurstParticles + params.killFragmentParticles);
         atomicAdd(&threatAccumulator[coarseCellIndexFor(position)], u32(THREAT_FIXED_POINT_SCALE));
       }
     }

@@ -19,7 +19,10 @@
 // Once the estimate first reaches the target, refills are also capped at refillFractionPerSecond
 // of the target per second (owner ruling R13, task C0b: killed space refills slowly, so a cleared
 // corridor stays clear for several seconds); the allowance accrues per second of delta, carries
-// at most one unit between steps and never banks while nothing is missing. Each species carries
+// at most one unit between steps and never banks while nothing is missing. With a wave (the
+// SpawnDirector's wave state, task C0b2) the allowance instead banks between waves while agents
+// are missing, up to wave.burstFraction of the target, and is released only while a gate emits,
+// spread over the wave's remaining seconds; between waves nothing spawns. Each species carries
 // its rounding error to the next frame, so small frames rotate the leftover units and long-run
 // totals follow the shares.
 // Read-back stats lag the GPU by a few steps (more with several fixed steps per frame), so the
@@ -162,11 +165,16 @@ export class SpawnPressure {
     this.refillAllowance = 0;
   }
 
-  // Agents this step may spawn at most: the frame cap, and after the first fill the refill rate.
-  stepCap(deltaSeconds) {
+  // Agents this step may spawn at most: the frame cap, and after the first fill the refill rate
+  // (banked between waves when wave is given; see the header).
+  stepCap(deltaSeconds, deficit, wave) {
     if (this.filling) return this.maximumPerFrame;
-    this.refillAllowance = Math.min(this.refillAllowance, 1) + this.ramp.refillFractionPerSecond * this.targetAlive * deltaSeconds;
-    return Math.min(this.maximumPerFrame, Math.floor(this.refillAllowance));
+    const bankLimit = wave && deficit > 0 ? Math.max(1, wave.burstFraction * this.targetAlive) : 1;
+    this.refillAllowance = Math.min(this.refillAllowance, bankLimit) + this.ramp.refillFractionPerSecond * this.targetAlive * deltaSeconds;
+    if (!wave) return Math.min(this.maximumPerFrame, Math.floor(this.refillAllowance));
+    if (!wave.emitting) return 0;
+    const releasedShare = Math.min(1, deltaSeconds / Math.max(deltaSeconds, wave.remainingSeconds));
+    return Math.min(this.maximumPerFrame, Math.floor(this.refillAllowance * releasedShare));
   }
 
   // Alive agents counted by the newest stats plus the spawns requested for steps after them.
@@ -182,12 +190,14 @@ export class SpawnPressure {
 
   // stats: the newest decoded stats read back ({ aliveTotal, frameSequence }), or null when none
   // has arrived; older stats than ones already seen are ignored. frameSequence: the sequence of
-  // the step this request is for (simulation.frameSequence + 1 before simulation.step).
-  update(deltaSeconds, stats, shares, frameSequence) {
+  // the step this request is for (simulation.frameSequence + 1 before simulation.step). wave
+  // (optional, SpawnDirector.wave): { emitting, remainingSeconds, burstFraction }; omitted, refills
+  // trickle every step.
+  update(deltaSeconds, stats, shares, frameSequence, wave = null) {
     this.elapsed += deltaSeconds;
     if (stats && (this.newestStats === null || stats.frameSequence >= this.newestStats.frameSequence)) this.newestStats = stats;
     const deficit = Math.max(0, Math.floor(this.targetAlive - this.estimatedAlive));
-    const counts = splitByShares(Math.min(deficit, this.stepCap(deltaSeconds)), shares, this.carry);
+    const counts = splitByShares(Math.min(deficit, this.stepCap(deltaSeconds, deficit, wave)), shares, this.carry);
     const total = counts.reduce((sum, count) => sum + count, 0);
     if (this.filling && total >= deficit) this.filling = false;
     else if (!this.filling) this.refillAllowance -= total;

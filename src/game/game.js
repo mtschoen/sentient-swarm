@@ -17,9 +17,10 @@
 //      expiry frame even when the weapon still returned one). A frame that fires (spawns or a
 //      beam) plays one weaponFire cue with the kind and tier it fired at; then the expiry cue.
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
-//   6. spawn pressure (paused while Dying and Respawning), its seek scale and its spawn distance
+//   6. the spawn director (gates and waves, task C0b2; no waves in Ready) and spawn pressure (both
+//      paused while Dying and Respawning, when the step gets no gates), its seek scale and its spawn distance
 //      (setSeekScale, setSpawnDistanceFraction: both ramp with the count), then the simulation
-//      step is submitted. At half simulation rate (setSimulationRate('half')) step 6 runs every
+//      step is submitted with the director's gate table. At half simulation rate (setSimulationRate('half')) step 6 runs every
 //      other update with the two updates' summed delta, so speeds, spawn pressure per second,
 //      fire rate and charge drain (steps 1 to 5 still run every update) do not change.
 //   7. every ready stats frame (readAllStats, oldest first): kills (killsSinceLastRead) score once
@@ -28,9 +29,9 @@
 //      new playerHitSequence is acknowledged (accepted or not) and offered to run.playerHit, which
 //      on success drops the weapon and resets the multiplier.
 //   8. run.update drains this step's actions: clearArena requests the kill-all for the next step
-//      and clears projectiles, shockwave (bomb and death) queues an impulse that also boosts
+//      (with the death flood) and clears projectiles, shockwave (bomb and death) queues an impulse that also boosts
 //      bloom, respawn recenters the player, sets the respawn sequence to the next step and
-//      resets spawn pressure; gameOver leaves the run frozen until restart.
+//      resets spawn pressure and the spawn director; gameOver leaves the run frozen until restart.
 import { Projectiles } from './projectiles.js';
 import { PlayerShip } from './player.js';
 import { WeaponState } from './weapons.js';
@@ -39,6 +40,7 @@ import { Awards, ScoreKeeper } from './score.js';
 import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
 import { SpawnPressure } from '../sim/spawner.js';
+import { SpawnDirector } from '../sim/spawn-director.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '../sim/layout.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
@@ -64,13 +66,14 @@ export class Game {
   // accepted hit, pickup() for a collection, weaponFire(kind, tier) for a frame that fires and
   // expiry() when the upgrade's charge runs out; a missing method is skipped.
   // frameTimer (optional, src/gpu/frame-timer.js) brackets every simulation step and render.
-  static async create({ gpu, simulation, projectiles, renderer, input, capacity, clock, spawnPressure, random = Math.random, effects = null, frameTimer = null }) {
+  // spawnDirector (injectable too) owns the spawn gates and waves.
+  static async create({ gpu, simulation, projectiles, renderer, input, capacity, clock, spawnPressure, spawnDirector, random = Math.random, effects = null, frameTimer = null }) {
     const projectileSet = projectiles ?? await Projectiles.create(gpu);
-    return new Game({ gpu, simulation, projectiles: projectileSet, renderer, input, capacity, clock, spawnPressure, random, effects, frameTimer });
+    return new Game({ gpu, simulation, projectiles: projectileSet, renderer, input, capacity, clock, spawnPressure, spawnDirector, random, effects, frameTimer });
   }
 
   // Use Game.create.
-  constructor({ gpu, simulation, projectiles, renderer, input, capacity = simulation.capacity, clock, spawnPressure, random, effects = null, frameTimer = null }) {
+  constructor({ gpu, simulation, projectiles, renderer, input, capacity = simulation.capacity, clock, spawnPressure, spawnDirector, random, effects = null, frameTimer = null }) {
     this.gpu = gpu;
     this.simulation = simulation;
     this.projectiles = projectiles;
@@ -86,6 +89,9 @@ export class Game {
     this.pendingSimulationSeconds = 0;
     this.clock = clock ?? (() => this.simulation.time);
     this.spawnPressure = spawnPressure ?? new SpawnPressure({ capacity });
+    this.spawnDirector = spawnDirector ?? new SpawnDirector({ random });
+    // The gate table for the next simulation step (null while Dying and Respawning).
+    this.stepGates = null;
     this.player = new PlayerShip({ arenaWidth: ARENA_WIDTH, arenaHeight: ARENA_HEIGHT });
     this.weapons = new WeaponState({ random });
     this.pickups = new PickupDirector({ random });
@@ -165,6 +171,7 @@ export class Game {
     this.pickups.reset();
     this.player.respawn();
     this.spawnPressure.reset();
+    this.spawnDirector.reset();
     this.projectiles.clear();
     this.simulation.requestKillAll();
     this.run.setRespawnSequence(this.simulation.frameSequence + 1);
@@ -259,7 +266,7 @@ export class Game {
       const spawnPerSpecies = this.spawnCounts(simulationSeconds);
       this.simulation.setSeekScale(this.spawnPressure.seekScale);
       this.simulation.setSpawnDistanceFraction(this.spawnPressure.spawnDistanceFraction);
-      this.stepSimulation(simulationSeconds, spawnPerSpecies);
+      this.stepSimulation(simulationSeconds, spawnPerSpecies, this.stepGates);
     }
     const frames = this.simulation.readAllStats();
     frames.forEach((stats) => this.processStats(stats));
@@ -289,18 +296,32 @@ export class Game {
     return { move: inputState.move, aim, firing: inputState.firing || inputState.pointerPrimaryDown };
   }
 
-  // No spawns between death and respawn: the arena stays clear for the pause.
+  // No spawns and no gates between death and respawn: the arena stays clear for the pause.
   spawnCounts(deltaSeconds) {
     const phase = this.run.phase;
+    this.stepGates = null;
     if (phase === RunPhase.Dying || phase === RunPhase.Respawning) return NO_SPAWNS;
-    return this.spawnPressure.update(deltaSeconds, this.latestStats, this.simulation.shares, this.simulation.frameSequence + 1);
+    this.spawnDirector.update(deltaSeconds, {
+      playerX: this.player.position.x,
+      playerY: this.player.position.y,
+      safeDistance: this.spawnPressure.spawnDistanceFraction * ARENA_WIDTH,
+      filling: this.spawnPressure.filling,
+      shares: this.simulation.shares,
+      // The Ready arena (before a run) trickles from every gate; waves start with the run.
+      continuous: phase === RunPhase.Ready,
+      // Waves avoid the gates in the player's aim lane (the lane being shot open).
+      aimX: this.player.aim.x,
+      aimY: this.player.aim.y,
+    });
+    this.stepGates = this.spawnDirector.spawnGates;
+    return this.spawnPressure.update(deltaSeconds, this.latestStats, this.simulation.shares, this.simulation.frameSequence + 1, this.spawnDirector.wave);
   }
 
-  stepSimulation(deltaSeconds, spawnPerSpecies) {
+  stepSimulation(deltaSeconds, spawnPerSpecies, spawnGates = null) {
     const { device } = this.gpu;
     const encoder = device.createCommandEncoder();
     this.frameTimer?.beginSection(encoder);
-    this.simulation.step(encoder, deltaSeconds, spawnPerSpecies);
+    this.simulation.step(encoder, deltaSeconds, spawnPerSpecies, spawnGates);
     this.frameTimer?.endSection(encoder);
     device.queue.submit([encoder.finish()]);
     this.simulation.afterSubmit();
@@ -336,7 +357,8 @@ export class Game {
   handleAction(action) {
     switch (action.type) {
       case 'clearArena':
-        this.simulation.requestKillAll();
+        // The death clear: the step also floods particles and flashes at the ship (task C0b2).
+        this.simulation.requestKillAll({ deathFlood: true });
         this.projectiles.clear();
         break;
       case 'shockwave':
@@ -346,6 +368,7 @@ export class Game {
         this.player.respawn();
         this.run.setRespawnSequence(this.simulation.frameSequence + 1);
         this.spawnPressure.reset();
+        this.spawnDirector.reset();
         break;
       case 'gameOver':
         // The phase itself freezes play until restart; the restart guard counts from here.

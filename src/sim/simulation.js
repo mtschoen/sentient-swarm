@@ -4,7 +4,7 @@
 // Frame contract, one step per submitted command buffer (params and the spawn budget go through
 // queue.writeBuffer, so two steps in one submission would both see the last values):
 //   const spawnPerSpecies = spawnPressure.update(deltaSeconds, lastStats, simulation.shares, simulation.frameSequence + 1);
-//   simulation.step(encoder, deltaSeconds, spawnPerSpecies);
+//   simulation.step(encoder, deltaSeconds, spawnPerSpecies, spawnDirector.spawnGates); // gates optional
 //   device.queue.submit([encoder.finish()]);
 //   simulation.afterSubmit();
 //   const stats = simulation.readStats(); // synchronous, null until a ring slot has mapped
@@ -42,8 +42,9 @@ import { DebugKillPass, KillAllPass, PlayerContactPass } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
 import {
-  DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, SIM_PARAMS_BYTES, packSimParams,
-  validatedKillBurstParticles, validatedSpawnBandWidth, validatedSpawnDensityBias,
+  DEFAULT_DEATH_FLOOD_PARTICLES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH,
+  DEFAULT_SPAWN_DENSITY_BIAS, SIM_PARAMS_BYTES, packSimParams, validatedDeathFloodParticles, validatedKillBurstParticles,
+  validatedKillFragmentParticles, validatedSpawnBandWidth, validatedSpawnDensityBias,
 } from './params.js';
 import { Spawner } from './spawn.js';
 import { defaultMatrix, defaultSpecies, normalizeShares, packSpeciesTable } from './species.js';
@@ -121,6 +122,7 @@ export class Simulation {
     this.killAllRequested = false;
     // { x, y, radius } for the next step's radial kill (the pickup blast), or null.
     this.radialKill = null;
+    this.deathFloodRequested = false;
     this.debugKillPosition = [0, 0];
     this.debugKillRadius = 0;
     this.frameSequenceValue = 0;
@@ -135,6 +137,12 @@ export class Simulation {
     this.killBurstParticles = DEFAULT_KILL_BURST_PARTICLES;
     this.spawnBandWidth = DEFAULT_SPAWN_BAND_WIDTH;
     this.spawnDensityBias = DEFAULT_SPAWN_DENSITY_BIAS;
+    // Task C0b2: heavy fragments per kill and the player death flood size.
+    this.killFragmentParticles = DEFAULT_KILL_FRAGMENT_PARTICLES;
+    this.deathFloodParticles = DEFAULT_DEATH_FLOOD_PARTICLES;
+    // The last step's gate table ({ gates, speciesBias } from SpawnDirector.spawnGates, or null for
+    // wall band spawns); the gate renderer draws it.
+    this.spawnGatesValue = null;
     this.registeredPasses = [];
     this.setSpecies(species, matrix);
     this.setShares(shares);
@@ -154,6 +162,7 @@ export class Simulation {
   get frameSequence() { return this.frameSequenceValue; }
   get time() { return this.timeValue; }
   get shares() { return this.sharesValue; }
+  get spawnGates() { return this.spawnGatesValue; }
 
   // Moves the player (the seek target) without touching the contact state.
   setPlayer(x, y) {
@@ -174,9 +183,11 @@ export class Simulation {
   }
 
   // Kills every agent, spawning ones included, in the next step only; those kills land in
-  // killsUnscored.
-  requestKillAll() {
+  // killsUnscored. deathFlood (the player death clear) also bursts deathFloodParticles particles
+  // and a white flash at the player position in that step.
+  requestKillAll({ deathFlood = false } = {}) {
     this.killAllRequested = true;
+    this.deathFloodRequested = this.deathFloodRequested || Boolean(deathFlood);
   }
 
   // Kills every agent within radius of (x, y), spawning ones included, in the next step only,
@@ -247,10 +258,24 @@ export class Simulation {
     this.spawnDensityBias = validatedSpawnDensityBias(bias);
   }
 
+  // Heavy fragments per kill from the next step on, an integer in
+  // [0, MAXIMUM_KILL_FRAGMENT_PARTICLES]; they share the kill's particle budget with the sparks.
+  setKillFragmentParticles(count) {
+    this.killFragmentParticles = validatedKillFragmentParticles(count);
+  }
+
+  // Particles of the player death flood, an integer in [0, MAXIMUM_DEATH_FLOOD_PARTICLES].
+  setDeathFloodParticles(count) {
+    this.deathFloodParticles = validatedDeathFloodParticles(count);
+  }
+
   // spawnPerSpecies: SPECIES_COUNT counts for this frame, usually from SpawnPressure.update.
-  step(encoder, deltaSeconds, spawnPerSpecies = new Uint32Array(SPECIES_COUNT)) {
+  // spawnGates (optional, SpawnDirector.spawnGates): this step's gate table; null spawns in the
+  // wall band.
+  step(encoder, deltaSeconds, spawnPerSpecies = new Uint32Array(SPECIES_COUNT), spawnGates = null) {
     this.frameSequenceValue += 1;
     this.timeValue += deltaSeconds;
+    this.spawnGatesValue = spawnGates;
     this.writeParams(deltaSeconds, spawnPerSpecies);
     const killRadius = this.debugKillRadius;
     this.debugKillRadius = 0;
@@ -258,6 +283,7 @@ export class Simulation {
     const radialKill = killAll ? null : this.radialKill;
     this.killAllRequested = false;
     this.radialKill = null;
+    this.deathFloodRequested = false;
     this.spawner.writeBudget(spawnPerSpecies);
     encoder.clearBuffer(this.statsBufferValue, 0, STATS_PERSISTENT_OFFSET_BYTES);
     this.particlePoolValue.encodeBeginStep(encoder);
@@ -316,6 +342,9 @@ export class Simulation {
       seekScale: this.seekScale,
       spawnDistanceFraction: this.spawnDistanceFraction,
       killBurstParticles: this.killBurstParticles,
+      killFragmentParticles: this.killFragmentParticles,
+      deathFloodParticles: this.killAllRequested && this.deathFloodRequested ? this.deathFloodParticles : 0,
+      spawnGates: this.spawnGatesValue,
       spawnBandWidth: this.spawnBandWidth,
       spawnDensityBias: this.spawnDensityBias,
       playerRadius: this.playerContact?.radius ?? 0,
@@ -398,9 +427,9 @@ export class Simulation {
   // playerHitSequence) is copied too, and lastKillsTotal carries, so kills in stats frames this
   // instance never read back are counted by the new instance's first read. Registered passes,
   // player state, acknowledged hit sequence, a pending kill-all, species, matrix, shares, seek
-  // scale, spawn distance, kill burst size, spawn band, density bias and the cohesion mode carry
-  // over, read now so edits made while the
-  // change was prepared are not lost. Live particles are not copied. The same submission builds
+  // scale, spawn distance, kill burst and fragment sizes, the death flood size, the last gate
+  // table, spawn band, density bias and the cohesion mode carry over, read now so edits made
+  // while the change was prepared are not lost. Live particles are not copied. The same submission builds
   // the new instance's grid and coarse field on the copied agents (with its params at dt 0), so
   // the renderer can draw it before its first step. Stats resume after the new instance's next
   // step.
@@ -435,6 +464,9 @@ export class Simulation {
     next.setKillBurstParticles(this.killBurstParticles);
     next.setSpawnBandWidth(this.spawnBandWidth);
     next.setSpawnDensityBias(this.spawnDensityBias);
+    next.setKillFragmentParticles(this.killFragmentParticles);
+    next.setDeathFloodParticles(this.deathFloodParticles);
+    next.spawnGatesValue = this.spawnGatesValue;
     next.registeredPasses = this.registeredPasses;
     next.frameSequenceValue = this.frameSequenceValue;
     next.timeValue = this.timeValue;
@@ -445,6 +477,7 @@ export class Simulation {
     next.lastKillsTotal = this.lastKillsTotal;
     next.killAllRequested = this.killAllRequested;
     next.radialKill = this.radialKill === null ? null : { ...this.radialKill };
+    next.deathFloodRequested = this.deathFloodRequested;
     next.setDebugKill(...this.debugKillPosition, this.debugKillRadius);
   }
 

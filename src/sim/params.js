@@ -1,7 +1,7 @@
 // Packs the SimParams uniform. Byte layout matches the table at the top of common.wgsl.
 import { ARENA_HEIGHT, SPECIES_COUNT } from './layout.js';
 
-export const SIM_PARAMS_BYTES = 128;
+export const SIM_PARAMS_BYTES = 224;
 
 // Particles per kill (owner ruling R12, task C0b); the kill passes scale it down only when a step's
 // kills would outrun the free particle slots.
@@ -15,6 +15,15 @@ export const DEFAULT_SPAWN_BAND_WIDTH = 0.6;
 export const DEFAULT_SPAWN_DENSITY_BIAS = 0.5;
 // A lab ceiling on the burst size, well past the default.
 export const MAXIMUM_KILL_BURST_PARTICLES = 64;
+// Heavy slow fragments per kill beside the sparks (owner ruling R21, task C0b2); a kill asks for
+// killBurstParticles + killFragmentParticles particles in all.
+export const DEFAULT_KILL_FRAGMENT_PARTICLES = 3;
+export const MAXIMUM_KILL_FRAGMENT_PARTICLES = 16;
+// Particles of the player death flood (R21), emitted at the ship in the death clear's step.
+export const DEFAULT_DEATH_FLOOD_PARTICLES = 480;
+export const MAXIMUM_DEATH_FLOOD_PARTICLES = 4096;
+// Gate table rows in SimParams (MAXIMUM_SPAWN_GATES in spawn-director.js).
+export const SIM_PARAMS_GATES = 4;
 
 // Range checks for the setters above (Simulation.setKillBurstParticles and friends): each returns
 // its value or throws RangeError.
@@ -23,6 +32,19 @@ export function validatedKillBurstParticles(count) {
     throw new RangeError(`killBurstParticles must be an integer in [0, ${MAXIMUM_KILL_BURST_PARTICLES}], got ${count}`);
   }
   return count;
+}
+
+function validatedCount(name, count, maximum) {
+  if (!(Number.isInteger(count) && count >= 0 && count <= maximum)) throw new RangeError(`${name} must be an integer in [0, ${maximum}], got ${count}`);
+  return count;
+}
+
+export function validatedKillFragmentParticles(count) {
+  return validatedCount('killFragmentParticles', count, MAXIMUM_KILL_FRAGMENT_PARTICLES);
+}
+
+export function validatedDeathFloodParticles(count) {
+  return validatedCount('deathFloodParticles', count, MAXIMUM_DEATH_FLOOD_PARTICLES);
 }
 
 export function validatedSpawnBandWidth(width) {
@@ -50,6 +72,13 @@ const SPAWN_DISTANCE_FRACTION_OFFSET = 36;
 const KILL_BURST_PARTICLES_OFFSET = 112;
 const SPAWN_BAND_WIDTH_OFFSET = 116;
 const SPAWN_DENSITY_BIAS_OFFSET = 120;
+const KILL_FRAGMENT_PARTICLES_OFFSET = 124;
+// Gate rows: vec4f (x, y, radius, emission) each, then one u32 favored species per gate.
+const SPAWN_GATES_OFFSET = 128;
+const SPAWN_GATE_SPECIES_OFFSET = 192;
+const SPAWN_GATE_COUNT_OFFSET = 208;
+const SPAWN_GATE_SPECIES_BIAS_OFFSET = 212;
+const DEATH_FLOOD_PARTICLES_OFFSET = 216;
 const VECTOR_FIELDS = { playerPosition: 8, debugKillPosition: 40 };
 const SPAWN_PER_SPECIES_OFFSET = 48;
 
@@ -73,6 +102,17 @@ export function packSimParams(values) {
   view.setUint32(KILL_BURST_PARTICLES_OFFSET, values.killBurstParticles ?? DEFAULT_KILL_BURST_PARTICLES, true);
   view.setFloat32(SPAWN_BAND_WIDTH_OFFSET, values.spawnBandWidth ?? DEFAULT_SPAWN_BAND_WIDTH, true);
   view.setFloat32(SPAWN_DENSITY_BIAS_OFFSET, values.spawnDensityBias ?? DEFAULT_SPAWN_DENSITY_BIAS, true);
+  view.setUint32(KILL_FRAGMENT_PARTICLES_OFFSET, values.killFragmentParticles ?? DEFAULT_KILL_FRAGMENT_PARTICLES, true);
+  view.setUint32(DEATH_FLOOD_PARTICLES_OFFSET, values.deathFloodParticles ?? 0, true);
+  // spawnGates: { gates: [{ x, y, radius, emit, species }], speciesBias } or none (wall band spawns).
+  const gates = values.spawnGates?.gates ?? [];
+  if (gates.length > SIM_PARAMS_GATES) throw new Error('spawnGates has ' + gates.length + ' gates; at most ' + SIM_PARAMS_GATES);
+  gates.forEach(({ x, y, radius, emit, species }, index) => {
+    [x, y, radius, emit].forEach((value, component) => view.setFloat32(SPAWN_GATES_OFFSET + index * 16 + component * 4, value, true));
+    view.setUint32(SPAWN_GATE_SPECIES_OFFSET + index * 4, species, true);
+  });
+  view.setUint32(SPAWN_GATE_COUNT_OFFSET, gates.length, true);
+  view.setFloat32(SPAWN_GATE_SPECIES_BIAS_OFFSET, values.spawnGates?.speciesBias ?? 0, true);
   // spawnPerSpecies0 holds species 0 to 3, spawnPerSpecies1.x holds species 4; the rest stays 0.
   const spawnPerSpecies = values.spawnPerSpecies ?? [];
   if (spawnPerSpecies.length > SPECIES_COUNT) {

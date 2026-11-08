@@ -1,6 +1,8 @@
-// GPU spawner: dead agent slots claim units from the per-species spawn budget and come alive in
-// the wall band away from the player, optionally near dense coarse field cells (spawn.wgsl). The budget buffer holds SPECIES_COUNT u32 counters; the caller
-// refills it every frame with writeBudget before encode.
+// GPU spawner: dead agent slots claim units from the per-species spawn budget and come alive at
+// the emitting spawn gates of the SimParams gate table (task C0b2), or in the wall band away from
+// the player, optionally near dense coarse field cells, when no gate emits (spawn.wgsl). The
+// budget buffer holds SPECIES_COUNT u32 counters; the caller refills it every frame with
+// writeBudget before encode.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';

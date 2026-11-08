@@ -9,6 +9,9 @@ import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
 
 export const PARTICLE_VIEW_BYTES = 32;
 export const PARTICLE_DEVICE_PIXELS = 4;
+// Lab range for setParticleDevicePixels (the burst particle size, task C0b2).
+export const MINIMUM_PARTICLE_DEVICE_PIXELS = 1;
+export const MAXIMUM_PARTICLE_DEVICE_PIXELS = 16;
 const VERTICES_PER_PARTICLE = 4;
 const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 
@@ -32,6 +35,7 @@ export class ParticleRenderer {
     this.common = common;
     this.pipeline = null;
     this.viewBuffer = createUniformBuffer(this.device, PARTICLE_VIEW_BYTES, 'particle-view');
+    this.particleDevicePixels = PARTICLE_DEVICE_PIXELS;
     this.bindGroupCache = new BindGroupCache((buffers) => this.device.createBindGroup({
       label: 'particle-bindings',
       layout: this.pipeline.getBindGroupLayout(0),
@@ -54,10 +58,20 @@ export class ParticleRenderer {
     });
   }
 
+  // The base quad size in device pixels at 1x zoom (sparks; fragments and the early burst scale
+  // it up), in [MINIMUM_PARTICLE_DEVICE_PIXELS, MAXIMUM_PARTICLE_DEVICE_PIXELS]. Throws RangeError
+  // and changes nothing when out of range. The renderer outlives capacity swaps, so it carries.
+  setParticleDevicePixels(pixels) {
+    if (!(pixels >= MINIMUM_PARTICLE_DEVICE_PIXELS && pixels <= MAXIMUM_PARTICLE_DEVICE_PIXELS)) {
+      throw new RangeError(`particleDevicePixels must lie in [${MINIMUM_PARTICLE_DEVICE_PIXELS}, ${MAXIMUM_PARTICLE_DEVICE_PIXELS}], got ${pixels}`);
+    }
+    this.particleDevicePixels = pixels;
+  }
+
   // Draws into an open render pass whose color target is a scene texture; Renderer passes
   // simulation.particlePool every frame.
   encode(pass, pool, emissionScale = 1) {
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packParticleView({ viewport: this.viewport, emissionScale }));
+    this.device.queue.writeBuffer(this.viewBuffer, 0, packParticleView({ viewport: this.viewport, particleDevicePixels: this.particleDevicePixels, emissionScale }));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, pool.buffers.particles]));
     pass.draw(VERTICES_PER_PARTICLE, pool.capacity);

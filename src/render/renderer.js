@@ -1,4 +1,4 @@
-// Renderer: the warp grid into its own grid layer, then trails decay, glyphs, projectiles, pickups, particles and the ship into the
+// Renderer: the warp grid into its own grid layer, then trails decay, spawn gates, glyphs, projectiles, pickups, particles and the ship into the
 // current scene target, bloom, then composite (scene plus grid plus bloom) into the swapchain. Two
 // rgba16float scene targets at canvas device-pixel size ping-pong for trails. The grid has its own
 // rgba16float layer, cleared every frame, so trail decay never copies it forward and it never smears.
@@ -16,6 +16,7 @@ import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { SHADER_CONSTANTS } from '../sim/layout.js';
 import { BLOOM_DIVISORS, BloomPass } from './bloom.js';
 import { FrameCapture } from './capture.js';
+import { GateRenderer } from './gates.js';
 import { CompositePass } from './composite.js';
 import { GlyphPass } from './glyphs.js';
 import { ImpulseSet, bloomBoostFactor } from './impulses.js';
@@ -50,6 +51,7 @@ export class Renderer {
     await Promise.all([
       renderer.warpGrid.initialize(),
       renderer.trails.initialize(),
+      renderer.gates.initialize(),
       renderer.glyphs.initialize(),
       renderer.particles.initialize(),
       renderer.projectileRenderer.initialize(),
@@ -71,6 +73,7 @@ export class Renderer {
     this.settings = { ...DEFAULT_RENDER_SETTINGS };
     this.trails = new TrailDecayPass(gpu, { fullscreenHeader });
     this.warpGrid = new WarpGrid(gpu, { viewport, common });
+    this.gates = new GateRenderer(gpu, { viewport, common });
     this.glyphs = new GlyphPass(gpu, { common });
     this.particles = new ParticleRenderer(gpu, { viewport, common });
     this.projectileRenderer = new ProjectileRenderer(gpu, { viewport, common });
@@ -153,6 +156,7 @@ export class Renderer {
     });
     const { decay, emissionScale } = trailFrameFactors(settings.trailDecay, deltaSeconds);
     this.trails.draw(scenePass, previousIndex, decay);
+    this.gates.encode(scenePass, simulation, time);
     this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time, emissionScale, interpolate });
     if (scene?.projectiles) this.projectileRenderer.encode(scenePass, time, scene.projectiles);
     if (scene?.pickups) this.pickupRenderer.encode(scenePass, scene.pickups, time);
@@ -199,7 +203,7 @@ export class Renderer {
   destroy() {
     this.destroySceneTextures();
     [this.glyphs, this.particles, this.warpGrid, this.projectileRenderer].forEach((pass) => pass.bindGroupCache.clear());
-    [this.warpGrid, this.trails, this.glyphs, this.particles, this.projectileRenderer, this.pickupRenderer, this.ship, this.bloom, this.composite].forEach((pass) => pass.destroy());
+    [this.warpGrid, this.trails, this.gates, this.glyphs, this.particles, this.projectileRenderer, this.pickupRenderer, this.ship, this.bloom, this.composite].forEach((pass) => pass.destroy());
     this.frameCapture.destroy();
   }
 }
