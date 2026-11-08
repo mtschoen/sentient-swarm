@@ -3,12 +3,12 @@
 // of it) and never exceeds what was requested (no double-spent budget); (b) every species holds
 // its share within 10 percent relative; (c) the read-back frameSequence lags the CPU frame by at
 // most 3; (d) after frame 1 every agent was spawned that frame: it sits at least ARENA_WIDTH / 4
-// from the player with 29 spawn-in frames left, in-range species, phase and hueJitter, and zero
+// from the player and within the default spawn band of a wall (task C0b) with 29 spawn-in frames left, in-range species, phase and hueJitter, and zero
 // velocity unless integrate's wall spring already pushed it (inside WALL_MARGIN of an edge);
 // (e) recreateWithCapacity(131072) keeps at least 95 percent of the alive agents after one more step;
 // (f) a one-frame debug kill of radius 2 at the arena center, with zero spawning, reports kills, drops
-// aliveTotal by exactly that many, reports zero kills a frame later, fills at least 6 particle slots
-// per kill (capped at the pool capacity) all within 2.5 of the center, and adds threat near the center;
+// aliveTotal by exactly that many, reports zero kills a frame later, fills at least DEFAULT_KILL_BURST_PARTICLES particle slots
+// per kill (12, the default burst; capped at the pool capacity) all within 2.5 of the center, and adds threat near the center;
 // (g) shrinking a 131072-slot simulation whose only alive agents sit in slots 100000 and up to
 // 65536 slots keeps every one of them (compaction, not a slot prefix);
 // (i) kills in stats frames the old instance never read back count after a capacity change: with
@@ -25,6 +25,7 @@ import { normalizeShares } from '/src/sim/species.js';
 import { SpawnPressure } from '/src/sim/spawner.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { PARTICLE_HEADER_BYTES, PARTICLE_STRIDE_BYTES } from '/src/sim/particles.js';
+import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH } from '/src/sim/params.js';
 
 const INITIAL_CAPACITY = 65536;
 const GROWN_CAPACITY = 131072;
@@ -39,7 +40,7 @@ const PHASE_TOLERANCE = 1e-5;
 const WALL_MARGIN = 0.5;
 const KILL_RADIUS = 2;
 const KILL_FRAMES_TO_WAIT = 3;
-const PARTICLES_PER_KILL = 6;
+const PARTICLES_PER_KILL = DEFAULT_KILL_BURST_PARTICLES;
 // Particle struct (common.wgsl): position, velocity, color, age at 20, lifetime at 24, after the
 // ParticlePool header (the spawn cursor and padding).
 const PARTICLE_AGE_OFFSET = 20;
@@ -108,7 +109,9 @@ function spawnPlacement(agentBytes) {
     const slot = base / AGENT_STRIDE_BYTES;
     if (distance < ARENA_WIDTH / 4) return { failure: `slot ${slot} spawned ${distance.toFixed(3)} from the player` };
     if (x < 0 || x > ARENA_WIDTH || y < 0 || y > ARENA_HEIGHT) return { failure: `slot ${slot} spawned outside the arena at (${x}, ${y})` };
-    const insideMargin = Math.min(x, y, ARENA_WIDTH - x, ARENA_HEIGHT - y) < WALL_MARGIN;
+    const wallDistance = Math.min(x, y, ARENA_WIDTH - x, ARENA_HEIGHT - y);
+    if (wallDistance > DEFAULT_SPAWN_BAND_WIDTH) return { failure: `slot ${slot} spawned ${wallDistance.toFixed(3)} from the nearest wall, outside the ${DEFAULT_SPAWN_BAND_WIDTH} band` };
+    const insideMargin = wallDistance < WALL_MARGIN;
     if (!insideMargin && (velocity[0] !== 0 || velocity[1] !== 0)) return { failure: `slot ${slot} has velocity ${velocity} in its spawn frame` };
     if (spawnFrames !== SPAWN_FRAMES - 1) return { failure: `slot ${slot} has ${spawnFrames} spawn-in frames after integrate, expected ${SPAWN_FRAMES - 1}` };
     if (species >= SPECIES_COUNT) return { failure: `slot ${slot} has species ${species}` };

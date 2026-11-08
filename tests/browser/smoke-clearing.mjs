@@ -1,0 +1,193 @@
+// Smoke modes for task C0b (owner rulings R12 and R13), run through smoke.mjs:
+// --corridor: the R13 acceptance metric. The synthetic gamepad moves the ship to the left wall
+//   (starting the run), the spawn floor is raised to CORRIDOR_RAMP's floorFraction of capacity
+//   through SpawnPressure.setRamp (the lab interface; the seek ramp, refill rate, spawn band and
+//   density bias stay at their defaults) so the coarse field holds a measurable crowd, the ship
+//   turns invulnerable (game.debugInvulnerable: a death would clear the arena mid-measurement),
+//   the swarm settles for CORRIDOR_SETTLE_FRAMES, then a tier 3 beam (armed through game.debugArm, the debug panel's
+//   arm path) fires right across the arena for CORRIDOR_FIRE_FRAMES. The coarse field is read
+//   back (Simulation.readCoarseField, a test-only readback) before the fire and 1 s and 3 s
+//   after it stops. Corridor: the coarse cells whose centers lie within the beam's half width of
+//   the ship's row, from CORRIDOR_START_X to CORRIDOR_END_X (clear of the ship, where seek
+//   gathers the swarm). Control: the same columns in the rows CONTROL_ROW_OFFSET above and below,
+//   untouched by the beam. The corridor's mean density must stay under half the control's at 3 s.
+// --bursts: the R12 visual gates. artifacts/kill-burst.png: the base gun firing into the swarm at
+//   default settings, captured after BURST_FIRE_FRAMES of fire. artifacts/bomb-burst.png: the
+//   floor raised to BOMB_FLOOR_FRACTION, a bomb through the dense arena, captured
+//   BOMB_CAPTURE_FRAMES after the press; the particle pool's live count (read from its header) is
+//   reported against the pool size before and after the bomb.
+// Both fail on console errors; the corridor check also fails when the ship died anyway.
+import { ARENA_HEIGHT, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT } from '../../src/sim/layout.js';
+
+const MOVE_TO_WALL_FRAMES = 75;
+// --legacy-spawn: the Plan A spawn for comparison: anywhere in the arena (a band of half the
+// arena height), refilling as fast as the ramp allows, no density bias.
+const LEGACY_RAMP = { refillFractionPerSecond: 1 };
+const LEGACY_SPAWN = { bandWidth: ARENA_HEIGHT / 2, densityBias: 0 };
+const CORRIDOR_SETTLE_FRAMES = 600;
+const CORRIDOR_FIRE_FRAMES = 60;
+const CORRIDOR_LATE_FRAMES = [60, 180];
+const CORRIDOR_START_X = 5;
+const CORRIDOR_END_X = 15;
+const CONTROL_ROW_OFFSET = 2.25;
+// The tier 3 beam's half width (WEAPON_TYPES.beam in src/game/weaponTypes.js).
+const BEAM_TIER = 3;
+const BEAM_HALF_WIDTH = 0.3;
+const CORRIDOR_MAXIMUM_RATIO = 0.5;
+const BURST_FIRE_FRAMES = 240;
+const BOMB_FLOOR_FRACTION = 0.9;
+const BOMB_SETTLE_FRAMES = 180;
+const BOMB_CAPTURE_FRAMES = 6;
+const FRAME_TIMEOUT_MILLISECONDS = 60_000;
+const CELL_HEIGHT = ARENA_HEIGHT / COARSE_ROWS;
+const CELL_WIDTH = 16 / COARSE_COLUMNS;
+
+// Mean total density (species channels) over the cells whose centers lie within halfHeight of
+// rowCenterY and between startX and endX.
+function bandDensity(field, rowCenterY, halfHeight, startX, endX) {
+  let sum = 0;
+  let cells = 0;
+  for (let row = 0; row < COARSE_ROWS; row += 1) {
+    if (Math.abs((row + 0.5) * CELL_HEIGHT - rowCenterY) >= halfHeight) continue;
+    for (let column = 0; column < COARSE_COLUMNS; column += 1) {
+      const centerX = (column + 0.5) * CELL_WIDTH;
+      if (centerX < startX || centerX > endX) continue;
+      const base = (row * COARSE_COLUMNS + column) * COARSE_CHANNELS;
+      for (let species = 0; species < SPECIES_COUNT; species += 1) sum += field[base + species];
+      cells += 1;
+    }
+  }
+  return sum / cells;
+}
+
+// --corridor-floor F raises the spawn floor to the fraction F of capacity for a denser crowd (by
+// default the tuned ramp is left alone); --legacy-spawn measures the Plan A spawn instead.
+function corridorOptions(argumentList) {
+  const index = argumentList.indexOf('--corridor-floor');
+  const floorFraction = index === -1 ? null : Number.parseFloat(argumentList[index + 1]);
+  if (floorFraction !== null && !(floorFraction > 0 && floorFraction <= 1)) throw new Error('--corridor-floor needs a fraction in (0, 1]');
+  return { floorFraction, legacy: argumentList.includes('--legacy-spawn') };
+}
+
+async function readField(page, evaluateWithin) {
+  return Float32Array.from(await evaluateWithin(page, 'reading the coarse field', async () => Array.from(await window.__murmuration.game.simulation.readCoarseField())));
+}
+
+function corridorDensities(field, shipY) {
+  const corridor = bandDensity(field, shipY, BEAM_HALF_WIDTH, CORRIDOR_START_X, CORRIDOR_END_X);
+  const control = (bandDensity(field, shipY - CONTROL_ROW_OFFSET, BEAM_HALF_WIDTH, CORRIDOR_START_X, CORRIDOR_END_X)
+    + bandDensity(field, shipY + CONTROL_ROW_OFFSET, BEAM_HALF_WIDTH, CORRIDOR_START_X, CORRIDOR_END_X)) / 2;
+  return { corridor, control, ratio: control > 0 ? corridor / control : Number.POSITIVE_INFINITY };
+}
+
+async function framesLater(page, helpers, frames) {
+  const start = await helpers.evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
+  await page.waitForFunction((target) => window.__murmuration.frame >= target, start + frames, { timeout: FRAME_TIMEOUT_MILLISECONDS });
+}
+
+async function setRamp(page, helpers, ramp) {
+  await helpers.evaluateWithin(page, 'changing the spawn ramp', (values) => window.__murmuration.game.spawnPressure.setRamp(values), ramp);
+}
+
+// Moves the ship to the left wall, which also starts the run. Returns the ship's y.
+async function moveToLeftWall(page, helpers) {
+  await helpers.setSticks(page, [-1, 0, 0, 0]);
+  await framesLater(page, helpers, MOVE_TO_WALL_FRAMES);
+  await helpers.setSticks(page, [0, 0, 0, 0]);
+  return (await helpers.evaluateWithin(page, 'reading the ship', () => window.__murmuration.stats)).playerY;
+}
+
+function describe({ corridor, control, ratio }) {
+  return `corridor ${corridor.toFixed(3)}, control ${control.toFixed(3)}, ratio ${ratio.toFixed(3)}`;
+}
+
+// Returns a failure message, or null.
+export async function checkCorridor(page, helpers) {
+  const options = corridorOptions(process.argv.slice(2));
+  await helpers.evaluateWithin(page, 'making the ship invulnerable', () => window.__murmuration.game.debugInvulnerable(true));
+  const shipY = await moveToLeftWall(page, helpers);
+  await setRamp(page, helpers, { ...(options.floorFraction === null ? {} : { floorFraction: options.floorFraction }), ...(options.legacy ? LEGACY_RAMP : {}) });
+  if (options.legacy) {
+    await helpers.evaluateWithin(page, 'restoring the uniform spawn', (spawn) => {
+      const { simulation } = window.__murmuration.game;
+      simulation.setSpawnBandWidth(spawn.bandWidth);
+      simulation.setSpawnDensityBias(spawn.densityBias);
+    }, LEGACY_SPAWN);
+  }
+  console.log(`smoke: corridor setup floor ${options.floorFraction ?? 'default'}${options.legacy ? ', legacy spawn (uniform, refill 1 per second, no bias)' : ', default spawn'}`);
+  await framesLater(page, helpers, CORRIDOR_SETTLE_FRAMES);
+  const settled = await helpers.evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  const livesBefore = settled.lives;
+  const before = corridorDensities(await readField(page, helpers.evaluateWithin), shipY);
+  await helpers.evaluateWithin(page, 'arming the beam', (tier) => window.__murmuration.game.debugArm('beam', tier), BEAM_TIER);
+  await helpers.setSticks(page, [0, 0, 1, 0]);
+  await framesLater(page, helpers, CORRIDOR_FIRE_FRAMES);
+  await helpers.setSticks(page, [0, 0, 0, 0]);
+  const after = [];
+  let waited = 0;
+  for (const frames of CORRIDOR_LATE_FRAMES) {
+    await framesLater(page, helpers, frames - waited);
+    waited = frames;
+    after.push(corridorDensities(await readField(page, helpers.evaluateWithin), shipY));
+  }
+  const { phase, lives } = await helpers.evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  console.log(`smoke: corridor before the beam (aliveTotal ${settled.aliveTotal}, lives ${livesBefore}): ${describe(before)}`);
+  // Informational: the ratio relative to the ratio before the beam, which factors out a corridor
+  // row that was already thinner (or denser) than the control rows.
+  CORRIDOR_LATE_FRAMES.forEach((frames, index) => console.log(`smoke: corridor ${(frames / 60).toFixed(0)} s after the beam: ${describe(after[index])}, relative to before ${(after[index].ratio / before.ratio).toFixed(3)}`));
+  if (page.consoleErrors.length > 0) return `smoke: console errors during the corridor check: ${page.consoleErrors.join(' | ')}`;
+  if (phase !== 'playing' || lives < livesBefore) {
+    return `smoke: the ship died during the corridor measurement (phase ${phase}, lives ${livesBefore} -> ${lives}); the metric needs a live ship`;
+  }
+  const late = after[after.length - 1];
+  if (!(late.ratio < CORRIDOR_MAXIMUM_RATIO)) {
+    return `smoke: expected the corridor under ${CORRIDOR_MAXIMUM_RATIO} of the control density ${CORRIDOR_LATE_FRAMES.at(-1) / 60} s after the beam, got ${describe(late)}`;
+  }
+  return null;
+}
+
+// The particle pool's live count (header word 1) and size, read back through the game's device.
+async function readParticleLoad(page, helpers) {
+  return helpers.evaluateWithin(page, 'reading the particle pool', async () => {
+    const { game } = window.__murmuration;
+    const { device } = game.gpu;
+    const pool = game.simulation.particlePool;
+    const staging = device.createBuffer({ size: 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const encoder = device.createCommandEncoder();
+    encoder.copyBufferToBuffer(pool.buffers.particles, 0, staging, 0, 16);
+    device.queue.submit([encoder.finish()]);
+    await staging.mapAsync(GPUMapMode.READ);
+    const live = new Uint32Array(staging.getMappedRange())[1];
+    staging.unmap();
+    staging.destroy();
+    return { live, size: pool.capacity };
+  });
+}
+
+// Returns a failure message, or null.
+export async function captureBursts(page, helpers) {
+  await moveToLeftWall(page, helpers);
+  await helpers.setSticks(page, [0, 0, 1, 0]);
+  await framesLater(page, helpers, BURST_FIRE_FRAMES);
+  const kills = await helpers.evaluateWithin(page, 'the kill burst capture', () => window.__murmuration.capture());
+  await helpers.writeDataUrl('kill-burst.png', kills.pngDataUrl);
+  await helpers.setSticks(page, [0, 0, 0, 0]);
+  const burstLoad = await readParticleLoad(page, helpers);
+  console.log(`smoke: kill burst capture after ${BURST_FIRE_FRAMES} frames of base fire, arena mean ${kills.meanLuminance.toFixed(4)}, live particles ${burstLoad.live} of ${burstLoad.size}`);
+  await setRamp(page, helpers, { floorFraction: BOMB_FLOOR_FRACTION });
+  await framesLater(page, helpers, BOMB_SETTLE_FRAMES);
+  const aliveBefore = (await helpers.evaluateWithin(page, 'reading stats', () => window.__murmuration.stats)).aliveTotal;
+  const loadBefore = await readParticleLoad(page, helpers);
+  await page.keyboard.down('Space');
+  await framesLater(page, helpers, BOMB_CAPTURE_FRAMES);
+  await page.keyboard.up('Space');
+  const bomb = await helpers.evaluateWithin(page, 'the bomb capture', () => window.__murmuration.capture());
+  await helpers.writeDataUrl('bomb-burst.png', bomb.pngDataUrl);
+  const loadAfter = await readParticleLoad(page, helpers);
+  console.log(`smoke: bomb through ${aliveBefore} alive agents: live particles ${loadBefore.live} -> ${loadAfter.live} of ${loadAfter.size}, arena mean ${bomb.meanLuminance.toFixed(4)}`);
+  if (page.consoleErrors.length > 0) return `smoke: console errors during the burst captures: ${page.consoleErrors.join(' | ')}`;
+  if (!(loadAfter.live > loadBefore.live && loadAfter.live <= loadAfter.size)) {
+    return `smoke: expected the bomb to add live particles within the pool, got ${loadBefore.live} -> ${loadAfter.live} of ${loadAfter.size}`;
+  }
+  return null;
+}

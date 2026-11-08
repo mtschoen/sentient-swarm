@@ -1,8 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SIM_PARAMS_BYTES, packSimParams } from '../../src/sim/params.js';
+import {
+  DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, MAXIMUM_KILL_BURST_PARTICLES, SIM_PARAMS_BYTES,
+  packSimParams, validatedKillBurstParticles, validatedSpawnBandWidth, validatedSpawnDensityBias,
+} from '../../src/sim/params.js';
 
-test('packSimParams produces the 112-byte uniform layout', () => {
+test('packSimParams produces the 128-byte uniform layout', () => {
   const buffer = packSimParams({
     dt: 0.5,
     gridColumns: 160,
@@ -12,7 +15,7 @@ test('packSimParams produces the 112-byte uniform layout', () => {
     playerPosition: [3, 4],
     spawnPerSpecies: [1, 2, 3, 4, 5],
   });
-  assert.equal(SIM_PARAMS_BYTES, 112);
+  assert.equal(SIM_PARAMS_BYTES, 128);
   assert.equal(buffer.byteLength, SIM_PARAMS_BYTES);
   const view = new DataView(buffer);
   assert.equal(view.getFloat32(0, true), 0.5);
@@ -28,9 +31,13 @@ test('packSimParams produces the 112-byte uniform layout', () => {
 test('packSimParams defaults missing fields to zero', () => {
   const view = new DataView(packSimParams({}));
   for (let offset = 0; offset < SIM_PARAMS_BYTES; offset += 4) {
-    // Same-species cohesion defaults to on the seek scale to 1 (full seek) and the spawn distance to 0.25 of the arena width.
+    // Same-species cohesion defaults to on the seek scale to 1 (full seek), the spawn distance to
+    // 0.25 of the arena width, and the kill burst, spawn band and density bias to their defaults.
     if (offset === 108) assert.equal(view.getFloat32(offset, true), 1);
     else if (offset === 36) assert.equal(view.getFloat32(offset, true), 0.25);
+    else if (offset === 112) assert.equal(view.getUint32(offset, true), DEFAULT_KILL_BURST_PARTICLES);
+    else if (offset === 116) assert.equal(view.getFloat32(offset, true), Math.fround(DEFAULT_SPAWN_BAND_WIDTH));
+    else if (offset === 120) assert.equal(view.getFloat32(offset, true), Math.fround(DEFAULT_SPAWN_DENSITY_BIAS));
     else assert.equal(view.getUint32(offset, true), offset === 88 ? 1 : 0);
   }
 });
@@ -60,4 +67,31 @@ test('packSimParams writes seekScale as f32 at byte offset 108', () => {
 
 test('packSimParams writes spawnDistanceFraction as f32 at byte offset 36', () => {
   assert.equal(new DataView(packSimParams({ spawnDistanceFraction: 0.375 })).getFloat32(36, true), 0.375);
+});
+
+test('the kill burst defaults to about a dozen particles (owner ruling R12)', () => {
+  assert.equal(DEFAULT_KILL_BURST_PARTICLES, 12);
+});
+
+test('packSimParams writes killBurstParticles as u32 at byte offset 112', () => {
+  assert.equal(new DataView(packSimParams({ killBurstParticles: 5 })).getUint32(112, true), 5);
+  assert.equal(new DataView(packSimParams({ killBurstParticles: 0 })).getUint32(112, true), 0);
+});
+
+test('packSimParams writes spawnBandWidth and spawnDensityBias as f32 at byte offsets 116 and 120', () => {
+  const view = new DataView(packSimParams({ spawnBandWidth: 1.5, spawnDensityBias: 0.25 }));
+  assert.equal(view.getFloat32(116, true), 1.5);
+  assert.equal(view.getFloat32(120, true), 0.25);
+  assert.equal(view.getUint32(124, true), 0);
+});
+
+test('the spawn and burst setters accept their ranges and reject the rest', () => {
+  assert.equal(validatedKillBurstParticles(0), 0);
+  assert.equal(validatedKillBurstParticles(MAXIMUM_KILL_BURST_PARTICLES), MAXIMUM_KILL_BURST_PARTICLES);
+  for (const bad of [-1, 2.5, MAXIMUM_KILL_BURST_PARTICLES + 1, Number.NaN]) assert.throws(() => validatedKillBurstParticles(bad), RangeError);
+  assert.equal(validatedSpawnBandWidth(4.5), 4.5);
+  for (const bad of [0, -1, 4.6, Number.NaN]) assert.throws(() => validatedSpawnBandWidth(bad), RangeError);
+  assert.equal(validatedSpawnDensityBias(0), 0);
+  assert.equal(validatedSpawnDensityBias(1), 1);
+  for (const bad of [-0.1, 1.1, Number.NaN]) assert.throws(() => validatedSpawnDensityBias(bad), RangeError);
 });

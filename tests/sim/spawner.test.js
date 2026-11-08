@@ -13,6 +13,9 @@ const DEFAULT_CEILING = 0.9;
 const DEFAULT_RAMP_SECONDS = 120;
 const DEFAULT_SEEK_FLOOR = 0.1;
 const DEFAULT_SPAWN_DISTANCE_START = 0.4;
+// Owner ruling R13 (Plan C task C0b): after the first fill, killed agents refill at this fraction of
+// the alive target per second, so a cleared corridor stays clear for several seconds.
+const DEFAULT_REFILL_FRACTION = 0.15;
 // The spec's minimum: spawns land at least a quarter of the arena width from the player.
 const SPEC_SPAWN_DISTANCE = 0.25;
 // The older deficit and rounding tests need a floor well above their deficits.
@@ -104,7 +107,10 @@ test('setRamp replaces the given ramp parameters and keeps the ramp position', (
   const elapsed = pressure.elapsed;
   pressure.setRamp({ floorFraction: 0.02, rampSeconds: 60, ceilingFraction: 0.5 });
   assert.equal(pressure.elapsed, elapsed);
-  assert.deepEqual(pressure.ramp, { floorFraction: 0.02, rampSeconds: 60, ceilingFraction: 0.5, curveExponent: 2, seekFloorFraction: DEFAULT_SEEK_FLOOR, spawnDistanceStartFraction: DEFAULT_SPAWN_DISTANCE_START });
+  assert.deepEqual(pressure.ramp, {
+    floorFraction: 0.02, rampSeconds: 60, ceilingFraction: 0.5, curveExponent: 2, seekFloorFraction: DEFAULT_SEEK_FLOOR,
+    spawnDistanceStartFraction: DEFAULT_SPAWN_DISTANCE_START, refillFractionPerSecond: DEFAULT_REFILL_FRACTION,
+  });
   near(pressure.targetAlive, CAPACITY * (0.02 + (0.5 - 0.02) * 0.25), 'target at 30 of 60 seconds');
   pressure.setRamp({ curveExponent: 1, seekFloorFraction: 0.5 });
   near(pressure.targetAlive, CAPACITY * (0.02 + (0.5 - 0.02) * 0.5), 'linear target');
@@ -199,11 +205,14 @@ test('reset() returns elapsed to 0', () => {
 });
 
 test('repeated small frames keep every species at its share in the long run', () => {
-  const pressure = new SpawnPressure({ capacity: CAPACITY });
+  // Past its first fill (stats at the target), with steps of 0.05 s at a refill of the whole target
+  // per second: 30 a step, well above 11.
+  const pressure = new SpawnPressure({ capacity: CAPACITY, refillFractionPerSecond: 1 });
+  pressure.update(0, statsWith(CAPACITY * DEFAULT_FLOOR, 0), EQUAL_SHARES, 1);
   const totals = new Array(5).fill(0);
   for (let frame = 1; frame <= 5; frame += 1) {
     // Each frame's stats already count the previous frame's 11, so the deficit stays 11.
-    const counts = pressure.update(0, statsWith(CAPACITY * DEFAULT_FLOOR - 11, frame - 1), EQUAL_SHARES, frame);
+    const counts = pressure.update(0.05, statsWith(CAPACITY * DEFAULT_FLOOR - 11, frame), EQUAL_SHARES, frame + 1);
     assert.equal(total(counts), 11);
     counts.forEach((count, species) => { totals[species] += count; });
   }
@@ -244,4 +253,73 @@ test('no overshoot above 1.02 of the target on a cold start at stats lags of 1, 
 test('no overshoot above 1.02 of the target when refilling after a clear at a lag of 2 steps', () => {
   const peak = peakRatio({ capacity: 262144, lag: 2, steps: 4200, clearAtStep: 3600 });
   assert.ok(peak <= 1.02, `peak ${peak.toFixed(3)}`);
+});
+
+// Fills the arena to the target (stats at the target end the first fill), then holds the alive
+// count at target - deficit with fresh stats every step, so nothing is in flight. Returns the
+// total spawned over the given seconds in steps of stepSeconds.
+function refillOver(pressure, { seconds, stepSeconds, deficit }) {
+  pressure.update(0, statsWith(pressure.targetAlive, 0), EQUAL_SHARES, 1);
+  let spawned = 0;
+  const steps = Math.round(seconds / stepSeconds);
+  for (let step = 1; step <= steps; step += 1) {
+    spawned += total(pressure.update(stepSeconds, statsWith(Math.floor(pressure.targetAlive) - deficit, step), EQUAL_SHARES, step + 1));
+  }
+  return spawned;
+}
+
+test('the default refill fraction is a tenth to a fifth of the alive target per second', () => {
+  const pressure = new SpawnPressure({ capacity: CAPACITY });
+  assert.equal(pressure.ramp.refillFractionPerSecond, DEFAULT_REFILL_FRACTION);
+  assert.ok(DEFAULT_REFILL_FRACTION >= 0.1 && DEFAULT_REFILL_FRACTION <= 0.2);
+});
+
+test('after the first fill, killed agents refill at refillFractionPerSecond of the target per second', () => {
+  // A huge ramp keeps the target still over the measured second.
+  const pressure = new SpawnPressure({ capacity: CAPACITY, ...WIDE_FLOOR, rampSeconds: 1e9 });
+  const target = CAPACITY * 0.05;
+  const spawned = refillOver(pressure, { seconds: 1, stepSeconds: STEP_SECONDS, deficit: 1000 });
+  assert.ok(Math.abs(spawned - DEFAULT_REFILL_FRACTION * target) <= 1, `spawned ${spawned}, expected ${DEFAULT_REFILL_FRACTION * target}`);
+});
+
+test('the refill rate is per second, so half-rate steps refill as fast as full-rate ones', () => {
+  const full = refillOver(new SpawnPressure({ capacity: CAPACITY, ...WIDE_FLOOR, rampSeconds: 1e9 }), { seconds: 2, stepSeconds: STEP_SECONDS, deficit: 2000 });
+  const half = refillOver(new SpawnPressure({ capacity: CAPACITY, ...WIDE_FLOOR, rampSeconds: 1e9 }), { seconds: 2, stepSeconds: 2 * STEP_SECONDS, deficit: 2000 });
+  assert.ok(Math.abs(full - half) <= 1, `full rate ${full}, half rate ${half}`);
+});
+
+test('setRamp changes the refill fraction', () => {
+  const pressure = new SpawnPressure({ capacity: CAPACITY, ...WIDE_FLOOR, rampSeconds: 1e9 });
+  pressure.setRamp({ refillFractionPerSecond: 0.5 });
+  const spawned = refillOver(pressure, { seconds: 1, stepSeconds: STEP_SECONDS, deficit: 2000 });
+  assert.ok(Math.abs(spawned - 0.5 * CAPACITY * 0.05) <= 1, `spawned ${spawned}`);
+});
+
+test('a refill fraction of 0 never refills and one outside [0, 1] is rejected', () => {
+  const pressure = new SpawnPressure({ capacity: CAPACITY, ...WIDE_FLOOR, refillFractionPerSecond: 0 });
+  assert.equal(refillOver(pressure, { seconds: 1, stepSeconds: STEP_SECONDS, deficit: 500 }), 0);
+  for (const refillFractionPerSecond of [-0.1, 1.5, Number.NaN]) {
+    assert.throws(() => pressure.setRamp({ refillFractionPerSecond }), RangeError);
+  }
+  assert.equal(pressure.ramp.refillFractionPerSecond, 0);
+});
+
+test('an idle refill does not bank: a sudden deficit after a calm minute refills at the rate', () => {
+  const pressure = new SpawnPressure({ capacity: CAPACITY, ...WIDE_FLOOR, rampSeconds: 1e9 });
+  const target = CAPACITY * 0.05;
+  pressure.update(0, statsWith(target, 0), EQUAL_SHARES, 1);
+  for (let step = 1; step <= 3600; step += 1) pressure.update(STEP_SECONDS, statsWith(target, step), EQUAL_SHARES, step + 1);
+  const counts = pressure.update(STEP_SECONDS, statsWith(target - 1000, 3601), EQUAL_SHARES, 3602);
+  assert.ok(total(counts) <= Math.ceil(DEFAULT_REFILL_FRACTION * target * STEP_SECONDS) + 1, `spawned ${total(counts)} in one step`);
+});
+
+test('the first fill after a start or a death is not rate limited, only capped at capacity / 60 a frame', () => {
+  const pressure = new SpawnPressure({ capacity: CAPACITY, ...WIDE_FLOOR, rampSeconds: 1e9 });
+  const target = CAPACITY * 0.05;
+  assert.equal(total(pressure.update(STEP_SECONDS, statsWith(0, 0), EQUAL_SHARES, 1)), CAPACITY / 60);
+  // The fill ends once the estimate reaches the target; then the refill rate applies.
+  pressure.update(STEP_SECONDS, statsWith(target, 1), EQUAL_SHARES, 2);
+  assert.ok(total(pressure.update(STEP_SECONDS, statsWith(0, 2), EQUAL_SHARES, 3)) <= Math.ceil(DEFAULT_REFILL_FRACTION * target * STEP_SECONDS) + 1);
+  pressure.reset();
+  assert.equal(total(pressure.update(STEP_SECONDS, statsWith(0, 3), EQUAL_SHARES, 4)), CAPACITY / 60);
 });

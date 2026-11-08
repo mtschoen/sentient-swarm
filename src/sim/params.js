@@ -1,7 +1,39 @@
 // Packs the SimParams uniform. Byte layout matches the table at the top of common.wgsl.
-import { SPECIES_COUNT } from './layout.js';
+import { ARENA_HEIGHT, SPECIES_COUNT } from './layout.js';
 
-export const SIM_PARAMS_BYTES = 112;
+export const SIM_PARAMS_BYTES = 128;
+
+// Particles per kill (owner ruling R12, task C0b); the kill passes scale it down only when a step's
+// kills would outrun the free particle slots.
+export const DEFAULT_KILL_BURST_PARTICLES = 12;
+// Depth in world units of the band along the walls where new agents appear (owner ruling R13);
+// the integrate pass's 0.5 wall margin pushes them inward. Half the arena height or more covers
+// the whole arena (the uniform spawn of Plan A).
+export const DEFAULT_SPAWN_BAND_WIDTH = 0.6;
+// 0 to 1: the chance that a spawn takes the densest of its candidate positions rather than the
+// first, so new agents join existing masses at the walls instead of refilling cleared space.
+export const DEFAULT_SPAWN_DENSITY_BIAS = 0.5;
+// A lab ceiling on the burst size, well past the default.
+export const MAXIMUM_KILL_BURST_PARTICLES = 64;
+
+// Range checks for the setters above (Simulation.setKillBurstParticles and friends): each returns
+// its value or throws RangeError.
+export function validatedKillBurstParticles(count) {
+  if (!(Number.isInteger(count) && count >= 0 && count <= MAXIMUM_KILL_BURST_PARTICLES)) {
+    throw new RangeError(`killBurstParticles must be an integer in [0, ${MAXIMUM_KILL_BURST_PARTICLES}], got ${count}`);
+  }
+  return count;
+}
+
+export function validatedSpawnBandWidth(width) {
+  if (!(width > 0 && width <= ARENA_HEIGHT / 2)) throw new RangeError(`spawnBandWidth must lie in (0, ${ARENA_HEIGHT / 2}], got ${width}`);
+  return width;
+}
+
+export function validatedSpawnDensityBias(bias) {
+  if (!(bias >= 0 && bias <= 1)) throw new RangeError(`spawnDensityBias must lie in [0, 1], got ${bias}`);
+  return bias;
+}
 
 const FLOAT_FIELDS = { dt: 0, time: 4, neighborRadius: 16, cellSize: 28, debugKillRadius: 80, playerRadius: 92 };
 const UNSIGNED_FIELDS = {
@@ -15,6 +47,9 @@ const SEEK_SCALE_OFFSET = 108;
 // Minimum spawn distance from the player as a fraction of the arena width (SpawnPressure); the
 // spec's quarter when omitted.
 const SPAWN_DISTANCE_FRACTION_OFFSET = 36;
+const KILL_BURST_PARTICLES_OFFSET = 112;
+const SPAWN_BAND_WIDTH_OFFSET = 116;
+const SPAWN_DENSITY_BIAS_OFFSET = 120;
 const VECTOR_FIELDS = { playerPosition: 8, debugKillPosition: 40 };
 const SPAWN_PER_SPECIES_OFFSET = 48;
 
@@ -35,6 +70,9 @@ export function packSimParams(values) {
   view.setUint32(SAME_SPECIES_COHESION_OFFSET, values.sameSpeciesCohesion ?? 1, true);
   view.setFloat32(SEEK_SCALE_OFFSET, values.seekScale ?? 1, true);
   view.setFloat32(SPAWN_DISTANCE_FRACTION_OFFSET, values.spawnDistanceFraction ?? 0.25, true);
+  view.setUint32(KILL_BURST_PARTICLES_OFFSET, values.killBurstParticles ?? DEFAULT_KILL_BURST_PARTICLES, true);
+  view.setFloat32(SPAWN_BAND_WIDTH_OFFSET, values.spawnBandWidth ?? DEFAULT_SPAWN_BAND_WIDTH, true);
+  view.setFloat32(SPAWN_DENSITY_BIAS_OFFSET, values.spawnDensityBias ?? DEFAULT_SPAWN_DENSITY_BIAS, true);
   // spawnPerSpecies0 holds species 0 to 3, spawnPerSpecies1.x holds species 4; the rest stays 0.
   const spawnPerSpecies = values.spawnPerSpecies ?? [];
   if (spawnPerSpecies.length > SPECIES_COUNT) {

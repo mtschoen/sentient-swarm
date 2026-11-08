@@ -18,18 +18,18 @@ struct ParticleView {
 }
 
 @group(0) @binding(0) var<uniform> view: ParticleView;
-// ParticlePool in common.wgsl, with the cursor as a plain u32: atomics need read_write storage.
+// ParticlePool in common.wgsl, with the header words as plain u32: atomics need read_write storage.
 struct ParticlePoolView {
   cursor: u32,
-  headerPadding0: u32,
-  headerPadding1: u32,
-  headerPadding2: u32,
+  liveCount: u32,
+  claimedThisStep: u32,
+  killAllAlive: u32,
   particles: array<Particle>,
 }
 
 @group(0) @binding(1) var<storage, read> pool: ParticlePoolView;
 
-const PARTICLE_INTENSITY: f32 = 0.4;
+const PARTICLE_INTENSITY: f32 = 1.0;
 
 struct ParticleVaryings {
   @builtin(position) position: vec4f,

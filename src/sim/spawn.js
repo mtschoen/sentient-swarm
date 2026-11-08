@@ -1,5 +1,5 @@
-// GPU spawner: dead agent slots claim units from the per-species spawn budget and come alive away
-// from the player (spawn.wgsl). The budget buffer holds SPECIES_COUNT u32 counters; the caller
+// GPU spawner: dead agent slots claim units from the per-species spawn budget and come alive in
+// the wall band away from the player, optionally near dense coarse field cells (spawn.wgsl). The budget buffer holds SPECIES_COUNT u32 counters; the caller
 // refills it every frame with writeBudget before encode.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer } from '../gpu/buffers.js';
@@ -14,10 +14,10 @@ export class Spawner {
     this.common = common;
     this.budgetBuffer = createStorageBuffer(this.device, SPECIES_COUNT * BYTES_PER_COUNTER, 'spawn-budget');
     this.pipeline = null;
-    this.bindGroupCache = new BindGroupCache(([agentsBuffer, paramsBuffer]) => this.device.createBindGroup({
+    this.bindGroupCache = new BindGroupCache(([agentsBuffer, paramsBuffer, fieldBuffer]) => this.device.createBindGroup({
       label: 'spawn-bindings',
       layout: this.pipeline.getBindGroupLayout(0),
-      entries: [paramsBuffer, agentsBuffer, this.budgetBuffer].map((buffer, binding) => ({ binding, resource: { buffer } })),
+      entries: [paramsBuffer, agentsBuffer, this.budgetBuffer, fieldBuffer].map((buffer, binding) => ({ binding, resource: { buffer } })),
     }));
   }
 
@@ -32,11 +32,12 @@ export class Spawner {
     this.device.queue.writeBuffer(this.budgetBuffer, 0, Uint32Array.from({ length: SPECIES_COUNT }, (unused, species) => spawnPerSpecies[species] ?? 0));
   }
 
-  encode(encoder, agentsBuffer, paramsBuffer) {
+  // fieldBuffer: the blurred coarse field (CoarseField buffers.blurred) the density bias reads.
+  encode(encoder, agentsBuffer, paramsBuffer, fieldBuffer) {
     if (this.pipeline === null) throw new Error('Spawner.initialize() must finish before encode()');
     const pass = encoder.beginComputePass({ label: 'spawn' });
     pass.setPipeline(this.pipeline);
-    pass.setBindGroup(0, this.bindGroupCache.get([agentsBuffer, paramsBuffer]));
+    pass.setBindGroup(0, this.bindGroupCache.get([agentsBuffer, paramsBuffer, fieldBuffer]));
     pass.dispatchWorkgroups(Math.ceil(agentsBuffer.size / AGENT_STRIDE_BYTES / WORKGROUP_SIZE));
     pass.end();
   }

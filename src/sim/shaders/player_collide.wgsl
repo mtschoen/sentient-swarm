@@ -10,8 +10,8 @@
 // agent past its spawn-in frames within playerRadius + CONTACT_MARGIN of params.playerPosition
 // touches the player; the first toucher to set the latch (atomicOr returned 0) stores
 // playerHitSequence = frameSequence (atomicMax) and dies: atomicAnd clears its alive bit, the kill
-// counts once into killsUnscored (contact never scores), and it splashes KILL_PARTICLE_COUNT
-// particles in its species hue. Later touchers in the same step see the latch and do nothing, so
+// counts once into killsUnscored (contact never scores), and it splashes params.killBurstParticles
+// particles in its species hue (from the step's shared particle budget). Later touchers in the same step see the latch and do nothing, so
 // one latch period reports exactly one hit and one contact kill.
 //
 // Storage buffers: agents, cellCounts, cellOffsets, sortedIndices, stats, particles (pool cursor
@@ -28,17 +28,26 @@
 
 const CONTACT_MARGIN: f32 = 0.02;
 const MAXIMUM_CELL_SPAN: i32 = 8;
-const KILL_PARTICLE_COUNT: u32 = 6u;
 
 var<workgroup> armed: u32;
 
-fn emitKillParticles(agentIndex: u32, position: vec2f, species: u32, hueJitter: f32) {
+// Claims up to requested particles from the step's shared budget (grantedParticleCount) and
+// writes the granted ones radiating from position.
+fn emitKillParticles(agentIndex: u32, position: vec2f, species: u32, hueJitter: f32, requested: u32) {
+  if (requested == 0u) {
+    return;
+  }
   let capacity = arrayLength(&pool.particles);
-  let first = atomicAdd(&pool.cursor, KILL_PARTICLE_COUNT) % capacity;
+  let claimedBefore = atomicAdd(&pool.claimedThisStep, requested);
+  let count = grantedParticleCount(requested, claimedBefore, atomicLoad(&pool.liveCount), capacity);
+  if (count == 0u) {
+    return;
+  }
+  let first = atomicAdd(&pool.cursor, count) % capacity;
   let color = killParticleColor(speciesTable[speciesFieldIndex(species, SPECIES_FIELD_HUE)], hueJitter);
   let seed = killBurstSeed(agentIndex, params.frameSequence);
-  for (var index = 0u; index < KILL_PARTICLE_COUNT; index = index + 1u) {
-    pool.particles[(first + index) % capacity] = killBurstParticle(index, KILL_PARTICLE_COUNT, seed, position, color);
+  for (var index = 0u; index < count; index = index + 1u) {
+    pool.particles[(first + index) % capacity] = killBurstParticle(index, count, seed, position, color);
   }
 }
 
@@ -50,7 +59,7 @@ fn touch(agentIndex: u32, position: vec2f) {
   let previousFlags = atomicAnd(&agents[agentIndex].flags, ~FLAG_ALIVE);
   if (isAlive(previousFlags)) {
     atomicAdd(&stats[STAT_KILLS_UNSCORED], 1u);
-    emitKillParticles(agentIndex, position, min(agents[agentIndex].species, SPECIES_COUNT - 1u), agents[agentIndex].hueJitter);
+    emitKillParticles(agentIndex, position, min(agents[agentIndex].species, SPECIES_COUNT - 1u), agents[agentIndex].hueJitter, params.killBurstParticles);
   }
 }
 

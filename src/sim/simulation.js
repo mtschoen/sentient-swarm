@@ -14,7 +14,8 @@
 //
 // step order: frameSequence and time advance; params and spawn budget are written; the stats
 // buffer's per-frame prefix is cleared (its persistent tail, holding the cumulative kills, the hit
-// latch and playerHitSequence, is not); spawn on agentsIn; grid and coarse field on agentsIn; steer agentsIn
+// latch and playerHitSequence, is not), and so are the particle pool's per-step claims; spawn on
+// agentsIn (wall band, reading the previous step's blurred coarse field); grid and coarse field on agentsIn; steer agentsIn
 // to agentsOut plus integrate; kill-all (only in the step after requestKillAll); registered passes
 // in registration order (registerPass); player contact (once setPlayerState has been called);
 // debug kill on agentsOut (skipped when no kill is armed; the arm lasts one step, so callers
@@ -39,7 +40,10 @@ import { SpatialGrid } from './grid.js';
 import { DebugKillPass, KillAllPass, PlayerContactPass } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
-import { SIM_PARAMS_BYTES, packSimParams } from './params.js';
+import {
+  DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, SIM_PARAMS_BYTES, packSimParams,
+  validatedKillBurstParticles, validatedSpawnBandWidth, validatedSpawnDensityBias,
+} from './params.js';
 import { Spawner } from './spawn.js';
 import { defaultMatrix, defaultSpecies, normalizeShares, packSpeciesTable } from './species.js';
 import { STATS_BYTES, STATS_PERSISTENT_OFFSET_BYTES, StatsPass, decodeStats } from './stats.js';
@@ -124,6 +128,10 @@ export class Simulation {
     this.seekScale = 1;
     // Minimum spawn distance from the player, a fraction of the arena width (also from SpawnPressure).
     this.spawnDistanceFraction = 0.25;
+    // Lab knobs (task C0b): particles per kill, wall band depth and spawn density bias.
+    this.killBurstParticles = DEFAULT_KILL_BURST_PARTICLES;
+    this.spawnBandWidth = DEFAULT_SPAWN_BAND_WIDTH;
+    this.spawnDensityBias = DEFAULT_SPAWN_DENSITY_BIAS;
     this.registeredPasses = [];
     this.setSpecies(species, matrix);
     this.setShares(shares);
@@ -210,6 +218,25 @@ export class Simulation {
     this.spawnDistanceFraction = fraction;
   }
 
+  // Particles per kill from the next step on, an integer in [0, MAXIMUM_KILL_BURST_PARTICLES]
+  // (params.js); the kill passes scale bursts down only when a step's kills outrun the free
+  // particle slots. Throws RangeError and changes nothing when out of range.
+  setKillBurstParticles(count) {
+    this.killBurstParticles = validatedKillBurstParticles(count);
+  }
+
+  // Depth in world units of the wall band new agents spawn in, in (0, ARENA_HEIGHT / 2]; half the
+  // arena height spawns anywhere. Throws RangeError when out of range.
+  setSpawnBandWidth(width) {
+    this.spawnBandWidth = validatedSpawnBandWidth(width);
+  }
+
+  // 0 to 1: the chance a spawn takes the densest of its candidate positions. Throws RangeError
+  // when out of range.
+  setSpawnDensityBias(bias) {
+    this.spawnDensityBias = validatedSpawnDensityBias(bias);
+  }
+
   // spawnPerSpecies: SPECIES_COUNT counts for this frame, usually from SpawnPressure.update.
   step(encoder, deltaSeconds, spawnPerSpecies = new Uint32Array(SPECIES_COUNT)) {
     this.frameSequenceValue += 1;
@@ -221,10 +248,11 @@ export class Simulation {
     this.killAllRequested = false;
     this.spawner.writeBudget(spawnPerSpecies);
     encoder.clearBuffer(this.statsBufferValue, 0, STATS_PERSISTENT_OFFSET_BYTES);
+    this.particlePoolValue.encodeBeginStep(encoder);
     const agentsIn = this.agentBuffers[this.inputIndex];
     const agentsOut = this.agentBuffers[1 - this.inputIndex];
     const params = this.paramsBufferValue;
-    this.spawner.encode(encoder, agentsIn, params);
+    this.spawner.encode(encoder, agentsIn, params, this.field.buffers.blurred);
     this.grid.encode(encoder, agentsIn, params);
     this.field.encode(encoder, agentsIn, this.grid.buffers, params);
     this.steering.encode(encoder, agentsIn, agentsOut, this.grid.buffers, this.field.buffers.blurred, this.speciesTableBufferValue, params);
@@ -275,6 +303,9 @@ export class Simulation {
       sameSpeciesCohesion: this.sameSpeciesCohesion ? 1 : 0,
       seekScale: this.seekScale,
       spawnDistanceFraction: this.spawnDistanceFraction,
+      killBurstParticles: this.killBurstParticles,
+      spawnBandWidth: this.spawnBandWidth,
+      spawnDensityBias: this.spawnDensityBias,
       playerRadius: this.playerContact?.radius ?? 0,
       playerInvulnerable: this.playerContact?.invulnerable ? 1 : 0,
       acknowledgedHitSequence: this.acknowledgedHitSequence,
@@ -355,7 +386,8 @@ export class Simulation {
   // playerHitSequence) is copied too, and lastKillsTotal carries, so kills in stats frames this
   // instance never read back are counted by the new instance's first read. Registered passes,
   // player state, acknowledged hit sequence, a pending kill-all, species, matrix, shares, seek
-  // scale, spawn distance and the cohesion mode carry over, read now so edits made while the
+  // scale, spawn distance, kill burst size, spawn band, density bias and the cohesion mode carry
+  // over, read now so edits made while the
   // change was prepared are not lost. Live particles are not copied. The same submission builds
   // the new instance's grid and coarse field on the copied agents (with its params at dt 0), so
   // the renderer can draw it before its first step. Stats resume after the new instance's next
@@ -388,6 +420,9 @@ export class Simulation {
     next.setSameSpeciesCohesion(this.sameSpeciesCohesion);
     next.setSeekScale(this.seekScale);
     next.setSpawnDistanceFraction(this.spawnDistanceFraction);
+    next.setKillBurstParticles(this.killBurstParticles);
+    next.setSpawnBandWidth(this.spawnBandWidth);
+    next.setSpawnDensityBias(this.spawnDensityBias);
     next.registeredPasses = this.registeredPasses;
     next.frameSequenceValue = this.frameSequenceValue;
     next.timeValue = this.timeValue;
@@ -398,6 +433,21 @@ export class Simulation {
     next.lastKillsTotal = this.lastKillsTotal;
     next.killAllRequested = this.killAllRequested;
     next.setDebugKill(...this.debugKillPosition, this.debugKillRadius);
+  }
+
+  // Browser checks only, never the game loop: resolves with a copy of the blurred coarse field as
+  // a Float32Array of COARSE_COLUMNS * COARSE_ROWS cells, COARSE_CHANNELS floats each (species
+  // densities 0..4, threat, padding), as of the last submitted step.
+  async readCoarseField() {
+    const source = this.field.buffers.blurred;
+    const staging = this.device.createBuffer({ label: 'coarse-field-readback', size: source.size, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const encoder = this.device.createCommandEncoder({ label: 'coarse-field-readback' });
+    encoder.copyBufferToBuffer(source, 0, staging, 0, source.size);
+    this.device.queue.submit([encoder.finish()]);
+    await staging.mapAsync(GPUMapMode.READ);
+    const values = new Float32Array(staging.getMappedRange().slice(0));
+    staging.destroy();
+    return values;
   }
 
   // Destroys every GPU buffer this instance created, including the passes' internal buffers.

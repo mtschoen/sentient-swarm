@@ -14,8 +14,14 @@
 // same at every capacity.
 // Each frame spawns the deficit between the target and the estimated alive count, capped at
 // capacity / 60, split across species by shares with largest-remainder rounding so the per-species
-// counts add up to exactly the frame's total. Each species carries its rounding error to the next
-// frame, so small frames rotate the leftover units and long-run totals follow the shares.
+// counts add up to exactly the frame's total. The first fill (from construction or reset, so after
+// a start and after every respawn) runs at that cap alone: it is the spec's first spawn wave.
+// Once the estimate first reaches the target, refills are also capped at refillFractionPerSecond
+// of the target per second (owner ruling R13, task C0b: killed space refills slowly, so a cleared
+// corridor stays clear for several seconds); the allowance accrues per second of delta, carries
+// at most one unit between steps and never banks while nothing is missing. Each species carries
+// its rounding error to the next frame, so small frames rotate the leftover units and long-run
+// totals follow the shares.
 // Read-back stats lag the GPU by a few steps (more with several fixed steps per frame), so the
 // estimate is the newest stats' alive total plus every request made for a step newer than those
 // stats: those spawns are in flight and not counted yet. Without them, each lagging step requests
@@ -24,7 +30,7 @@
 // high until newer stats arrive, which errs toward spawning less.
 import { SPECIES_COUNT } from './layout.js';
 
-// A frame spawns at most capacity / SPAWN_CAP_DIVISOR agents: a full arena refills in a second at 60 fps.
+// A frame spawns at most capacity / SPAWN_CAP_DIVISOR agents (the first fill runs at this cap alone).
 const SPAWN_CAP_DIVISOR = 60;
 
 // The tuned ramp (Plan C task C0); setRamp and the constructor take any subset of these names.
@@ -35,6 +41,7 @@ export const DEFAULT_RAMP = Object.freeze({
   curveExponent: 2,
   seekFloorFraction: 0.1,
   spawnDistanceStartFraction: 0.4,
+  refillFractionPerSecond: 0.15,
 });
 
 // The spec's minimum spawn distance from the player, as a fraction of the arena width: the end of
@@ -44,7 +51,7 @@ export const SPEC_SPAWN_DISTANCE_FRACTION = 0.25;
 const MAXIMUM_SPAWN_DISTANCE_FRACTION = 0.5;
 
 // Fractions lie in [0, 1]; rampSeconds and curveExponent are positive and finite.
-const UNIT_FIELDS = ['floorFraction', 'ceilingFraction', 'seekFloorFraction'];
+const UNIT_FIELDS = ['floorFraction', 'ceilingFraction', 'seekFloorFraction', 'refillFractionPerSecond'];
 const POSITIVE_FIELDS = ['rampSeconds', 'curveExponent'];
 
 function validatedRamp(ramp) {
@@ -106,6 +113,10 @@ export class SpawnPressure {
     this.maximumPerFrame = Math.floor(capacity / SPAWN_CAP_DIVISOR);
     this.elapsed = 0;
     this.carry = new Float64Array(SPECIES_COUNT);
+    // True until the estimate first reaches the target after construction or reset.
+    this.filling = true;
+    // Agents the refill rate has allowed but not yet spent (at most one carries between steps).
+    this.refillAllowance = 0;
     // Requested totals keyed by the frameSequence of the step they were requested for.
     this.requests = new Map();
     this.newestStats = null;
@@ -147,6 +158,15 @@ export class SpawnPressure {
   reset() {
     this.elapsed = 0;
     this.carry.fill(0);
+    this.filling = true;
+    this.refillAllowance = 0;
+  }
+
+  // Agents this step may spawn at most: the frame cap, and after the first fill the refill rate.
+  stepCap(deltaSeconds) {
+    if (this.filling) return this.maximumPerFrame;
+    this.refillAllowance = Math.min(this.refillAllowance, 1) + this.ramp.refillFractionPerSecond * this.targetAlive * deltaSeconds;
+    return Math.min(this.maximumPerFrame, Math.floor(this.refillAllowance));
   }
 
   // Alive agents counted by the newest stats plus the spawns requested for steps after them.
@@ -167,8 +187,10 @@ export class SpawnPressure {
     this.elapsed += deltaSeconds;
     if (stats && (this.newestStats === null || stats.frameSequence >= this.newestStats.frameSequence)) this.newestStats = stats;
     const deficit = Math.max(0, Math.floor(this.targetAlive - this.estimatedAlive));
-    const counts = splitByShares(Math.min(deficit, this.maximumPerFrame), shares, this.carry);
+    const counts = splitByShares(Math.min(deficit, this.stepCap(deltaSeconds)), shares, this.carry);
     const total = counts.reduce((sum, count) => sum + count, 0);
+    if (this.filling && total >= deficit) this.filling = false;
+    else if (!this.filling) this.refillAllowance -= total;
     if (total > 0) this.requests.set(frameSequence, (this.requests.get(frameSequence) ?? 0) + total);
     return counts;
   }

@@ -2,7 +2,7 @@
 // SMOKE_URL, when set, skips spawning and uses that URL instead. Either way the page gets
 // ?probe=off&capacity=262144 (unless the URL already sets them), so the quality probe cannot
 // change the capacity under the checks.
-// Usage: node tests/browser/smoke.mjs [--frames N] [--play N]
+// Usage: node tests/browser/smoke.mjs [--frames N] [--play N | --pulse | --corridor | --bursts]
 // Reads the composited frame back through window.__murmuration.capture (headless Chromium may never
 // composite a WebGPU canvas, so page.screenshot() is not trusted) and writes artifacts/smoke.png and
 // artifacts/smoke-zoom.png (4x inspect zoom, trails off) and artifacts/smoke-ships.png (1x, trails
@@ -17,6 +17,8 @@
 // --pulse instead arms the pulse weapon through the debug panel's arm select, fires toward the arena
 // center with the synthetic gamepad, and writes artifacts/pulse-ring.png, captured the moment the
 // stats report a ring detonation (ringsThisFrame), so a ring is expanding on screen.
+// --corridor and --bursts (task C0b, smoke-clearing.mjs): the beam corridor density metric, and the
+// kill burst and bomb captures (artifacts/kill-burst.png, artifacts/bomb-burst.png).
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 // Liveness: every page.evaluate is bounded by EVALUATE_TIMEOUT_MILLISECONDS (a capture resolves only
 // on a later rendered frame, so a renderer that throws or stops would leave it pending forever),
@@ -25,6 +27,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
+import { captureBursts, checkCorridor } from './smoke-clearing.mjs';
 
 const SMOKE_SEARCH = { probe: 'off', capacity: '262144' };
 const READY_TIMEOUT_MILLISECONDS = 10_000;
@@ -50,9 +53,9 @@ const MAXIMUM_BAND_LUMINANCE = 0.01;
 // (CAPTURE_SETTLE_FRAMES in capture-hook.js), so the capture sees a young flood.
 const START_CLICK_SETTLE_FRAMES = 24;
 const START_CLICK_HOLD_FRAMES = 3;
-// Measured rise is 0.0023 to 0.0030 (0.0431 -> 0.0454 to 0.0461) over four runs, with the calm mean
-// steady within 0.0001: the Ready arena now holds only the ramp floor (about 2,700 agents at the
-// default capacity, Plan C task C0), so the clear kills far fewer than the 13,000 of the old floor.
+// The Ready arena holds only the ramp floor (about 2,700 agents at the default capacity, Plan C task
+// C0); since task C0b every kill bursts 12 bright particles, and the measured rise is about 0.09
+// (0.0430 -> 0.1308), well clear of the margin.
 const FLOOD_MARGIN = 0.001;
 const FLOOD_SETTINGS = { trailDecay: 0, shipArenaFraction: 0 };
 // --play: the ship moves left at full stick for this many frames (6 units per second, about 2 units
@@ -336,7 +339,8 @@ async function run(resources) {
     resources.browser = launched.browser;
     const { page } = launched;
     const pulseMode = process.argv.includes('--pulse');
-    if (playFrames !== null || pulseMode) await page.addInitScript(installSyntheticGamepad);
+    const clearingMode = ['--corridor', '--bursts'].find((flag) => process.argv.includes(flag)) ?? null;
+    if (playFrames !== null || pulseMode || clearingMode) await page.addInitScript(installSyntheticGamepad);
 
     await page.goto(url);
     const adapterAvailable = await evaluateWithin(page, 'the adapter probe', async () => {
@@ -366,6 +370,16 @@ async function run(resources) {
       console.error('smoke: console errors:');
       page.consoleErrors.forEach((line) => console.error(line));
       return EXIT_FAILURE;
+    }
+    if (clearingMode) {
+      const helpers = { evaluateWithin, setSticks, writeDataUrl };
+      const failure = clearingMode === '--corridor' ? await checkCorridor(page, helpers) : await captureBursts(page, helpers);
+      if (failure) {
+        console.error(failure);
+        return EXIT_FAILURE;
+      }
+      console.log(`smoke: ok (${clearingMode.slice(2)})`);
+      return EXIT_OK;
     }
     if (pulseMode) {
       const pulseFailure = await checkPulse(page);

@@ -96,6 +96,8 @@ export class Game {
     // Game time spent in GameOver, for the restart guard.
     this.gameOverSeconds = 0;
     this.pendingImpulses = [];
+    // Debug switch (debugInvulnerable): player contact stays off while it is on.
+    this.debugInvulnerableValue = false;
     // The old simulation keeps stepping while a capacity change is prepared (CapacitySwap); commit
     // and install run synchronously together between two updates, so no frame sees a destroyed
     // simulation; spawn pressure keeps its ramp and the score carries its streak (ScoreKeeper).
@@ -225,7 +227,7 @@ export class Game {
     if (this.run.phase === RunPhase.Ready) {
       this.simulation.setPlayer(x, y);
     } else {
-      this.simulation.setPlayerState({ x, y, radius: this.player.radius, invulnerable: !playing || this.run.invulnerable });
+      this.simulation.setPlayerState({ x, y, radius: this.player.radius, invulnerable: !playing || this.run.invulnerable || this.debugInvulnerableValue });
     }
 
     this.pendingSimulationSeconds += deltaSeconds;
@@ -372,6 +374,12 @@ export class Game {
     if (type === 'base') return;
     this.weapons.collect(type);
     for (let upgrade = 1; upgrade < tier; upgrade += 1) this.weapons.collect(type);
+  }
+
+  // Debug hook (browser checks, a lab sandbox): while enabled, the GPU contact test never hits, so
+  // the ship survives a measurement in a crowded arena (the C0b corridor metric).
+  debugInvulnerable(enabled) {
+    this.debugInvulnerableValue = Boolean(enabled);
   }
 
   // alpha is FrameLoop's fraction of an update; it becomes the fraction of the current simulation

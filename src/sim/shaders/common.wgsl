@@ -44,7 +44,7 @@ struct Agent {
   hueJitter: f32,
 }
 
-// Uniform layout (byte offsets), total 112 bytes:
+// Uniform layout (byte offsets), total 128 bytes:
 //   0 dt                 f32
 //   4 time               f32
 //   8 playerPosition     vec2f
@@ -65,6 +65,10 @@ struct Agent {
 // 100 acknowledgedHitSequence u32 (newest hit frameSequence the CPU has read)
 // 104 killAllRequested   u32 (1 only in the step that runs kill_all.wgsl)
 // 108 seekScale          f32 (multiplier on every species' seek weight, from SpawnPressure)
+// 112 killBurstParticles u32 (particles per kill before pool scaling)
+// 116 spawnBandWidth     f32 (depth in world units of the wall band where spawns land)
+// 120 spawnDensityBias   f32 (0 to 1: chance a spawn takes its densest candidate)
+// 124 paramsPadding      u32
 struct SimParams {
   dt: f32,
   time: f32,
@@ -86,6 +90,10 @@ struct SimParams {
   acknowledgedHitSequence: u32,
   killAllRequested: u32,
   seekScale: f32,
+  killBurstParticles: u32,
+  spawnBandWidth: f32,
+  spawnDensityBias: f32,
+  paramsPadding: u32,
 }
 
 // Bit 0 alive, bits 8..15 spawn-in frames remaining.
@@ -165,15 +173,49 @@ fn isParticleAlive(particle: Particle) -> bool {
   return particle.lifetime > 0.0 && particle.age < particle.lifetime;
 }
 
-// The particles buffer: a 16-byte header whose first word is the spawn cursor (killers claim
-// slots with one atomicAdd, wrapping modulo the particle count), then the particles. Read-only
-// views (the particle renderer) declare the same layout with a plain u32 cursor.
+// The particles buffer: a 16-byte header, then the particles. Header words:
+//   cursor          the spawn cursor: killers claim slots with one atomicAdd, wrapping modulo the
+//                   particle count;
+//   liveCount       particles alive after the last particle step (it zeroes and recounts it);
+//   claimedThisStep particles requested by this step's kills so far (the step zeroes it first);
+//   killAllAlive    alive agents counted by kill_all.wgsl's count entry in a kill-all step (the
+//                   step zeroes it first).
+// Read-only views (the particle renderer) declare the same layout with plain u32 words.
 struct ParticlePool {
   cursor: atomic<u32>,
-  headerPadding0: u32,
-  headerPadding1: u32,
-  headerPadding2: u32,
+  liveCount: atomic<u32>,
+  claimedThisStep: atomic<u32>,
+  killAllAlive: atomic<u32>,
   particles: array<Particle>,
+}
+
+// Kill bursts share one per-step budget, the slots that were free after the last particle step
+// (pool size minus liveCount), so one step's kills never overwrite each other or the particles
+// still flying. A kill asks for requested particles after the step's kills before it asked for
+// claimedBefore in total, and gets what is left of the budget, at most requested.
+fn grantedParticleCount(requested: u32, claimedBefore: u32, liveCount: u32, poolSize: u32) -> u32 {
+  let free = poolSize - min(liveCount, poolSize);
+  if (claimedBefore >= free) {
+    return 0u;
+  }
+  return min(requested, free - claimedBefore);
+}
+
+// A burst thinned to an expected size: at or above KILL_BURST_MINIMUM_PARTICLES it rounds
+// stochastically to a neighboring integer; below it the kill emits a minimum-size burst with
+// probability expected / minimum or none, so a thinned flood still reads as small bursts rather
+// than single sparks. random lies in [0, 1).
+const KILL_BURST_MINIMUM_PARTICLES: u32 = 4u;
+
+fn thinnedBurstCount(expected: f32, random: f32) -> u32 {
+  let minimum = f32(KILL_BURST_MINIMUM_PARTICLES);
+  if (expected >= minimum) {
+    return u32(floor(expected + random));
+  }
+  if (random * minimum < expected) {
+    return KILL_BURST_MINIMUM_PARTICLES;
+  }
+  return 0u;
 }
 
 // 48 bytes, 16-byte aligned for storage arrays. flags bit 0 is alive. extra is the ring growth
@@ -232,7 +274,7 @@ const KILL_PARTICLE_SPEED_RANGE: f32 = 1.5;
 const KILL_PARTICLE_MINIMUM_LIFETIME: f32 = 0.4;
 const KILL_PARTICLE_LIFETIME_RANGE: f32 = 0.3;
 const KILL_PARTICLE_HUE_JITTER_SPREAD: f32 = 0.05;
-const KILL_PARTICLE_SATURATION: f32 = 0.8;
+const KILL_PARTICLE_SATURATION: f32 = 0.5;
 
 fn killParticleColor(hue: f32, hueJitter: f32) -> u32 {
   return packColor(hsvToRgb(fract(hue + KILL_PARTICLE_HUE_JITTER_SPREAD * hueJitter), KILL_PARTICLE_SATURATION, 1.0));

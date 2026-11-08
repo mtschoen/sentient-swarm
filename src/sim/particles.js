@@ -1,7 +1,10 @@
-// GPU particle pool: one buffer holding a 16-byte header, whose first u32 is the spawn cursor,
-// then a fixed ring of 32-byte particles (the ParticlePool struct in common.wgsl). Passes that
-// kill agents claim slots with an atomicAdd on the cursor (wrapping modulo capacity) and write
-// particles directly; encodeStep ages, moves and drags the live ones (particles_step.wgsl).
+// GPU particle pool: one buffer holding a 16-byte header (the spawn cursor, liveCount,
+// claimedThisStep and killAllAlive u32 words), then a fixed ring of 32-byte particles (the
+// ParticlePool struct in common.wgsl). Passes that kill agents ask the step's shared budget for
+// their burst (the slots free after the last particle step), claim the granted slots with an
+// atomicAdd on the cursor (wrapping modulo capacity) and write particles directly.
+// encodeBeginStep zeroes the step's claims before any kill pass; encodeStep ages, moves and drags
+// the live ones and recounts liveCount (particles_step.wgsl).
 // Folding the cursor into the particles buffer keeps the collide pass at 8 storage buffers.
 // Particle: position vec2f, velocity vec2f, color u32 (rgba8, r low byte), age f32, lifetime f32,
 // padding f32. A slot with lifetime <= 0 or age >= lifetime is dead; new buffers are all dead.
@@ -13,6 +16,9 @@ import { SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
 export const PARTICLE_STRIDE_BYTES = 32;
 export const PARTICLE_HEADER_BYTES = 16;
 export const DEFAULT_PARTICLE_CAPACITY = 65536;
+// Header word byte offsets (ParticlePool in common.wgsl).
+export const PARTICLE_HEADER_OFFSETS = Object.freeze({ cursor: 0, liveCount: 4, claimedThisStep: 8, killAllAlive: 12 });
+const HEADER_WORD_BYTES = 4;
 
 export class ParticlePool {
   constructor(gpu, { capacity = DEFAULT_PARTICLE_CAPACITY, common }) {
@@ -49,8 +55,14 @@ export class ParticlePool {
     previous.destroy();
   }
 
+  // At the start of a simulation step: zeroes claimedThisStep and killAllAlive (adjacent words).
+  encodeBeginStep(encoder) {
+    encoder.clearBuffer(this.buffers.particles, PARTICLE_HEADER_OFFSETS.claimedThisStep, 2 * HEADER_WORD_BYTES);
+  }
+
   encodeStep(encoder, paramsBuffer) {
     if (this.pipeline === null) throw new Error('ParticlePool.initialize() must finish before encodeStep()');
+    encoder.clearBuffer(this.buffers.particles, PARTICLE_HEADER_OFFSETS.liveCount, HEADER_WORD_BYTES);
     const pass = encoder.beginComputePass({ label: 'particles-step' });
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([paramsBuffer]));

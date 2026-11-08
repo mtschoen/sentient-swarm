@@ -5,8 +5,12 @@
 //   params.debugKillPosition, counted in kills. Storage buffers: agents, stats, particles, threat
 //   accumulator, species table (5), plus the params uniform.
 // - KillAllPass (kill_all.wgsl): every alive agent, spawning ones included, counted in
-//   killsUnscored. Storage buffers: agents, stats, particles, threat accumulator, species table
-//   (5), plus the params uniform.
+//   killsUnscored. A countAlive dispatch first counts them into the particle pool header, so the
+//   bursts can be thinned evenly when the clear would outrun the free particle slots. Storage
+//   buffers: agents, stats, particles, threat accumulator, species table (5), plus the params
+//   uniform (countAlive binds only agents and particles).
+// Every kill asks for params.killBurstParticles particles from one budget per step: the slots
+// free after the last particle step (ParticlePool.encodeBeginStep zeroes the step's claims).
 // - PlayerContactPass (player_collide.wgsl, one workgroup): the hit latch and the one agent that
 //   touches the player, counted in killsUnscored. Storage buffers: agents, cellCounts,
 //   cellOffsets, sortedIndices, stats, particles, species table (7), plus the params uniform.
@@ -64,12 +68,32 @@ export class DebugKillPass extends ComputePass {
 export class KillAllPass extends ComputePass {
   constructor(gpu, { common }) {
     super(gpu, { common, shaderName: 'kill_all', label: 'kill-all' });
+    this.countPipeline = null;
+    this.countBindGroupCache = new BindGroupCache(([paramsBuffer, agentsBuffer, particlesBuffer]) => this.device.createBindGroup({
+      label: 'kill-all-count-bindings',
+      layout: this.countPipeline.getBindGroupLayout(0),
+      entries: [[0, paramsBuffer], [1, agentsBuffer], [3, particlesBuffer]].map(([binding, buffer]) => ({ binding, resource: { buffer } })),
+    }));
+  }
+
+  async initialize() {
+    const source = prependCommon(substituteConstants(await loadShader(this.shaderName), SHADER_CONSTANTS), this.common);
+    const module = this.device.createShaderModule({ label: this.label, code: source });
+    const pipeline = (entryPoint) => this.device.createComputePipelineAsync({ label: this.label + '-' + entryPoint, layout: 'auto', compute: { module, entryPoint } });
+    [this.countPipeline, this.pipeline] = await Promise.all([pipeline('countAlive'), pipeline('main')]);
   }
 
   encode(encoder, { agentsBuffer, statsBuffer, particleBuffers, threatAccumulator, speciesTableBuffer, paramsBuffer }) {
+    if (this.countPipeline === null) throw new Error('KillAllPass.initialize() must finish before encode()');
+    const workgroups = agentWorkgroups(agentsBuffer);
+    const pass = encoder.beginComputePass({ label: this.label + '-count' });
+    pass.setPipeline(this.countPipeline);
+    pass.setBindGroup(0, this.countBindGroupCache.get([paramsBuffer, agentsBuffer, particleBuffers.particles]));
+    pass.dispatchWorkgroups(workgroups);
+    pass.end();
     this.dispatch(encoder, [
       paramsBuffer, agentsBuffer, statsBuffer, particleBuffers.particles, threatAccumulator, speciesTableBuffer,
-    ], agentWorkgroups(agentsBuffer));
+    ], workgroups);
   }
 }
 

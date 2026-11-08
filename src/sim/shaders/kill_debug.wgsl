@@ -4,8 +4,10 @@
 // cleared with atomicAnd and the kill only counts when the old flags had it, so concurrent
 // killers never double count. Each kill then:
 //   adds 1 to the kills stat (reduced per workgroup, one global atomicAdd from thread 0),
-//   claims KILL_PARTICLE_COUNT particle slots with one atomicAdd on the pool cursor (wrapping
-//   modulo the pool capacity) and writes particles radiating from the agent in its species hue,
+//   asks for params.killBurstParticles particles from the step's shared particle budget
+//   (grantedParticleCount in common.wgsl), claims the granted slots with one atomicAdd on the pool
+//   cursor (wrapping modulo the pool capacity) and writes particles radiating from the agent in
+//   its species hue,
 //   adds one threat unit (THREAT_FIXED_POINT_SCALE fixed point) to its coarse cell.
 // The barrier sits outside every branch; threads past capacity still reach it.
 
@@ -16,17 +18,26 @@
 @group(0) @binding(4) var<storage, read_write> threatAccumulator: array<atomic<u32>>;
 @group(0) @binding(5) var<storage, read> speciesTable: array<f32>;
 
-const KILL_PARTICLE_COUNT: u32 = 6u;
 
 var<workgroup> workgroupKills: atomic<u32>;
 
-fn emitKillParticles(slot: u32, position: vec2f, species: u32, hueJitter: f32) {
+// Claims up to requested particles from the step's shared budget (grantedParticleCount) and
+// writes the granted ones radiating from position.
+fn emitKillParticles(slot: u32, position: vec2f, species: u32, hueJitter: f32, requested: u32) {
+  if (requested == 0u) {
+    return;
+  }
   let capacity = arrayLength(&pool.particles);
-  let first = atomicAdd(&pool.cursor, KILL_PARTICLE_COUNT) % capacity;
+  let claimedBefore = atomicAdd(&pool.claimedThisStep, requested);
+  let count = grantedParticleCount(requested, claimedBefore, atomicLoad(&pool.liveCount), capacity);
+  if (count == 0u) {
+    return;
+  }
+  let first = atomicAdd(&pool.cursor, count) % capacity;
   let color = killParticleColor(speciesTable[speciesFieldIndex(species, SPECIES_FIELD_HUE)], hueJitter);
   let seed = killBurstSeed(slot, params.frameSequence);
-  for (var index = 0u; index < KILL_PARTICLE_COUNT; index = index + 1u) {
-    pool.particles[(first + index) % capacity] = killBurstParticle(index, KILL_PARTICLE_COUNT, seed, position, color);
+  for (var index = 0u; index < count; index = index + 1u) {
+    pool.particles[(first + index) % capacity] = killBurstParticle(index, count, seed, position, color);
   }
 }
 
@@ -43,7 +54,7 @@ fn main(
       let previousFlags = atomicAnd(&agents[slot].flags, ~FLAG_ALIVE);
       if (isAlive(previousFlags)) {
         atomicAdd(&workgroupKills, 1u);
-        emitKillParticles(slot, position, min(agents[slot].species, SPECIES_COUNT - 1u), agents[slot].hueJitter);
+        emitKillParticles(slot, position, min(agents[slot].species, SPECIES_COUNT - 1u), agents[slot].hueJitter, params.killBurstParticles);
         atomicAdd(&threatAccumulator[coarseCellIndexFor(position)], u32(THREAT_FIXED_POINT_SCALE));
       }
     }

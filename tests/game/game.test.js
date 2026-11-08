@@ -517,6 +517,17 @@ test('debugArm arms a weapon at a tier with a full charge, and base drops it', a
   assert.equal(game.state.armed, 'base');
 });
 
+test('debugInvulnerable keeps contact off while playing until it is turned off again', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  game.debugInvulnerable(true);
+  runFor(game, 5);
+  assert.ok(simulation.playerStates.every((state) => state.invulnerable), 'every step while the debug switch is on');
+  game.debugInvulnerable(false);
+  game.update(STEP);
+  assert.equal(simulation.playerStates.at(-1).invulnerable, false);
+});
+
 test('scene hides the ship from death until respawn and carries the armed weapon', async () => {
   const { game } = await createGame();
   game.debugArm('pulse', 2);
