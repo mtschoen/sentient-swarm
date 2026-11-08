@@ -58,6 +58,13 @@ export function packSpeciesTable(rows, matrix, densityScale = 1) {
   return table;
 }
 
+// Shipped spawn shares, species order Chaser, Orbiter, Skittish, Lattice, Predator (owner ruling R38).
+// The steering pressure term and the cohesion fade read total density against the agent's own comfort
+// density, so other species dilute the Chaser ribbons back into fog; at 0.9 the swarm reads as one
+// textured creature streaming toward the ship, Orbiters ringing it and a few Predators inside.
+// Lattice stays available in the lab but no longer spawns in the shipped game.
+export const DEFAULT_SHARES = Object.freeze([0.9, 0.03, 0.02, 0, 0.05]);
+
 export function normalizeShares(shares) {
   const clamped = Float32Array.from(shares, (share) => (Number.isFinite(share) ? Math.max(0, share) : 0));
   const total = clamped.reduce((sum, share) => sum + share, 0);
