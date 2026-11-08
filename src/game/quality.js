@@ -49,11 +49,11 @@ export function resolveInitialPreset({ settings, adapterKey, isMobile, maxStorag
 // over, but the live settings (sliders may have moved during the swap's prepare) are applied again
 // once it has settled; liveSettings is read at that moment, not captured when the swap starts.
 // Returns the settle promise, or null when no swap was asked for. A failed swap leaves the old
-// simulation installed and is ignored here, as before.
+// simulation installed; onFailure (optional) runs then so the caller can re-sync its display.
 export function settleApply({ quality, liveSettings, applySettings }) {
-  return (current) => {
+  return (current, onFailure = () => {}) => {
     if (!current.preset || current.preset === quality.current) return null;
-    return quality.apply(current.preset).then(() => applySettings(liveSettings()), () => {});
+    return quality.apply(current.preset).then(() => applySettings(liveSettings()), () => onFailure());
   };
 }
 

@@ -176,6 +176,7 @@ export function createSettingsPanel({
       root.hidden = false;
     },
     close,
+    refresh,
     get isOpen() { return open; },
   };
 }

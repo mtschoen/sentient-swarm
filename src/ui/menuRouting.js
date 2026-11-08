@@ -48,3 +48,13 @@ export function createSettingsOpener({ isRotateShowing, pauseForMenu, openPanel 
     openPanel();
   };
 }
+
+// Turning the phone back to landscape after the rotate overlay paused the run. Normally the run
+// resumes. With the settings panel open (opened over the overlay) it stays paused: holdForMenu
+// hands the pause over to the pause menu, so closing the panel returns to that menu.
+export function createRotateBackHandler({ settingsOpen, resume, holdForMenu }) {
+  return () => {
+    if (settingsOpen()) holdForMenu();
+    else resume();
+  };
+}

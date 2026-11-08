@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMenuInput } from '../../src/input/menuInput.js';
-import { createSettingsOpener, routeMenuActions, routeSettingsKey } from '../../src/ui/menuRouting.js';
+import { createRotateBackHandler, createSettingsOpener, routeMenuActions, routeSettingsKey } from '../../src/ui/menuRouting.js';
 
 // The render loop's wiring (main.js): the real menu input, a settings panel that closes, and the
 // menu dispatch that would pause or resume the run on 'pause'.
@@ -112,4 +112,26 @@ test('settings opened while the rotate overlay pauses shows no pause menu under 
   rotating = false;
   open();
   assert.deepEqual(steps, ['panel', 'pause menu', 'panel']);
+});
+
+function rotateBackSetup(settingsIsOpen) {
+  const steps = [];
+  const handler = createRotateBackHandler({
+    settingsOpen: () => settingsIsOpen,
+    resume: () => steps.push('resume'),
+    holdForMenu: () => steps.push('pause menu'),
+  });
+  return { steps, handler };
+}
+
+test('rotating back with settings open does not resume and shows the pause menu', () => {
+  const { steps, handler } = rotateBackSetup(true);
+  handler();
+  assert.deepEqual(steps, ['pause menu']);
+});
+
+test('rotating back with settings closed resumes the run', () => {
+  const { steps, handler } = rotateBackSetup(false);
+  handler();
+  assert.deepEqual(steps, ['resume']);
 });

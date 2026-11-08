@@ -287,3 +287,11 @@ test('a preset swap that fails is swallowed and applies nothing', async () => {
   await settlePreset({ preset: 'phoneMedium' });
   assert.deepEqual(applied, []);
 });
+
+test('a failed preset swap runs the failure callback so the caller can re-sync its display', async () => {
+  const { controller } = createController();
+  let failures = 0;
+  const settlePreset = settleApply({ quality: controller, liveSettings: () => ({}), applySettings: () => {} });
+  await settlePreset({ preset: 'phoneMedium' }, () => { failures += 1; });
+  assert.equal(failures, 1);
+});

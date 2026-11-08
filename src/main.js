@@ -27,7 +27,7 @@ import {
 import { createMenu, createPauseMenu } from './ui/menu.js';
 import { createRotateOverlay } from './ui/rotateOverlay.js';
 import { createMenuInput } from './input/menuInput.js';
-import { createSettingsOpener, routeMenuActions, routeSettingsKey } from './ui/menuRouting.js';
+import { createRotateBackHandler, createSettingsOpener, routeMenuActions, routeSettingsKey } from './ui/menuRouting.js';
 
 const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
 
@@ -156,7 +156,7 @@ async function boot() {
     onRerunProbe: () => quality.rerunProbe(),
     onChange: (current) => {
       applySettings(current);
-      if (pinnedCapacity === null) settlePreset(current);
+      if (pinnedCapacity === null) settlePreset(current, () => settingsPanel.refresh());
     },
   });
   document.body.append(settingsPanel.element);
@@ -266,6 +266,15 @@ async function boot() {
   const menuInput = createMenuInput();
   let pausedByRotate = false;
   let rotateShowing = false;
+  // Settings opened over the rotate overlay: rotating back keeps the run paused under the pause menu.
+  const onRotateBack = createRotateBackHandler({
+    settingsOpen,
+    resume: resumeGame,
+    holdForMenu: () => {
+      pausedByRotate = false;
+      pauseMenu.show();
+    },
+  });
 
   function requestPause() {
     if (rotateShowing || settingsOpen()) return;
@@ -300,7 +309,7 @@ async function boot() {
       pausedByRotate = true;
       audio.setPaused(true);
     } else if (!rotating && rotateShowing && pausedByRotate) {
-      resumeGame();
+      onRotateBack();
     }
     rotateShowing = rotating;
     if (state.phase !== 'ready' && menu.visible) menu.hide();
