@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation } from '../../src/sim/simulation.js';
+import { AgentCompaction } from '../../src/sim/compact.js';
 import { PRESETS } from '../../src/settings/presets.js';
 import { SPECIES_FIELDS, SPECIES_NAMES, defaultSpecies, defaultMatrix, packSpeciesTable, normalizeShares, DENSITY_REFERENCE_CAPACITY, densityScaleFor } from '../../src/sim/species.js';
 
@@ -124,10 +125,34 @@ test('Simulation.setSpecies keeps absolute densities unless asked to scale', () 
   assert.equal(writes[0][DENSITY_INDEX], 120);
 });
 
-test('the shipped boot and the capacity swap both ask for density scaling', async () => {
+test('the shipped boot asks for density scaling', async () => {
   const { readFile } = await import('node:fs/promises');
   const main = await readFile(new URL('../../src/main.js', import.meta.url), 'utf8');
   assert.match(main, /scaleDensityToCapacity: true/);
-  const simulation = await readFile(new URL('../../src/sim/simulation.js', import.meta.url), 'utf8');
-  assert.match(simulation, /scaleDensityToCapacity: this\.scalesDensityValue/);
+});
+
+// prepareCapacity builds the next simulation through Simulation.create; both statics are replaced
+// for the call so no GPU is needed, and the options create receives are what the swap carries on.
+async function createOptionsOfPrepare(scalesDensity) {
+  const { simulation } = fakeSimulation({ capacity: 4096, scalesDensity });
+  Object.assign(simulation, { neighborRadius: 0.1, species: defaultSpecies(), matrix: defaultMatrix(), sharesValue: normalizeShares([1, 1, 1, 1, 1]), particlePoolValue: { capacity: 64 } });
+  const originalCreate = Simulation.create;
+  const originalCompactionCreate = AgentCompaction.create;
+  const received = [];
+  Simulation.create = async (gpu, options) => { received.push(options); return { destroy() {} }; };
+  AgentCompaction.create = async () => ({});
+  try {
+    await simulation.prepareCapacity(8192);
+  } finally {
+    Simulation.create = originalCreate;
+    AgentCompaction.create = originalCompactionCreate;
+  }
+  return received[0];
+}
+
+test('the capacity swap carries the density scaling choice into the next simulation', async () => {
+  assert.equal((await createOptionsOfPrepare(true)).scaleDensityToCapacity, true);
+  const unscaled = await createOptionsOfPrepare(false);
+  assert.equal(unscaled.scaleDensityToCapacity, false);
+  assert.equal(unscaled.capacity, 8192);
 });
