@@ -51,7 +51,7 @@ import {
   validatedWallStiffness,
 } from './params.js';
 import { Spawner } from './spawn.js';
-import { defaultMatrix, defaultSpecies, normalizeShares, densityScaleFor, packSpeciesTable } from './species.js';
+import { DEFAULT_SHARES, defaultMatrix, defaultSpecies, normalizeShares, densityScaleFor, packSpeciesTable } from './species.js';
 import { STATS_BYTES, STATS_PERSISTENT_OFFSET_BYTES, StatsPass, decodeStats } from './stats.js';
 import { Steering } from './steer.js';
 
@@ -64,7 +64,7 @@ export class Simulation {
     neighborRadius = 0.1,
     species = defaultSpecies(),
     matrix = defaultMatrix(),
-    shares = normalizeShares(new Array(SPECIES_COUNT).fill(1)),
+    shares = normalizeShares(DEFAULT_SHARES),
     particleCapacity = DEFAULT_PARTICLE_CAPACITY,
     scaleDensityToCapacity = false,
   }) {
