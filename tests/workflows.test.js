@@ -28,6 +28,7 @@ test('every action reference is pinned by full commit SHA with a version comment
 
 test('check.yml runs on every push and pull request with a read-only token', () => {
   const checkLines = lines('check.yml').map((line) => line.replace(/\r$/, ''));
+  assert.ok(!checkLines.some((line) => line.includes('continue-on-error')), 'the software-GPU job is required since its first green run');
   assert.ok(checkLines.includes('on:'));
   assert.ok(checkLines.includes('  push:'));
   assert.ok(checkLines.includes('  pull_request:'));
