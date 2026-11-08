@@ -13,8 +13,8 @@
 // A pulseOrb that moves into a detonation (its lifetime ran out, it left the arena, or the total
 // density at its coarse cell exceeds extra) keeps its kind for that step, so the collide pass
 // still walks the segment it just flew, and converts at the start of the next step, before it
-// moves: it becomes a pulseRing at its position (clamped back to the arena) with zero velocity, radius RING_START_RADIUS, lifetime RING_LIFETIME and
-// extra RING_GROWTH_SPEED. Each detonation adds 1 to stats ringsThisFrame; the one that took
+// moves: it becomes a pulseRing at its position (clamped back to the arena) with zero
+// velocity, radius RING_START_RADIUS, lifetime RING_LIFETIME and extra RING_GROWTH_SPEED. Each detonation adds 1 to stats ringsThisFrame; the one that took
 // count 0 also stores its position as f32 bits in lastRingX and lastRingY, so the pair is always
 // one ring's (the CPU turns it into one warp grid impulse per frame).
 // Storage buffers: projectiles, field, stats = 3.

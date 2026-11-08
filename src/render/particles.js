@@ -80,6 +80,7 @@ export class ParticleRenderer {
   encode(pass, pool, emissionScale = 1) {
     const { viewport, particleDevicePixels } = this;
     this.device.queue.writeBuffer(this.viewBuffer, 0, packParticleView({ viewport, particleDevicePixels, emissionScale }, this.viewFloats));
+    pool.registerBindGroupCache(this.bindGroupCache);
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, pool.buffers.particles]));
     pass.draw(VERTICES_PER_PARTICLE, pool.capacity);

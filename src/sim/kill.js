@@ -40,6 +40,11 @@ class ComputePass {
     this.pipeline = await this.device.createComputePipelineAsync({ label: this.label, layout: 'auto', compute: { module, entryPoint: 'main' } });
   }
 
+  // Every cache whose bind groups name the particle pool's buffer.
+  bindGroupCaches() {
+    return [this.bindGroupCache];
+  }
+
   // buffers in binding order; workgroups is the dispatch size.
   dispatch(encoder, buffers, workgroups) {
     if (this.pipeline === null) throw new Error(`${this.constructor.name}.initialize() must finish before encode()`);
@@ -97,6 +102,10 @@ export class KillAllPass extends ComputePass {
       layout: this.countPipeline.getBindGroupLayout(0),
       entries: [[0, paramsBuffer], [1, agentsBuffer], [3, particlesBuffer], [6, this.areaBuffer]].map(([binding, buffer]) => ({ binding, resource: { buffer } })),
     }));
+  }
+
+  bindGroupCaches() {
+    return [this.bindGroupCache, this.countBindGroupCache];
   }
 
   async initialize() {

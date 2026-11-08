@@ -288,6 +288,7 @@ export class Projectiles {
   encode(encoder, { agentsBuffer, gridBuffers, fieldBuffers, particlePool, statsBuffer, paramsBuffer, speciesTableBuffer }) {
     if (this.pipelines === null) throw new Error('Projectiles.initialize() must finish before encode()');
     this.writePending();
+    particlePool.registerBindGroupCache(this.collideBindGroupCache);
     for (let species = 0; species < SPECIES_COUNT; species += 1) {
       encoder.copyBufferToBuffer(speciesTableBuffer, species * SPECIES_ROW_BYTES + HUE_FIELD_BYTES, this.huesBuffer, species * BYTES_PER_FLOAT, BYTES_PER_FLOAT);
     }

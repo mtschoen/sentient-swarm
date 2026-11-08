@@ -182,8 +182,12 @@ class Harness {
   }
 }
 
+// One case's result: pass only when every verdict holds; detail is the PASS or FAIL text.
 function verdictLine(verdicts) {
-  return verdicts.map(([ok, text]) => `${ok ? 'PASS' : 'FAIL'} ${text}`).join('; ');
+  return {
+    pass: verdicts.every(([ok]) => ok),
+    detail: verdicts.map(([ok, text]) => `${ok ? 'PASS' : 'FAIL'} ${text}`).join('; '),
+  };
 }
 
 const SWEEP_SPEED = 20;
@@ -534,15 +538,14 @@ async function runCheck() {
   const projectiles = await Projectiles.create(gpu, {});
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const harness = new Harness(device, simulation, projectiles);
-  const lines = [];
+  const entries = [];
   for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase]) {
-    lines.push(await run(harness));
-    if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${lines.join('; ')}` };
+    entries.push(await run(harness));
+    if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${entries.map((entry) => entry.detail).join('; ')}` };
   }
   simulation.destroy();
   projectiles.destroy();
-  const detail = lines.join('; ');
-  return { pass: !detail.includes('FAIL'), detail };
+  return { pass: entries.every((entry) => entry.pass), detail: entries.map((entry) => entry.detail).join('; ') };
 }
 
 runCheck().then(

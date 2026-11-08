@@ -114,6 +114,10 @@ export class Simulation {
     this.killAllPass = new KillAllPass(gpu, { common });
     this.playerContactPass = new PlayerContactPass(gpu, { common });
     this.particlePoolValue = new ParticlePool(gpu, { capacity: particleCapacity, common });
+    // A pool resize destroys its buffer; the kill passes' bind groups name it, so they are evicted.
+    [this.killPass, this.killAllPass, this.playerContactPass]
+      .flatMap((pass) => pass.bindGroupCaches())
+      .forEach((cache) => this.particlePoolValue.registerBindGroupCache(cache));
     // New buffers are zero-filled, so every slot starts dead.
     this.agentBuffers = [0, 1].map((index) => createStorageBuffer(this.device, agentBufferBytes(capacity), 'agents-' + index));
     this.inputIndex = 0;

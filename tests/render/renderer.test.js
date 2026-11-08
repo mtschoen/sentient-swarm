@@ -60,7 +60,7 @@ function createFakeSimulation(name, frameSequence) {
     paramsBuffer: buffer('params'),
     fieldBuffer: buffer('field'),
     speciesTableBuffer: buffer('species'),
-    particlePool: { capacity: 64, buffers: { particles: buffer('particles') } },
+    particlePool: { capacity: 64, buffers: { particles: buffer('particles') }, registerBindGroupCache() {} },
   };
 }
 

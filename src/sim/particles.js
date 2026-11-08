@@ -48,7 +48,7 @@ export class ParticlePool {
   // Other passes cache bind groups that name this pool's buffer; resize evicts the replaced
   // buffer's entries from each registered cache so they do not hold it after destroy.
   registerBindGroupCache(cache) {
-    this.dependentCaches.push(cache);
+    if (!this.dependentCaches.includes(cache)) this.dependentCaches.push(cache);
   }
 
   // Replaces the ring with an empty one of capacity slots (live particles are dropped). Every
