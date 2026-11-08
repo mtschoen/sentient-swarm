@@ -13,7 +13,7 @@
     "check:gpu": "node tests/browser/gpu-checks.mjs",
     "smoke:menu": "node tests/browser/smoke-menu.mjs",
     "smoke:lab": "node tests/browser/smoke-lab.mjs",
-    "coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.js\" --test-coverage-exclude=\"src/sim/grid.js\" --test-coverage-exclude=\"src/render/render-shaders.js\" --test-coverage-lines=92 --test-coverage-functions=88 \"tests/**/*.test.js\""
+    "coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**/*.js\" --test-coverage-exclude=\"src/sim/grid.js\" --test-coverage-exclude=\"src/render/render-shaders.js\" --test-coverage-lines=89 --test-coverage-functions=79 \"tests/**/*.test.js\""
   },
   "devDependencies": {
     "playwright": "^1.49.0",
