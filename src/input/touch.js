@@ -1,6 +1,8 @@
 // Twin-stick touch: left half of the canvas moves, right half aims; each stick floats at first contact.
 // Touches that start on (or inside the rectangle of) an element marked data-touch-exclusive never
-// start a stick: the bomb button and the display-only HUD panels carry the mark.
+// start a stick: the bomb button, the HUD buttons and the display-only HUD panels carry the mark. A
+// HUD panel is a full-width strip (the whole letterbox band, or half the arena width along the top
+// edge) with auto height, not just its text.
 export const STICK_RADIUS = 60;
 
 export function createTouchSource(canvas) {

@@ -92,7 +92,7 @@ export function createMenu({ onStart, onLab, onSettings, documentObject = docume
   return buildMenu({
     documentObject,
     className: 'menu-title-screen',
-    title: 'MURMURATION',
+    title: 'SENTIENT SWARM',
     items: [
       { label: 'Play', primary: true, action: () => onStart() },
       { label: 'Lab', action: () => onLab() },
