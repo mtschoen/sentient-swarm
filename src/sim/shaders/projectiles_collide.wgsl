@@ -1,7 +1,8 @@
 // Over 500 lines: the capsule, ring and beam entry points share the kill and grid walk helpers here.
 // Projectile collision against the spatial grid, run after projectiles_step.wgsl on the freshly
 // integrated agents. The grid was built from the step's input agents, so cell membership is one
-// step stale while distances use current positions. Every kind pierces; a base bullet (kind
+// step stale while distances use current positions. Every kind pierces except the sidewinder, which
+// detonates on its first kill (below); a base bullet (kind
 // bullet) with extra of 1 or more (the lab's base gun kill budget, task C6b; 0 is unlimited, the
 // default) stops killing once it has spent extra kills, writes the rest back into extra and dies
 // at 0. Its thread is the only one walking it, so a private counter is exact.
@@ -16,6 +17,10 @@
 //   its distance to the segment is at most the reach. The budget covers a radius 0.2 energy ball
 //   at speed 10 on every preset grid (cell size 0.08 to 0.12) at full and half simulation rate:
 //   at most 89 cells, worst at cell size 0.08 with a half-rate step (tests/sim/capsule-budget.test.js).
+// - sidewinder: walked with a kill budget of 1. If it killed, its slot is rewritten in place as a
+//   pulse ring (flag PROJECTILE_FLAG_MISSILE_RING, lifetime MISSILE_RING_LIFETIME, so it grows to
+//   half a pulse ring) at its position clamped to the arena, counted in stats ringsThisFrame and
+//   lastRingX/Y as an orb's detonation is; the rings entry then collides it. A miss flies on.
 // - pulseRing: skipped here, see rings.
 // Entry rings, a few workgroups (RING_WORKGROUP_COUNT in projectiles.js): every workgroup scans
 // the slots for alive pulse rings (at most MAXIMUM_LISTED_RINGS), then all the dispatch's threads
@@ -311,7 +316,27 @@ fn main(
       if (budgeted) {
         killBudget = u32(projectile.extra);
       }
+      let detonates = projectile.kind == PROJECTILE_KIND_SIDEWINDER;
+      if (detonates) {
+        killBudget = 1u;
+      }
       collideCapsule(projectile.previousPosition, projectile.position, projectile.radius + CAPSULE_KILL_MARGIN, 0u, 1u, CAPSULE_CELL_BUDGET, NO_THREAT);
+      if (detonates && killBudget == 0u) {
+        var ring = projectile;
+        ring.kind = PROJECTILE_KIND_PULSE_RING;
+        ring.position = clampToArena(projectile.position);
+        ring.previousPosition = ring.position;
+        ring.velocity = vec2f(0.0, 0.0);
+        ring.radius = RING_START_RADIUS;
+        ring.lifetime = MISSILE_RING_LIFETIME;
+        ring.extra = RING_GROWTH_SPEED;
+        ring.flags = projectile.flags | PROJECTILE_FLAG_MISSILE_RING;
+        projectiles[slot] = ring;
+        if (atomicAdd(&stats[STAT_RINGS_THIS_FRAME], 1u) == 0u) {
+          atomicStore(&stats[STAT_LAST_RING_X], bitcast<u32>(ring.position.x));
+          atomicStore(&stats[STAT_LAST_RING_Y], bitcast<u32>(ring.position.y));
+        }
+      }
       if (budgeted) {
         projectiles[slot].extra = f32(killBudget);
         if (killBudget == 0u) {

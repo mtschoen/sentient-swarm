@@ -270,6 +270,16 @@ const PROJECTILE_KIND_PULSE_RING: u32 = __PROJECTILE_KIND_PULSE_RING__u;
 const PROJECTILE_KIND_SIDEWINDER: u32 = __PROJECTILE_KIND_SIDEWINDER__u;
 const PROJECTILE_KIND_BEAM: u32 = __PROJECTILE_KIND_BEAM__u;
 const PROJECTILE_FLAG_ALIVE: u32 = __PROJECTILE_FLAG_ALIVE__u;
+const PROJECTILE_FLAG_MISSILE_RING: u32 = __PROJECTILE_FLAG_MISSILE_RING__u;
+
+// Pulse ring shape, shared by the orb detonation (projectiles_step.wgsl) and the sidewinder
+// detonation (projectiles_collide.wgsl). A missile ring lives MISSILE_RING_LIFETIME, so it grows
+// to half a pulse ring's radius.
+const RING_START_RADIUS: f32 = 0.05;
+const RING_LIFETIME: f32 = 0.5;
+const MISSILE_RING_LIFETIME: f32 = 0.25;
+// World units per second.
+const RING_GROWTH_SPEED: f32 = 6.0;
 
 fn pcgHash(value: u32) -> u32 {
   let state = value * 747796405u + 2891336453u;

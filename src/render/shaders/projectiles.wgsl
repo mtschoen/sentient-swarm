@@ -42,7 +42,6 @@ const ORB_GLOW_RADIUS_FACTOR: f32 = 3.5;
 const RING_GLOW_MARGIN: f32 = 0.35;
 const BEAM_GLOW_FACTOR: f32 = 2.2;
 const BEAM_GLOW_MARGIN: f32 = 0.1;
-const RING_LIFETIME: f32 = 0.5;
 const SCATTER_FADE_SECONDS: f32 = 0.12;
 const GLOW_SATURATION: f32 = 0.85;
 // Sweeps narrower than this (radians) draw as the plain beam quad.
@@ -113,6 +112,7 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
   let direction = select(vec2f(1.0, 0.0), projectile.velocity / max(speed, 1e-6), speed > 1e-5);
   let side = vec2f(-direction.y, direction.x);
   var center = projectile.position;
+  let isMissileRing = (projectile.flags & PROJECTILE_FLAG_MISSILE_RING) != 0u;
   var halfExtent = vec2f(0.1);
   var fade = 1.0;
   // The swept beam's quad is the sector's world-axis bounding box instead of a heading frame.
@@ -136,7 +136,7 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
     }
     case PROJECTILE_KIND_PULSE_RING: {
       halfExtent = vec2f(projectile.radius + RING_GLOW_MARGIN);
-      fade = clamp(projectile.lifetime / RING_LIFETIME, 0.0, 1.0);
+      fade = clamp(projectile.lifetime / select(RING_LIFETIME, MISSILE_RING_LIFETIME, isMissileRing), 0.0, 1.0);
     }
     case PROJECTILE_KIND_SIDEWINDER: {
       halfExtent = vec2f(SIDEWINDER_TAIL * 0.5 + 0.1, 0.3);
@@ -173,7 +173,7 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
   // Fragment coordinates are relative to the projectile's position (its head) in its heading frame,
   // except the beam's, which are the world offset from the ship.
   output.local = select(local + vec2f(dot(center - projectile.position, direction), 0.0), world - projectile.position, kind == PROJECTILE_KIND_BEAM);
-  output.hue = kindHue(kind);
+  output.hue = kindHue(select(kind, PROJECTILE_KIND_SIDEWINDER, kind == PROJECTILE_KIND_PULSE_RING && isMissileRing));
   output.kind = kind;
   output.shape = vec4f(projectile.radius, halfExtent.x, projectile.seed, fade);
   return output;

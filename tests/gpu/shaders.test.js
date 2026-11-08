@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { loadShader, substituteConstants, prependCommon } from '../../src/gpu/shaders.js';
-import { PROJECTILE_FLAG_ALIVE, SHADER_CONSTANTS } from '../../src/sim/layout.js';
+import { PROJECTILE_FLAG_ALIVE, PROJECTILE_FLAG_MISSILE_RING, SHADER_CONSTANTS } from '../../src/sim/layout.js';
 import { PROJECTILE_KINDS } from '../../src/game/weaponTypes.js';
 
 test('substituteConstants replaces every token occurrence', () => {
@@ -68,6 +68,10 @@ test('projectile kind constants substituted into WGSL equal PROJECTILE_KINDS', a
   }
   assert.ok(commonSource.includes('const PROJECTILE_FLAG_ALIVE: u32 = __PROJECTILE_FLAG_ALIVE__u;'));
   assert.ok(collide.includes(`const PROJECTILE_FLAG_ALIVE: u32 = ${PROJECTILE_FLAG_ALIVE}u;`));
+  assert.equal(PROJECTILE_FLAG_MISSILE_RING, 2);
+  assert.equal(SHADER_CONSTANTS.PROJECTILE_FLAG_MISSILE_RING, 2);
+  assert.ok(commonSource.includes('const PROJECTILE_FLAG_MISSILE_RING: u32 = __PROJECTILE_FLAG_MISSILE_RING__u;'));
+  assert.ok(collide.includes('const PROJECTILE_FLAG_MISSILE_RING: u32 = 2u;'));
   // Every kind test in the collide entry points compares against a named constant, never a number.
   const kindTests = collide.match(/\.kind\s*[!=]=\s*\w+/g);
   assert.ok(kindTests.length >= 4);

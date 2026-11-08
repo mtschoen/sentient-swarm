@@ -17,6 +17,8 @@
 // velocity, radius RING_START_RADIUS, lifetime RING_LIFETIME and extra RING_GROWTH_SPEED. Each detonation adds 1 to stats ringsThisFrame; the one that took
 // count 0 also stores its position as f32 bits in lastRingX and lastRingY, so the pair is always
 // one ring's (the CPU turns it into one warp grid impulse per frame).
+// A sidewinder's detonation ring is made by projectiles_collide.wgsl (MISSILE_RING_LIFETIME, the
+// missile flag); this pass grows and expires it like any ring. Ring constants are in common.wgsl.
 // Storage buffers: projectiles, field, stats = 3.
 
 @group(0) @binding(0) var<uniform> params: SimParams;
@@ -24,10 +26,6 @@
 @group(0) @binding(2) var<storage, read> field: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> stats: array<atomic<u32>, STATS_WORD_COUNT>;
 
-const RING_START_RADIUS: f32 = 0.05;
-const RING_LIFETIME: f32 = 0.5;
-// World units per second.
-const RING_GROWTH_SPEED: f32 = 6.0;
 const MINIMUM_LENGTH: f32 = 0.000001;
 // Sidewinder weave: radians per second and radians per second of lifetime.
 const WEAVE_TURN_RATE: f32 = 3.0;

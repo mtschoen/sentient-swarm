@@ -18,6 +18,8 @@ export const AGENT_SPAWN_FRAMES_SHIFT = 8;
 export const AGENT_SPAWN_FRAMES_MASK = 0xff00;
 // Projectile struct flags bit 0 (common.wgsl).
 export const PROJECTILE_FLAG_ALIVE = 1;
+// Bit 1: a pulse ring made by a sidewinder detonation (drawn in the sidewinder hue).
+export const PROJECTILE_FLAG_MISSILE_RING = 2;
 
 export function gridDimensions(neighborRadius) {
   const cellSize = neighborRadius;
@@ -78,4 +80,5 @@ export const SHADER_CONSTANTS = {
   PROJECTILE_KIND_SIDEWINDER: PROJECTILE_KINDS.sidewinder,
   PROJECTILE_KIND_BEAM: PROJECTILE_KINDS.beam,
   PROJECTILE_FLAG_ALIVE,
+  PROJECTILE_FLAG_MISSILE_RING,
 };

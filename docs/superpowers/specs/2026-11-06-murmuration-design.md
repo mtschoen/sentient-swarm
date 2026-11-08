@@ -144,7 +144,7 @@ Upgrades: five types. Each has three tiers.
 - Scatter: a wide arc of energy balls as big and long-lived as the base gun's, a shotgun wall (owner ruling R32: a pickup is never a power-down). Shoves the grid outward in a cone. Tiers add balls to the arc.
 - Rail: narrow, very fast, long range, pierces. Thin streaks on the grid. Tiers add parallel bolts.
 - Pulse: slow large orbs that detonate into expanding rings on contact or at range. Ripples on the grid. Tiers add orb count and ring radius.
-- Sidewinders: homing missiles that weave toward the densest nearby cluster (the grid count buffer tells them where). Wiggly dimples on the grid. Tiers add missile count and turn rate.
+- Sidewinders: homing missiles that weave toward the densest nearby cluster (the grid count buffer tells them where). Wiggly dimples on the grid. Tiers add missile count and turn rate. A missile detonates on its first kill into a half-size pulse ring (owner ruling R33).
 
 Acquisition and decay, as the designer's call unless the owner objects:
 

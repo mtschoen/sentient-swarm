@@ -49,10 +49,14 @@
 //     exactly the union of the two kill sets each makes alone (the sets differ both ways: the wide
 //     slow one kills the wider tunnel, the narrow fast one kills farther along), with the alive drop
 //     equal to the kills and one particle burst per killed agent.
+// (m) sidewinder blast (task R33): a sidewinder whose segment reaches an agent kills exactly that
+//     one, then its slot becomes a pulse ring carrying the missile flag, counted once in stats
+//     ringsThisFrame at the missile's position; the ring grows past the base radius, kills an
+//     agent 0.8 away and spares one 3 away. A sidewinder that hits nothing stays a sidewinder.
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
-import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, PROJECTILE_FLAG_ALIVE, SPECIES_COUNT } from '/src/sim/layout.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, PROJECTILE_FLAG_ALIVE, PROJECTILE_FLAG_MISSILE_RING, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES } from '/src/sim/params.js';
 import { defaultSpecies } from '/src/sim/species.js';
@@ -188,6 +192,7 @@ class Harness {
       lifetime: view.getFloat32(base + PROJECTILE_OFFSETS.lifetime, true),
       kind: view.getUint32(base + PROJECTILE_OFFSETS.kind, true),
       alive: (view.getUint32(base + PROJECTILE_OFFSETS.flags, true) & PROJECTILE_FLAG_ALIVE) !== 0,
+      missileRing: (view.getUint32(base + PROJECTILE_OFFSETS.flags, true) & PROJECTILE_FLAG_MISSILE_RING) !== 0,
     };
   }
 }
@@ -374,6 +379,38 @@ async function runSidewinderCase(harness) {
   return verdictLine([
     [sidewinder.velocity[1] > 0.1 * SIDEWINDER_SPEED, `(e) sidewinder velocity (${sidewinder.velocity.map((value) => value.toFixed(3)).join(', ')}) turned toward the block`],
     [Math.abs(speed - SIDEWINDER_SPEED) < SIDEWINDER_SPEED * SIDEWINDER_SPEED_TOLERANCE, `(e) sidewinder speed ${speed.toFixed(4)} kept`],
+  ]);
+}
+
+const MISSILE_RING_START_RADIUS = 0.05;
+const MISSILE_BLAST_FRAMES = 20;
+
+async function runMissileBlastCase(harness) {
+  harness.seedPositions([[8, 4.5], [8.8, 4.5], [11, 4.5], [2, 1]]);
+  const slot = harness.projectiles.queueSpawn({ x: 7.97, y: 4.5, velocityX: SIDEWINDER_SPEED, velocityY: 0, radius: 0.02, lifetime: 1, kind: PROJECTILE_KINDS.sidewinder, extra: 2 });
+  const firstKills = await harness.step();
+  const blast = await harness.projectileSlot(slot);
+  const blastStats = harness.lastStats;
+  await harness.steps(MISSILE_BLAST_FRAMES);
+  const alive = await harness.aliveFlags();
+  const grown = await harness.projectileSlot(slot);
+  return verdictLine([
+    [firstKills === 1, `(m) the missile kills ${firstKills} agent in its first step (need 1)`],
+    [blast.alive && blast.kind === PROJECTILE_KINDS.pulseRing && blast.missileRing, `(m) slot became a missile ring (kind ${blast.kind}, missile flag ${blast.missileRing})`],
+    [Math.abs(blast.radius - MISSILE_RING_START_RADIUS) < 1e-6 && blast.velocity[0] === 0, `(m) ring starts at radius ${blast.radius.toFixed(3)} with zero velocity`],
+    [blastStats.ringsThisFrame === 1 && Math.abs(blastStats.lastRingX - blast.position[0]) < 1e-5, `(m) stats ringsThisFrame ${blastStats.ringsThisFrame} at x ${blastStats.lastRingX.toFixed(3)} (need 1, at the ring)`],
+    [!alive[0] && !alive[1] && alive[2] && alive[3], `(m) alive flags ${alive.slice(0, 4).join(',')} (need false,false,true,true)`],
+    [!grown.alive || grown.radius > MISSILE_RING_START_RADIUS, `(m) ring grew or expired (radius ${grown.radius.toFixed(3)})`],
+  ]);
+}
+
+async function runMissileMissCase(harness) {
+  harness.seedPositions([[12, 7]]);
+  const slot = harness.projectiles.queueSpawn({ x: 3, y: 2, velocityX: SIDEWINDER_SPEED, velocityY: 0, radius: 0.02, lifetime: 1, kind: PROJECTILE_KINDS.sidewinder, extra: 2 });
+  const kills = await harness.steps(SIDEWINDER_FRAMES);
+  const missile = await harness.projectileSlot(slot);
+  return verdictLine([
+    [kills === 0 && missile.alive && missile.kind === PROJECTILE_KINDS.sidewinder && !missile.missileRing, `(m) a missile that hits nothing stays a sidewinder (kills ${kills}, kind ${missile.kind})`],
   ]);
 }
 
@@ -647,7 +684,7 @@ async function runCheck() {
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const harness = new Harness(device, simulation, projectiles);
   const entries = [];
-  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase, runBeamReversalCase, runMixedBulletsCase]) {
+  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runMissileBlastCase, runMissileMissCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase, runBeamReversalCase, runMixedBulletsCase]) {
     entries.push(await run(harness));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${entries.map((entry) => entry.detail).join('; ')}` };
   }
