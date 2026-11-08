@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SpawnPressure } from '../../src/sim/spawner.js';
+import { DEFAULT_RAMP, SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../../src/sim/spawner.js';
 
 const CAPACITY = 60000;
 const EQUAL_SHARES = [0.2, 0.2, 0.2, 0.2, 0.2];
@@ -322,4 +322,18 @@ test('the first fill after a start or a death is not rate limited, only capped a
   assert.ok(total(pressure.update(STEP_SECONDS, statsWith(0, 2), EQUAL_SHARES, 3)) <= Math.ceil(DEFAULT_REFILL_FRACTION * target * STEP_SECONDS) + 1);
   pressure.reset();
   assert.equal(total(pressure.update(STEP_SECONDS, statsWith(0, 3), EQUAL_SHARES, 4)), CAPACITY / 60);
+});
+
+test('DEFAULT_RAMP pins every tuned value', () => {
+  assert.deepEqual({ ...DEFAULT_RAMP }, {
+    floorFraction: 0.01,
+    rampSeconds: 120,
+    ceilingFraction: 0.9,
+    curveExponent: 2,
+    seekFloorFraction: 0.1,
+    spawnDistanceStartFraction: 0.4,
+    refillFractionPerSecond: 0.15,
+  });
+  assert.equal(Object.isFrozen(DEFAULT_RAMP), true);
+  assert.equal(SPEC_SPAWN_DISTANCE_FRACTION, 0.25);
 });

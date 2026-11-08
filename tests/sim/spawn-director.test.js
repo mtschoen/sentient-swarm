@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_GATE_SCHEDULE, GATE_FADE_SECONDS, MAXIMUM_SPAWN_GATES, SpawnDirector, inAimLane } from '../../src/sim/spawn-director.js';
+import { DEFAULT_GATE_SCHEDULE, GATE_FADE_SECONDS, MAXIMUM_SPAWN_GATES, SpawnDirector, TELEGRAPH_SECONDS, inAimLane, validatedSchedule } from '../../src/sim/spawn-director.js';
 import { SpawnPressure } from '../../src/sim/spawner.js';
 import { ARENA_HEIGHT, ARENA_WIDTH } from '../../src/sim/layout.js';
 
@@ -241,4 +241,37 @@ test('a gate that stays in the aim lane closes after AIM_LANE_CLOSE_SECONDS', ()
   assert.equal(gate.closing, false);
   for (let step = 0; step < Math.round(0.2 / STEP_SECONDS); step += 1) director.update(STEP_SECONDS, { ...context, ...aim });
   assert.equal(gate.closing, true);
+});
+
+test('DEFAULT_GATE_SCHEDULE pins every gate default, and the fade and telegraph times', () => {
+  assert.deepEqual({ ...DEFAULT_GATE_SCHEDULE }, {
+    gateCount: 3,
+    gateLifetimeSeconds: 14,
+    wavePeriodSeconds: 1.6,
+    waveSeconds: 0.7,
+    burstFraction: 0.25,
+    driftSpeed: 0.3,
+    gateRadius: 0.8,
+    speciesBias: 0.7,
+  });
+  assert.equal(Object.isFrozen(DEFAULT_GATE_SCHEDULE), true);
+  assert.equal(MAXIMUM_SPAWN_GATES, 4);
+  assert.equal(GATE_FADE_SECONDS, 0.6);
+  assert.equal(TELEGRAPH_SECONDS, 0.5);
+  assert.deepEqual({ ...new SpawnDirector().schedule }, { ...DEFAULT_GATE_SCHEDULE });
+});
+
+test('validatedSchedule accepts the range edges and rejects each field just outside', () => {
+  const edges = {
+    gateLifetimeSeconds: [2, 120], wavePeriodSeconds: [0.2, 20], waveSeconds: [0.05, 5], burstFraction: [0.01, 1], driftSpeed: [0, 3], gateRadius: [0.2, 2], speciesBias: [0, 1],
+  };
+  for (const [name, [minimum, maximum]] of Object.entries(edges)) {
+    assert.doesNotThrow(() => validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, [name]: minimum }), name);
+    assert.doesNotThrow(() => validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, [name]: maximum }), name);
+    assert.throws(() => validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, [name]: minimum - 0.001 }), RangeError, name);
+    assert.throws(() => validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, [name]: maximum + 0.001 }), RangeError, name);
+    assert.throws(() => validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, [name]: NaN }), RangeError, name);
+  }
+  for (const gateCount of [0, 5, 1.5, NaN]) assert.throws(() => validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, gateCount }), /gateCount/);
+  assert.doesNotThrow(() => validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, gateCount: 4 }));
 });

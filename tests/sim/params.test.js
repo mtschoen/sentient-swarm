@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_COMFORT_RADIUS, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH,
+  DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, SIM_PARAMS_GATES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH,
   DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, MAXIMUM_COMFORT_RADIUS, MAXIMUM_DEATH_FLOOD_PARTICLES,
   MAXIMUM_KILL_BURST_PARTICLES, MAXIMUM_KILL_FRAGMENT_PARTICLES, MAXIMUM_WALL_MARGIN, MAXIMUM_WALL_STIFFNESS, SIM_PARAMS_BYTES,
   packSimParams, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles, validatedKillFragmentParticles,
@@ -164,4 +164,77 @@ test('the spawn and burst setters accept their ranges and reject the rest', () =
 test('packSimParams writes projectileDt as f32 at byte offset 236, defaulting to dt', () => {
   assert.equal(new DataView(packSimParams({ dt: 0.25, projectileDt: 0.5 })).getFloat32(236, true), 0.5);
   assert.equal(new DataView(packSimParams({ dt: 0.25 })).getFloat32(236, true), 0.25);
+});
+
+test('every packSimParams field lands at its pinned byte offset with its type', () => {
+  const view = new DataView(packSimParams({
+    dt: 1.5, time: 2.5, neighborRadius: 3.5, cellSize: 4.5, debugKillRadius: 5.5, playerRadius: 6.5,
+    gridColumns: 7, gridRows: 8, capacity: 9, frameSequence: 10,
+    playerInvulnerable: 1, acknowledgedHitSequence: 11, killAllRequested: 1,
+    playerPosition: [12.5, 13.5], debugKillPosition: [14.5, 15.5],
+    sameSpeciesCohesion: 0, seekScale: 0.25, spawnDistanceFraction: 0.375, killBurstParticles: 16,
+    spawnBandWidth: 1.25, spawnDensityBias: 0.75, killFragmentParticles: 17, deathFloodParticles: 18,
+    wallMargin: 1.5, wallStiffness: 20.5, comfortRadius: 2.25, coarseFieldPressure: 0, projectileDt: 0.125,
+    spawnPerSpecies: [21, 22, 23, 24, 25],
+  }));
+  const floats = { 0: 1.5, 4: 2.5, 16: 3.5, 28: 4.5, 80: 5.5, 92: 6.5, 8: 12.5, 12: 13.5, 40: 14.5, 44: 15.5, 108: 0.25, 36: 0.375, 116: 1.25, 120: 0.75, 220: 1.5, 224: 20.5, 228: 2.25, 236: 0.125 };
+  const unsigned = { 20: 7, 24: 8, 32: 9, 84: 10, 96: 1, 100: 11, 104: 1, 88: 0, 112: 16, 124: 17, 216: 18, 232: 0, 48: 21, 52: 22, 56: 23, 60: 24, 64: 25 };
+  for (const [offset, value] of Object.entries(floats)) assert.equal(view.getFloat32(Number(offset), true), value, `float at ${offset}`);
+  for (const [offset, value] of Object.entries(unsigned)) assert.equal(view.getUint32(Number(offset), true), value, `u32 at ${offset}`);
+});
+
+test('the unwritten bytes stay zero: 68 to 79 padding, 160 and 164 to 191 gate rows when no gates are given, and the tail past 240 does not exist', () => {
+  const view = new DataView(packSimParams({ spawnPerSpecies: [1, 1, 1, 1, 1] }));
+  for (let offset = 68; offset < 80; offset += 4) assert.equal(view.getUint32(offset, true), 0, `offset ${offset}`);
+  for (let offset = 128; offset < 208; offset += 4) assert.equal(view.getUint32(offset, true), 0, `offset ${offset}`);
+  assert.equal(view.byteLength, 240);
+  assert.throws(() => view.getUint32(240, true), RangeError);
+});
+
+test('the packed defaults when nothing is given pin the omitted-field values by offset', () => {
+  const view = new DataView(packSimParams({}));
+  assert.equal(view.getUint32(88, true), 1, 'sameSpeciesCohesion');
+  assert.equal(view.getFloat32(108, true), 1, 'seekScale');
+  assert.equal(view.getFloat32(36, true), 0.25, 'spawnDistanceFraction');
+  assert.equal(view.getUint32(112, true), 12, 'killBurstParticles');
+  assert.equal(view.getFloat32(116, true), Math.fround(0.6), 'spawnBandWidth');
+  assert.equal(view.getFloat32(120, true), 0.5, 'spawnDensityBias');
+  assert.equal(view.getUint32(124, true), 3, 'killFragmentParticles');
+  assert.equal(view.getUint32(216, true), 0, 'deathFloodParticles');
+  assert.equal(view.getFloat32(220, true), 0.5, 'wallMargin');
+  assert.equal(view.getFloat32(224, true), 40, 'wallStiffness');
+  assert.equal(view.getFloat32(228, true), 1, 'comfortRadius');
+  assert.equal(view.getUint32(232, true), 1, 'coarseFieldPressure');
+  assert.equal(view.getFloat32(236, true), 0, 'projectileDt follows dt');
+  assert.equal(DEFAULT_DEATH_FLOOD_PARTICLES, 480);
+  assert.equal(SIM_PARAMS_GATES, 4);
+});
+
+test('projectileDt follows dt when omitted and an explicit zero is kept', () => {
+  assert.equal(new DataView(packSimParams({ dt: 0.02 })).getFloat32(236, true), Math.fround(0.02));
+  assert.equal(new DataView(packSimParams({ dt: 0.02, projectileDt: 0 })).getFloat32(236, true), 0);
+  assert.equal(new DataView(packSimParams({ dt: 0.02, projectileDt: 0.05 })).getFloat32(236, true), Math.fround(0.05));
+});
+
+test('the gate table packs four rows in order and a species per gate', () => {
+  const gates = [0, 1, 2, 3].map((index) => ({ x: index + 0.5, y: index + 10, radius: 0.25 * (index + 1), emit: index % 2, species: 4 - index }));
+  const view = new DataView(packSimParams({ spawnGates: { gates, speciesBias: 0.25 } }));
+  gates.forEach((gate, index) => {
+    assert.deepEqual([0, 4, 8, 12].map((component) => view.getFloat32(128 + index * 16 + component, true)), [gate.x, gate.y, gate.radius, gate.emit]);
+    assert.equal(view.getUint32(192 + index * 4, true), gate.species);
+  });
+  assert.equal(view.getUint32(208, true), 4);
+  assert.equal(view.getFloat32(212, true), 0.25);
+});
+
+test('the range constants and defaults are pinned by value', () => {
+  assert.deepEqual(
+    [DEFAULT_KILL_BURST_PARTICLES, MAXIMUM_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, MAXIMUM_KILL_FRAGMENT_PARTICLES, MAXIMUM_DEATH_FLOOD_PARTICLES],
+    [12, 64, 3, 16, 4096],
+  );
+  assert.deepEqual(
+    [DEFAULT_WALL_MARGIN, MAXIMUM_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, MAXIMUM_WALL_STIFFNESS, DEFAULT_COMFORT_RADIUS, MAXIMUM_COMFORT_RADIUS],
+    [0.5, 2, 40, 160, 1, 4],
+  );
+  assert.deepEqual([DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS], [0.6, 0.5]);
 });

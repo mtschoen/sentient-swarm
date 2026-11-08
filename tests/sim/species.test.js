@@ -39,3 +39,41 @@ test('normalizeShares treats NaN and non-finite shares as zero and falls back to
   assert.deepEqual(Array.from(normalizeShares([NaN, Infinity, -Infinity, NaN, undefined])), Array(5).fill(Math.fround(0.2)));
   assert.deepEqual(Array.from(normalizeShares([0, 0, 0, 0, 0])), Array(5).fill(Math.fround(0.2)));
 });
+
+test('every default species row has finite numeric fields, a unit hue and positive speed limits', () => {
+  for (const row of defaultSpecies()) {
+    for (const field of SPECIES_FIELDS) {
+      assert.equal(typeof row[field], 'number', `${row.name} ${field}`);
+      assert.ok(Number.isFinite(row[field]), `${row.name} ${field}`);
+    }
+    assert.ok(row.hue >= 0 && row.hue < 1, `${row.name} hue`);
+    assert.ok(row.maximumSpeed > 0 && row.maximumTurn > 0 && row.targetDensity > 0, row.name);
+    assert.ok(row.seek >= 0 && row.separation >= 0, row.name);
+  }
+});
+
+test('the packed default table and the default matrix are finite', () => {
+  const table = packSpeciesTable(defaultSpecies(), defaultMatrix());
+  assert.ok(Array.from(table).every(Number.isFinite));
+  assert.ok(Array.from(defaultMatrix()).every(Number.isFinite));
+  assert.equal(defaultMatrix().length, 25);
+});
+
+test('the default rows pin their starting numbers', () => {
+  const pinned = {
+    Chaser: [0.02, 1.0, 0.9, 0.5, 0.3, 4.0, 0.6, 0, 0, 0.5, 24],
+    Orbiter: [0.55, 0.5, 0.3, 0.9, 0.3, 3.0, 0.5, 2.4, 0, 0.2, 18],
+    Skittish: [0.15, 0.5, 0.9, 0.4, 0.3, 5.0, 0.8, 0, 2.0, 0.5, 30],
+    Lattice: [0.75, 0.15, 0.1, 0.9, 1.8, 2.0, 0.3, 0, 0, 1.0, 24],
+    Predator: [0.92, 0.2, 0.2, 0.3, 0.4, 4.5, 0.7, 0, 0, 0.5, 16],
+  };
+  const fields = ['hue', 'seek', 'cohesion', 'alignment', 'separation', 'maximumSpeed', 'maximumTurn', 'orbitRadius', 'flee', 'pressure', 'targetDensity'];
+  for (const row of defaultSpecies()) assert.deepEqual(fields.map((field) => row[field]), pinned[row.name], row.name);
+});
+
+test('the default matrix has the predator rows only', () => {
+  const matrix = defaultMatrix();
+  const nonzero = Array.from(matrix).map((value, index) => [index, value]).filter(([, value]) => value !== 0);
+  assert.deepEqual(nonzero.map(([index]) => index), [20, 22, 23]);
+  assert.deepEqual(nonzero.map(([, value]) => value), [0.8, 0.8, -0.6].map(Math.fround));
+});
