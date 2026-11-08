@@ -2,8 +2,8 @@
 // ?probe=off, fresh storage), so it starts at the desktop preset; clicks to start the run, then
 // feeds the real QualityController slow frame times (onFrame, injected time) until the probe's
 // first 'down' halves the particle budget and lowers bloom, and its second 'down' steps the
-// preset to phoneHigh mid-run. Checks: the alive agents carried across the swap within 5 percent,
-// the preset persisted, no console errors or device loss, and the next 10 frames all render
+// preset to phoneHigh mid-run. Checks: the carried count is exact (below), alive 10 frames after
+// the install stays under 1.05 times the alive target, the preset persisted, no console errors or device loss, and the next 10 frames all render
 // (the renderer drew each one and the frame counter advanced). Reports the longest frame and the
 // longest time the simulation did not step across the swap. Then applies phoneLow (half
 // simulation rate, interpolated glyphs) and checks 10 more frames render.
@@ -13,25 +13,49 @@
 // below the probe's down threshold (FrameTimeProbe defaults: 10 ms x 1.35), so a healthy device
 // is not stepped down by a timer that tracks the vsync interval; it also reports the 'up'
 // threshold (10 ms x 0.6) and the median requestAnimationFrame interval.
+// The carry is counted exactly: the page wraps the swap's commit and install and copies agent
+// buffers to MAP_READ buffers in queue order, counting alive flags: O, the old simulation's alive
+// agents just before the commit; N, the new simulation's right after the install, before its first
+// step; A, the first stats frame after the install. The gate is N within 0.5 percent of
+// min(O, 131072). The former gate (the first stats frame after the commit against min(alive of the
+// last record before the install, 131072), within 5 percent) compared two counts the compaction
+// never saw: the reference was 1 to 3 steps stale, so spawns requested in flight joined the
+// numerator. Task D8 (2026-11-07, desktop RTX, other lanes loading the GPU, prepare 13 to 37 ms,
+// longest frame 18 to 23 ms): 5 as-is runs O 1187 1138 1342 1138 1138, N equal to O in all,
+// old ratio 1.073 1.169 1.047 1.169 1.072, the rise A minus the old reference (83 169 60 169 78)
+// exactly the spawns requested after the reference's stats; 5 held runs (--hold-spawns) O 1044
+// 1044 1044 1044 1138, N and A equal to O, old ratio 1.000, 61 to 62 requests totalling 0.
+// --hold-spawns holds SpawnPressure at target 0 from HOLD_STEPS steps before the commit to
+// HOLD_STEPS after and asserts no request spawned and A is at most 1 percent over N (agents that
+// appear with spawning stopped are a carry bug); without it the target bound is checked instead.
 // Writes artifacts/quality-desktop.png and artifacts/quality-phoneLow.png.
-// Usage: node tests/browser/quality.mjs (SMOKE_PORT picks the server port)
+// Usage: node tests/browser/quality.mjs [--hold-spawns] (SMOKE_PORT picks the server port)
 // Exit codes: 0 pass, 1 failure.
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
 import { FrameTimeProbe } from '../../src/settings/probe.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES } from '../../src/sim/layout.js';
 
 const CHECK_TIMEOUT_MILLISECONDS = 60_000;
 const START_CLICK_HOLD_FRAMES = 5;
 const PLAY_FRAMES_BEFORE_STEP = 120;
 const FRAMES_AFTER_STEP = 10;
-const ALIVE_TOLERANCE = 0.05;
+// N, the alive agents in the new simulation at install, against min(O, new capacity).
+const CARRY_TOLERANCE = 0.005;
+// Alive FRAMES_AFTER_STEP frames after the install stays under this multiple of the alive target.
+const TARGET_BOUND = 1.05;
+// With --hold-spawns, the first stats frame after the install counts at most this much over N.
+const HELD_APPEAR_TOLERANCE = 0.01;
 const CPU_TIMER_FRAMES = 400;
 const PROBE = new FrameTimeProbe();
 const DOWN_THRESHOLD_MILLISECONDS = PROBE.targetMilliseconds * PROBE.downRatio;
 const UP_THRESHOLD_MILLISECONDS = PROBE.targetMilliseconds * PROBE.upRatio;
 const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
+const HOLD_SPAWNS = process.argv.includes('--hold-spawns');
+const HOLD_STEPS = 30;
+const SWAP_PROBE_LAYOUT = { strideWords: AGENT_STRIDE_BYTES / 4, flagsWord: AGENT_OFFSETS.flags / 4, aliveFlag: AGENT_FLAG_ALIVE };
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
 async function writeDataUrl(name, dataUrl) {
@@ -61,6 +85,7 @@ function installRecorder() {
       capacity: game.simulation.capacity,
       statsSequence: game.latestStats?.frameSequence ?? 0,
       alive: game.latestStats?.aliveTotal ?? 0,
+      target: game.activeSpawnPressure.targetAlive,
       drew,
       applying: window.__murmuration.quality.applying,
     });
@@ -69,6 +94,79 @@ function installRecorder() {
   };
   requestAnimationFrame(record);
   window.__qualityRecords = records;
+}
+
+// Page side: wraps the capacity swap's commit and install to count alive agents exactly, by
+// copying agent buffers to MAP_READ buffers in queue order: O, the old simulation's agents as
+// queued just before the commit (what the compaction reads); N, the new simulation's agents right
+// after the install, before its first step (what the compaction carried); A, the alive total of
+// the first stats frame after the install. Only the first swap is measured. Also records every
+// SpawnPressure request (sequence of the step it is for, total) so a hold can be confirmed.
+function installSwapProbe({ strideWords, flagsWord, aliveFlag }) {
+  const { game } = window.__murmuration;
+  const device = game.gpu.device;
+  const probe = { O: null, N: null, A: null, ASequence: null, commitSequence: null, requests: [], pending: [] };
+  window.__swapProbe = probe;
+  const queueCount = (buffer, name) => {
+    const staging = device.createBuffer({ label: 'swap-probe-' + name, size: buffer.size, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const encoder = device.createCommandEncoder({ label: 'swap-probe-' + name });
+    encoder.copyBufferToBuffer(buffer, 0, staging, 0, buffer.size);
+    device.queue.submit([encoder.finish()]);
+    probe.pending.push(staging.mapAsync(GPUMapMode.READ).then(() => {
+      const words = new Uint32Array(staging.getMappedRange());
+      let alive = 0;
+      for (let index = flagsWord; index < words.length; index += strideWords) alive += words[index] & aliveFlag;
+      probe[name] = alive;
+      staging.unmap();
+      staging.destroy();
+    }));
+  };
+  const swap = game.capacitySwap;
+  const commit = swap.commit;
+  const install = swap.install;
+  swap.commit = (prepared) => {
+    if (probe.commitSequence === null) {
+      probe.commitSequence = game.simulation.frameSequence;
+      queueCount(game.simulation.agentsBuffer, 'O');
+    }
+    return commit(prepared);
+  };
+  swap.install = (next) => {
+    install(next);
+    if (probe.pending.length !== 1) return;
+    queueCount(next.agentsBuffer, 'N');
+    const readAllStats = next.readAllStats.bind(next);
+    next.readAllStats = () => {
+      const frames = readAllStats();
+      const first = frames.find((stats) => stats.frameSequence > probe.commitSequence);
+      if (probe.A === null && first) {
+        probe.A = first.aliveTotal;
+        probe.ASequence = first.frameSequence;
+      }
+      return frames;
+    };
+  };
+  const pressure = game.spawnPressure;
+  const update = pressure.update.bind(pressure);
+  pressure.update = (...parameters) => {
+    const counts = update(...parameters);
+    probe.requests.push({ sequence: parameters[3], total: counts.reduce((sum, count) => sum + count, 0) });
+    return counts;
+  };
+}
+
+// Page side: holds spawning (alive target 0, no refill); releaseSpawns restores the ramp. Both
+// return the simulation's frame sequence at the call.
+function holdSpawns() {
+  const pressure = window.__murmuration.game.spawnPressure;
+  window.__heldRamp = { ...pressure.ramp };
+  pressure.setRamp({ floorFraction: 0, ceilingFraction: 0, refillFractionPerSecond: 0 });
+  return window.__murmuration.game.simulation.frameSequence;
+}
+
+function releaseSpawns() {
+  window.__murmuration.game.spawnPressure.setRamp(window.__heldRamp);
+  return window.__murmuration.game.simulation.frameSequence;
 }
 
 // Page side: feeds slow frames until predicate() holds; returns how many it took.
@@ -140,9 +238,6 @@ function analyzeSwap(records, oldCapacity, newCapacity) {
   const installIndex = records.findIndex((entry) => entry.capacity === newCapacity);
   const applyIndex = records.findIndex((entry) => entry.applying);
   if (installIndex < 0 || applyIndex < 0) return { failure: `no install (${installIndex}) or apply (${applyIndex}) in ${records.length} records` };
-  const before = records[installIndex - 1];
-  const commitSequence = records[installIndex].sequence;
-  const after = records.slice(installIndex).find((entry) => entry.statsSequence >= commitSequence && entry.capacity === newCapacity);
   const windowEnd = Math.min(records.length, installIndex + FRAMES_AFTER_STEP + 1);
   let longestFrame = 0;
   for (let index = applyIndex + 1; index < windowEnd; index += 1) longestFrame = Math.max(longestFrame, records[index].time - records[index - 1].time);
@@ -157,8 +252,7 @@ function analyzeSwap(records, oldCapacity, newCapacity) {
   }
   const following = records.slice(installIndex, installIndex + FRAMES_AFTER_STEP);
   return {
-    before,
-    after,
+    later: records[installIndex + FRAMES_AFTER_STEP],
     prepareMilliseconds: records[installIndex].time - records[applyIndex].time,
     longestFrame,
     frozen,
@@ -170,6 +264,10 @@ function analyzeSwap(records, oldCapacity, newCapacity) {
 function framesRender(following) {
   if (following.length < FRAMES_AFTER_STEP) return false;
   return following.every((entry, index) => entry.drew && (index === 0 || entry.frame > following[index - 1].frame));
+}
+
+async function waitSequence(page, sequence) {
+  await page.waitForFunction((target) => window.__murmuration.game.simulation.frameSequence >= target, sequence, { timeout: CHECK_TIMEOUT_MILLISECONDS });
 }
 
 async function waitFrames(page, count) {
@@ -199,6 +297,7 @@ async function run() {
     }));
     expect(start.preset === 'desktop' && start.capacity === 524288, `starts at ${start.preset} with capacity ${start.capacity} (need desktop, 524288), frame timer ${start.timestamps}`);
     await page.evaluate(installRecorder);
+    await page.evaluate(installSwapProbe, SWAP_PROBE_LAYOUT);
     await clickToStart(page);
     await waitFrames(page, PLAY_FRAMES_BEFORE_STEP);
     const phase = await page.evaluate(() => window.__murmuration.stats?.phase);
@@ -209,10 +308,26 @@ async function run() {
     const startSeconds = await page.evaluate(() => performance.now() / 1000 + 1000);
     const first = await page.evaluate(feedSlowFrames, { startSeconds, until: 'reduced' });
     expect(first.frames > 0 && first.particleCapacity === 65536 && first.bloom === 'medium', `first down after ${first.frames} slow frames: particles ${first.particleCapacity} (need 65536), bloom ${first.bloom} (need medium), preset still desktop`);
+    let holdStart = null;
+    if (HOLD_SPAWNS) {
+      holdStart = await page.evaluate(holdSpawns);
+      await waitSequence(page, holdStart + HOLD_STEPS);
+    }
     const second = await page.evaluate(feedSlowFrames, { startSeconds: startSeconds + 10, until: 'applying' });
     expect(second.frames > 0, `second down after ${second.frames} slow frames starts applying phoneHigh`);
     await page.evaluate(() => window.__murmuration.quality.settled);
     await waitFrames(page, FRAMES_AFTER_STEP + 2);
+    await page.waitForFunction(() => window.__swapProbe.A !== null && window.__swapProbe.pending.length >= 2, null, { timeout: CHECK_TIMEOUT_MILLISECONDS });
+    let holdEnd = null;
+    if (HOLD_SPAWNS) {
+      await waitSequence(page, (await page.evaluate(() => window.__swapProbe.commitSequence)) + HOLD_STEPS);
+      holdEnd = await page.evaluate(releaseSpawns);
+    }
+    const probe = await page.evaluate(async () => {
+      const swapProbe = window.__swapProbe;
+      await Promise.all(swapProbe.pending);
+      return { O: swapProbe.O, N: swapProbe.N, A: swapProbe.A, ASequence: swapProbe.ASequence, commitSequence: swapProbe.commitSequence, requests: swapProbe.requests };
+    });
     const applied = await page.evaluate(() => ({
       preset: window.__murmuration.quality.current,
       capacity: window.__murmuration.game.simulation.capacity,
@@ -229,9 +344,19 @@ async function run() {
     if (swap.failure) {
       expect(false, swap.failure);
     } else {
-      const reference = Math.min(swap.before.alive, 131072);
-      const carried = swap.after ? swap.after.alive / reference : 0;
-      expect(swap.after !== undefined && Math.abs(carried - 1) <= ALIVE_TOLERANCE, `alive ${swap.before.alive} before the swap, ${swap.after?.alive ?? 'none'} after (ratio ${carried.toFixed(3)} of ${reference}, need within ${ALIVE_TOLERANCE * 100}%)`);
+      const carriedReference = Math.min(probe.O, 131072);
+      const carryError = probe.N / carriedReference - 1;
+      expect(Math.abs(carryError) <= CARRY_TOLERANCE, `carried ${probe.N} alive agents into the new simulation at install from ${probe.O} queued before the commit (${(carryError * 100).toFixed(3)}% off min(O, 131072) = ${carriedReference}, need within ${CARRY_TOLERANCE * 100}%)`);
+      const appeared = probe.A / probe.N - 1;
+      if (HOLD_SPAWNS) {
+        const heldRequests = probe.requests.filter((entry) => entry.sequence > holdStart && entry.sequence <= holdEnd);
+        const heldTotal = heldRequests.reduce((sum, entry) => sum + entry.total, 0);
+        expect(heldRequests.length >= 2 * HOLD_STEPS && heldTotal === 0, `spawning held from sequence ${holdStart} to ${holdEnd} around the commit at ${probe.commitSequence}: ${heldRequests.length} requests totalling ${heldTotal} (need at least ${2 * HOLD_STEPS}, totalling 0)`);
+        expect(appeared <= HELD_APPEAR_TOLERANCE, `with spawning held, the first stats frame after the install (sequence ${probe.ASequence}) counts ${probe.A} alive against ${probe.N} carried (${(appeared * 100).toFixed(3)}%, need at most ${HELD_APPEAR_TOLERANCE * 100}% more)`);
+      } else {
+        expect(swap.later !== undefined && swap.later.alive < TARGET_BOUND * swap.later.target, `alive ${swap.later?.alive} ${FRAMES_AFTER_STEP} frames after the install against the alive target ${swap.later?.target?.toFixed(0)} (need under ${TARGET_BOUND} times)`);
+      }
+      lines.push(`MEASURED carry: O ${probe.O}, N ${probe.N}, A ${probe.A} (A/N - 1 = ${(appeared * 100).toFixed(3)}%, commit sequence ${probe.commitSequence}, first stats ${probe.ASequence})`);
       expect(framesRender(swap.following), `the ${FRAMES_AFTER_STEP} frames after the install all rendered: frames ${swap.following.map((entry) => entry.frame).join(',')}, drew ${swap.following.map((entry) => (entry.drew ? 1 : 0)).join('')}`);
       lines.push(`MEASURED prepare (apply start to install) ${swap.prepareMilliseconds.toFixed(1)} ms with play running, longest frame from apply start to ${FRAMES_AFTER_STEP} frames after install ${swap.longestFrame.toFixed(1)} ms, longest time without a simulation step ${swap.frozen.toFixed(1)} ms`);
     }
