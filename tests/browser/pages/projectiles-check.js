@@ -39,6 +39,16 @@
 //     dies farther than the reach limit plus the half width from the ship, and some die inside it.
 // (j) final pulse orb segment: an orb that expires on its first step still kills an agent on the
 //     segment it flew that step, before it converts to a ring.
+// (k) beam reversal: a ship at the arena center with agents spread uniformly over radii 1 to 4 on
+//     the full circle; the beam holds at +x for one step, then points exactly -x (and, reseeded,
+//     -x then +x): a 180 degree turn in one step. Each reversal takes the counterclockwise half
+//     disc from the previous direction, so it kills the half below then the half above, 18 bins of
+//     10 degrees each with no empty bin, no alive agent inside the half, no dead agent farther than
+//     the half width from it (the padding along the shared diameter).
+// (l) mixed bullets: two overlapping bullets of different radius and speed spawned in one frame kill
+//     exactly the union of the two kill sets each makes alone (the sets differ both ways: the wide
+//     slow one kills the wider tunnel, the narrow fast one kills farther along), with the alive drop
+//     equal to the kills and one particle burst per killed agent.
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
@@ -238,6 +248,44 @@ async function runOverlapCase(harness) {
     [single > 0 && double === single, `(b) two overlapping bullets kill ${double}, one kills ${single} (need equal)`],
     [dropped === double, `(b) alive drop ${dropped} equals the pair's kills`],
     [cursorDelta === PROJECTILE_KILL_PARTICLES * double, `(b) particle cursor advanced ${cursorDelta} for the pair (need ${PROJECTILE_KILL_PARTICLES} per kill, ${PROJECTILE_KILL_PARTICLES * double})`],
+  ]);
+}
+
+// (l) Two overlapping bullets that differ in radius and speed: the first is narrow and fast (it
+// flies 6 units through the block), the second wide and slow (3 units, so it dies at the block's
+// middle), so neither kill set contains the other.
+const MIXED_NARROW = { ...sweepSpawn(PROJECTILE_KINDS.bullet) };
+const MIXED_WIDE = {
+  ...sweepSpawn(PROJECTILE_KINDS.bullet),
+  radius: 0.12,
+  lifetime: 0.2,
+  velocityX: SWEEP_DIRECTION[0] * 15,
+  velocityY: SWEEP_DIRECTION[1] * 15,
+};
+
+async function killedSlots(harness, spawns) {
+  harness.seedBlock(CENTER);
+  for (const spawn of spawns) harness.projectiles.queueSpawn(spawn);
+  const cursorBefore = await harness.particleCursor();
+  const kills = await harness.steps(SWEEP_FRAMES);
+  const cursorDelta = ((await harness.particleCursor()) - cursorBefore) >>> 0;
+  const alive = await harness.aliveFlags();
+  return { kills, cursorDelta, alive, killed: new Set(alive.flatMap((flag, slot) => (flag ? [] : [slot]))) };
+}
+
+async function runMixedBulletsCase(harness) {
+  const narrow = await killedSlots(harness, [MIXED_NARROW]);
+  const wide = await killedSlots(harness, [MIXED_WIDE]);
+  const both = await killedSlots(harness, [MIXED_NARROW, MIXED_WIDE]);
+  const union = new Set([...narrow.killed, ...wide.killed]);
+  const sameSet = both.killed.size === union.size && [...union].every((slot) => both.killed.has(slot));
+  const wideOnly = [...wide.killed].filter((slot) => !narrow.killed.has(slot)).length;
+  const narrowOnly = [...narrow.killed].filter((slot) => !wide.killed.has(slot)).length;
+  return verdictLine([
+    [wideOnly > 0 && narrowOnly > 0, `(l) the kill sets differ both ways: ${wideOnly} only the wide bullet's, ${narrowOnly} only the narrow one's (need both > 0)`],
+    [sameSet, `(l) the pair kills ${both.killed.size}, the union of the two alone is ${union.size} (${narrow.killed.size} and ${wide.killed.size}; need the same agents)`],
+    [both.kills === both.killed.size, `(l) stats kills ${both.kills} equal the alive drop ${both.killed.size}`],
+    [both.cursorDelta === PROJECTILE_KILL_PARTICLES * both.kills, `(l) particle cursor advanced ${both.cursorDelta} for the pair (need ${PROJECTILE_KILL_PARTICLES} per kill, ${PROJECTILE_KILL_PARTICLES * both.kills})`],
   ]);
 }
 
@@ -525,6 +573,66 @@ async function runFinalSegmentCase(harness) {
   ]);
 }
 
+const REVERSAL_RADII = [1, 4];
+const REVERSAL_BINS = 18;
+
+// Positions uniform by area over radii REVERSAL_RADII on the full circle around the arena center.
+function ringPositions() {
+  const random = seededRandom(4242);
+  return Array.from({ length: AGENT_COUNT }, () => {
+    const radius = Math.sqrt(REVERSAL_RADII[0] ** 2 + random() * (REVERSAL_RADII[1] ** 2 - REVERSAL_RADII[0] ** 2));
+    const angle = random() * 2 * Math.PI;
+    return [Math.fround(CENTER[0] + Math.cos(angle) * radius), Math.fround(CENTER[1] + Math.sin(angle) * radius)];
+  });
+}
+
+// One beam step along `first`, then one along `second` (exact unit vectors, so the turn is exactly
+// 180 degrees), then the frame after the beam stops; returns the kills.
+async function fireBeamDirections(harness, first, second) {
+  let kills = 0;
+  for (const [directionX, directionY] of [first, second]) {
+    harness.projectiles.setBeam({ x: CENTER[0], y: CENTER[1], directionX, directionY, halfWidth: SWEEP_HALF_WIDTH });
+    kills += await harness.step();
+  }
+  harness.projectiles.setBeam(null);
+  return kills + await harness.step();
+}
+
+// A reversal sweeps the counterclockwise half disc from the previous direction: from +x that is the
+// half with y above the ship (side 1), from -x the half below it (side -1). Returns its verdicts.
+async function reversalVerdicts(harness, positions, { label, first, second, side }) {
+  harness.seedPositions(positions);
+  const kills = await fireBeamDirections(harness, first, second);
+  const alive = await harness.aliveFlags();
+  const histogram = new Array(REVERSAL_BINS).fill(0);
+  let aliveInside = 0;
+  let deadOutside = 0;
+  positions.forEach((position, index) => {
+    const offset = (position[1] - CENTER[1]) * side;
+    if (offset >= 0 && alive[index]) aliveInside += 1;
+    // Outside the half disc the nearest point is on the diameter, which the beam's two rays cover.
+    if (offset < 0 && !alive[index] && -offset > SWEEP_HALF_WIDTH + SWEEP_TOLERANCE) deadOutside += 1;
+    if (offset > 0 && !alive[index]) {
+      const fraction = Math.atan2(offset, (position[0] - CENTER[0]) * side) / Math.PI;
+      histogram[Math.min(REVERSAL_BINS - 1, Math.floor(fraction * REVERSAL_BINS))] += 1;
+    }
+  });
+  const dropped = alive.filter((flag) => !flag).length;
+  return [
+    [histogram.every((count) => count > 0), `(k) ${label} kill histogram over ${REVERSAL_BINS} bins [${histogram.join(' ')}] (need no empty bin)`],
+    [aliveInside === 0, `(k) ${label} alive agents inside the half disc ${aliveInside} (need 0)`],
+    [deadOutside === 0, `(k) ${label} dead agents beyond the half width ${SWEEP_HALF_WIDTH} of it ${deadOutside} (need 0)`],
+    [dropped === kills, `(k) ${label} alive drop ${dropped} equals kills ${kills}`],
+  ];
+}
+
+async function runBeamReversalCase(harness) {
+  const positions = ringPositions();
+  const above = await reversalVerdicts(harness, positions, { label: '+x to -x (half above the ship)', first: [1, 0], second: [-1, 0], side: 1 });
+  const below = await reversalVerdicts(harness, positions, { label: '-x to +x (half below the ship)', first: [-1, 0], second: [1, 0], side: -1 });
+  return verdictLine([...above, ...below]);
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   const { device } = gpu;
@@ -539,7 +647,7 @@ async function runCheck() {
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const harness = new Harness(device, simulation, projectiles);
   const entries = [];
-  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase]) {
+  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase, runBeamReversalCase, runMixedBulletsCase]) {
     entries.push(await run(harness));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${entries.map((entry) => entry.detail).join('; ')}` };
   }

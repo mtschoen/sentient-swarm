@@ -208,10 +208,8 @@ async function armFromPanel(page, weapon) {
   const begin = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
   await setSticks(page, [-1, 0, 0, 0]);
   await waitForFrame(page, begin + PLAY_MOVE_FRAMES);
-  await page.keyboard.press('Backquote');
-  await page.locator('select', { has: page.locator(`option[value="${weapon}"]`) }).selectOption(weapon);
-  await page.keyboard.press('Backquote');
-  await page.evaluate(() => document.activeElement?.blur());
+  // The lab's arm select only exists while the lab is open (backquote opens it from the title only), so arm through the same hook it calls.
+  await evaluateWithin(page, 'arming the weapon', (type) => window.__murmuration.game.debugArm(type), weapon);
 }
 
 async function checkPulse(page) {
@@ -236,27 +234,98 @@ const SWEEP_START_DEGREES = -60;
 const SWEEP_DEGREES = 120;
 const SWEEP_TURN_FRAMES = 4;
 const SWEEP_HOLD_FRAMES = 20;
+const SWEEP_BUDGET_DEGREES = 15;
 
 async function checkSweep(page) {
   await armFromPanel(page, 'beam');
+  // The lab sweep budget is on, so the turn shortens the beam. The capture must show the swept step itself
+  // (a later step is a plain full-length line), so the spy on the beam tracker pauses the game right after
+  // the step that reaches the last angle: the paused game draws that step's beam slot unchanged. The spy
+  // keeps that step's spawn (its previous direction, its direction and its reach scale in lifetime).
+  await evaluateWithin(page, 'setting the lab sweep budget', ({ degrees, lastAngleDegrees }) => {
+    const { game } = window.__murmuration;
+    const { projectiles } = game;
+    projectiles.setBeamSweepThreshold(degrees);
+    window.__smokeSweptSpawn = null;
+    const next = projectiles.beamTracker.next.bind(projectiles.beamTracker);
+    projectiles.beamTracker.next = () => {
+      const spawn = next();
+      const lastRadians = (lastAngleDegrees * Math.PI) / 180;
+      if (spawn !== null && window.__smokeSweptSpawn === null && spawn.lifetime < 1 && Math.abs(spawn.velocityY - Math.sin(lastRadians)) < 1e-6) {
+        window.__smokeSweptSpawn = { x: spawn.x, y: spawn.y, velocityX: spawn.velocityX, velocityY: spawn.velocityY, lifetime: spawn.lifetime };
+        game.pause();
+      }
+      return spawn;
+    };
+  }, { degrees: SWEEP_BUDGET_DEGREES, lastAngleDegrees: SWEEP_START_DEGREES + SWEEP_DEGREES });
   const radians = (degrees) => (degrees * Math.PI) / 180;
   await setSticks(page, [0, 0, Math.cos(radians(SWEEP_START_DEGREES)), Math.sin(radians(SWEEP_START_DEGREES))]);
   await waitForFrame(page, (await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame)) + SWEEP_HOLD_FRAMES);
-  const captured = await evaluateWithin(page, 'the sweep capture', ({ start, degrees, frames }) => new Promise((resolve) => {
+  await evaluateWithin(page, 'turning the aim', ({ start, degrees, frames }) => new Promise((resolve) => {
     let frame = 0;
     const turn = () => {
       frame += 1;
       const angle = ((start + (degrees * frame) / frames) * Math.PI) / 180;
       window.__smokeGamepad.axes = [0, 0, Math.cos(angle), Math.sin(angle)];
       if (frame < frames) requestAnimationFrame(turn);
-      else resolve(window.__murmuration.capture());
+      else resolve();
     };
     requestAnimationFrame(turn);
   }), { start: SWEEP_START_DEGREES, degrees: SWEEP_DEGREES, frames: SWEEP_TURN_FRAMES });
-  await setSticks(page, [0, 0, 0, 0]);
+  await page.waitForFunction(() => window.__smokeSweptSpawn !== null, null, { timeout: READY_TIMEOUT_MILLISECONDS });
+  const captured = await evaluateWithin(page, 'the sweep capture', () => window.__murmuration.capture());
   await writeDataUrl('beam-sweep.png', captured.pngDataUrl);
   console.log(`smoke: beam sweep captured, arena mean ${captured.meanLuminance.toFixed(4)}`);
+  const reach = await evaluateWithin(page, 'measuring the drawn beam reach', measureBeamReach, captured);
+  console.log(`smoke: beam sweep reach scale ${reach.scale.toFixed(3)}, kill reach ${reach.killReach.toFixed(3)}, drawn reach ${reach.drawnReach.toFixed(3)} world units (full reach ${reach.fullReach.toFixed(3)})`);
+  if (!(reach.scale < 1) || Math.abs(reach.drawnReach - reach.killReach) > reach.coarseCell) {
+    return `smoke: expected the drawn beam reach ${reach.drawnReach.toFixed(3)} within one coarse cell (${reach.coarseCell}) of the shortened kill reach ${reach.killReach.toFixed(3)} (scale ${reach.scale})`;
+  }
   return page.consoleErrors.length > 0 ? `smoke: console errors during the sweep capture: ${page.consoleErrors.join(' | ')}` : null;
+}
+
+// Runs in the page. The kill reach is the beam slot's reach scale times the current ray's length to
+// the arena edge (projectiles_collide.wgsl); the drawn reach is how far along that ray the capture
+// stays at least half as bright as it is near the ship (the beam core is far brighter than the fan).
+async function measureBeamReach(captured) {
+  const { arenaRect } = captured;
+  const { arenaWidth, arenaHeight } = window.__murmuration.arenaRect();
+  const spawn = window.__smokeSweptSpawn;
+  const toEdge = (origin, direction) => {
+    let nearest = Infinity;
+    if (direction.x > 0) nearest = Math.min(nearest, (arenaWidth - origin.x) / direction.x);
+    if (direction.x < 0) nearest = Math.min(nearest, -origin.x / direction.x);
+    if (direction.y > 0) nearest = Math.min(nearest, (arenaHeight - origin.y) / direction.y);
+    if (direction.y < 0) nearest = Math.min(nearest, -origin.y / direction.y);
+    return nearest;
+  };
+  const direction = { x: spawn.velocityX, y: spawn.velocityY };
+  const fullReach = toEdge(spawn, direction);
+  const killReach = spawn.lifetime * fullReach;
+  const image = new Image();
+  await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = captured.pngDataUrl; });
+  const canvas = document.createElement('canvas');
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const context = canvas.getContext('2d');
+  context.drawImage(image, 0, 0);
+  const pixelsPerUnit = arenaRect.width / arenaWidth;
+  const luminanceAt = (distance) => {
+    const x = Math.round(arenaRect.x + (spawn.x + direction.x * distance) * pixelsPerUnit);
+    const y = Math.round(arenaRect.y + (spawn.y + direction.y * distance) * pixelsPerUnit);
+    const [red, green, blue] = context.getImageData(x, y, 1, 1).data;
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  };
+  const sampleStep = 0.02;
+  const nearSamples = [];
+  for (let distance = 0.5; distance <= 1; distance += sampleStep) nearSamples.push(luminanceAt(distance));
+  nearSamples.sort((first, second) => first - second);
+  const threshold = nearSamples[Math.floor(nearSamples.length / 2)] / 2;
+  let drawnReach = 0;
+  for (let distance = 0.5; distance <= fullReach; distance += sampleStep) {
+    if (luminanceAt(distance) >= threshold) drawnReach = distance;
+  }
+  return { scale: spawn.lifetime, killReach, fullReach, drawnReach, coarseCell: arenaWidth / 64 };
 }
 
 // Replaces navigator.getGamepads, before any page script runs, with one standard pad whose axes
