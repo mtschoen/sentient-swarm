@@ -90,7 +90,11 @@ export function createHud(rootElement, {
   pauseButton.setAttribute('aria-label', 'Pause');
   pauseButton.setAttribute('data-touch-exclusive', '');
   pauseButton.hidden = true;
-  pauseButton.addEventListener('click', () => onPause?.());
+  pauseButton.addEventListener('click', () => {
+    // A focused button would take the next Space or Enter as a click, re-pausing the resumed run.
+    pauseButton.blur?.();
+    onPause?.();
+  });
   
   rootElement.append(leftPanel, rightPanel, settingsButton, pauseButton, toast, gameOver);
 

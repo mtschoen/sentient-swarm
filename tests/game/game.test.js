@@ -934,3 +934,14 @@ test('quitToTitle returns to Ready with a fresh score, and a restart works', asy
   assert.equal(game.state.phase, RunPhase.Playing);
   assert.equal(game.state.lives, 3);
 });
+
+test('quitToTitle with the bomb held does not restart the run before the menu owns the start', async () => {
+  const { game, input } = await createGame();
+  game.start();
+  game.update(STEP);
+  game.pause();
+  input.state.bomb = true;
+  game.quitToTitle();
+  game.update(STEP);
+  assert.equal(game.state.phase, RunPhase.Ready);
+});

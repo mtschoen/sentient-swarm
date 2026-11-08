@@ -184,6 +184,8 @@ export class Game {
     this.paused = false;
     this.resetModules();
     this.run = new RunState();
+    // The title menu takes over the start; the confirming press (Space, a face button) must not start the run.
+    this.startsOnGesture = false;
   }
 
   // Freezes the run; returns whether it paused (Ready and GameOver have nothing to freeze).

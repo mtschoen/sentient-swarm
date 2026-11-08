@@ -2,7 +2,7 @@
 // Mouse and touch click the buttons; the keyboard and gamepad drive the same list through
 // handleAction(action) with the actions from src/input/menuInput.js ('up', 'down', 'confirm',
 // 'altConfirm', 'back'). Focus wraps, hovering a button moves it, and show() resets it to the first
-// item. A hidden menu ignores everything. The title menu (createMenu) also starts play on any tap
+// item; Enter or Space after only hovering still means the primary item. A hidden menu ignores everything. The title menu (createMenu) also starts play on any tap
 // on the arena behind the buttons and on a non-primary face button; Lab and Settings never start
 // play. Callers hide the menu themselves once the run has started.
 function buildMenu({ documentObject, className, title, items, onBackdrop = null, onAltConfirm = null, onBack = null }) {
@@ -18,6 +18,8 @@ function buildMenu({ documentObject, className, title, items, onBackdrop = null,
   const list = make('div', 'menu-list');
   element.append(list);
   let focusIndex = 0;
+  // Focus follows the pointer, but the keyboard and gamepad confirm means the primary item until they move.
+  let focusFromPointer = false;
   let visible = true;
 
   const buttons = items.map(({ label, primary, action }, index) => {
@@ -34,6 +36,7 @@ function buildMenu({ documentObject, className, title, items, onBackdrop = null,
     });
     button.addEventListener('pointerenter', () => {
       focusIndex = index;
+      focusFromPointer = true;
       renderFocus();
     });
     list.append(button);
@@ -60,6 +63,7 @@ function buildMenu({ documentObject, className, title, items, onBackdrop = null,
       visible = true;
       element.hidden = false;
       focusIndex = 0;
+      focusFromPointer = false;
       renderFocus();
     },
     hide() {
@@ -68,6 +72,12 @@ function buildMenu({ documentObject, className, title, items, onBackdrop = null,
     },
     handleAction(action) {
       if (!visible) return;
+      if (focusFromPointer && action === 'confirm') {
+        focusFromPointer = false;
+        const primaryIndex = items.findIndex((item) => item.primary);
+        if (primaryIndex >= 0) focusIndex = primaryIndex;
+      }
+      if (action === 'down' || action === 'up') focusFromPointer = false;
       if (action === 'down') focusIndex = (focusIndex + 1) % buttons.length;
       else if (action === 'up') focusIndex = (focusIndex + buttons.length - 1) % buttons.length;
       else if (action === 'confirm') items[focusIndex].action();

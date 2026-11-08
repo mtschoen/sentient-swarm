@@ -168,3 +168,14 @@ test('the pause button calls onPause, shows only while a run is live, and is exc
   hud.update({ ...STATE, phase: 'gameOver' });
   assert.equal(pauseButton.hidden, true);
 });
+
+test('the pause button is blurred after a click so Space cannot re-click it', () => {
+  const documentObject = createFakeDocument();
+  const root = documentObject.createElement('div');
+  createHud(root, { documentObject, now: () => 0, onPause: () => {} });
+  const pauseButton = find(root, 'hud-pause');
+  let blurs = 0;
+  pauseButton.blur = () => { blurs += 1; };
+  pauseButton.fire('click');
+  assert.equal(blurs, 1);
+});

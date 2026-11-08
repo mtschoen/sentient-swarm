@@ -121,3 +121,16 @@ test('the pause menu lists Resume, Settings, Restart run and Quit to title, and 
   menu.handleAction('back');
   assert.deepEqual(calls, ['restart', 'quit', 'resume']);
 });
+
+test('Enter or Space after hovering Lab still means Play, and arrow keys take over from the hover', () => {
+  const { menu, calls } = titleMenu();
+  button(menu, 'Lab').fire('pointerenter');
+  assert.equal(focusedLabel(menu), 'Lab');
+  menu.handleAction('confirm');
+  assert.deepEqual(calls, { start: 1, lab: 0, settings: 0 });
+  menu.show();
+  button(menu, 'Lab').fire('pointerenter');
+  menu.handleAction('down');
+  menu.handleAction('confirm');
+  assert.equal(calls.settings, 1, 'the keyboard moves from the hovered item and confirms the focused one');
+});
