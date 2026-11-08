@@ -39,9 +39,15 @@ function weaponText(armed, tier) {
   return `${armed.toUpperCase()} ${ROMAN[tier] ?? tier}`;
 }
 
+const PAUSE_BUTTON_SIZE_CSS_PIXELS = 34;
+// Phases in which the pause button shows (pausing a Ready or GameOver screen means nothing).
+const PAUSABLE_PHASES = new Set(['playing', 'dying', 'respawning']);
+
+// onPause: the pause button's click (main.js asks the game to pause and opens the pause menu).
 export function createHud(rootElement, {
   documentObject = document,
   now = () => performance.now(),
+  onPause = null,
 } = {}) {
   const make = (tagName, className, textContent = '') => {
     const created = documentObject.createElement(tagName);
@@ -78,7 +84,15 @@ export function createHud(rootElement, {
   settingsButton.setAttribute('data-touch-exclusive', '');
   settingsButton.setAttribute('aria-label', 'Settings');
   const toast = make('div', 'hud-toast');
-  rootElement.append(leftPanel, rightPanel, settingsButton, toast, gameOver);
+  
+  // Top centre of the arena, clear of both panels' text; excluded from touch sticks like the panels.
+  const pauseButton = make('button', 'hud-pause', 'II');
+  pauseButton.setAttribute('aria-label', 'Pause');
+  pauseButton.setAttribute('data-touch-exclusive', '');
+  pauseButton.hidden = true;
+  pauseButton.addEventListener('click', () => onPause?.());
+  
+  rootElement.append(leftPanel, rightPanel, settingsButton, pauseButton, toast, gameOver);
 
   // Skip DOM writes for unchanged text: update runs every rendered frame.
   const lastText = new Map();
@@ -118,6 +132,7 @@ export function createHud(rootElement, {
     update(state) {
       setText(score, groupDigits(state.score ?? 0));
       setText(multiplier, `x${state.multiplier ?? 1}`);
+      pauseButton.hidden = !PAUSABLE_PHASES.has(state.phase);
       setText(weapon, weaponText(state.armed, state.tier));
       setText(lives, LIFE_ICON.repeat(Math.max(0, state.lives ?? 0)));
       setText(bombs, BOMB_ICON.repeat(Math.max(0, state.bombs ?? 0)));
@@ -146,6 +161,8 @@ export function createHud(rootElement, {
       const fontSizes = bandFontSizes(Math.min(leftWidth, rightWidth));
       const bands = Object.values(fontSizes).every((size) => size >= MINIMUM_BAND_FONT_CSS_PIXELS);
       const mode = bands ? 'bands' : 'top';
+      pauseButton.style.left = `${arenaRect.x + arenaRect.width / 2 - PAUSE_BUTTON_SIZE_CSS_PIXELS / 2}px`;
+      pauseButton.style.top = `${arenaRect.y + 4}px`;
       for (const panel of [leftPanel, rightPanel]) {
         panel.classList.remove('hud-bands');
         panel.classList.remove('hud-top');

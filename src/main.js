@@ -1,7 +1,7 @@
 import { createGpuContext, describeUnsupported, WebGpuUnavailableError } from './gpu/device.js';
 import { Simulation } from './sim/simulation.js';
 import { FrameLoop } from './game/loop.js';
-import { Game } from './game/game.js';
+import { Game, RESTART_GUARD_SECONDS } from './game/game.js';
 import { createInput } from './input/input.js';
 import { Viewport } from './render/viewport.js';
 import { Renderer } from './render/renderer.js';
@@ -26,6 +26,12 @@ import {
 
 const SETTINGS_KEY_CODE = 'KeyO';
 const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
+import { createMenu, createPauseMenu } from './ui/menu.js';
+import { createRotateOverlay } from './ui/rotateOverlay.js';
+import { createMenuInput } from './input/menuInput.js';
+
+// The debug panel is the Lab until the lab mode lands (Plan C task C6b): its toggle key.
+const LAB_PLACEHOLDER_KEY = '`';
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
 
@@ -45,7 +51,8 @@ async function boot() {
   }
 
   const viewport = new Viewport();
-  const hud = createHud(document.getElementById('hud'));
+  // The pause button asks for the same pause menu as Escape; requestPause is defined with the game.
+  const hud = createHud(document.getElementById('hud'), { onPause: () => requestPause() });
   let renderer = null;
   // The HUD lives in CSS pixels; the viewport rectangle is in device pixels.
   const layoutHud = () => {
@@ -163,10 +170,80 @@ async function boot() {
   const update = (fixedStep) => {
     game.update(fixedStep);
     if (game.latestStats) window.__murmuration.stats = { ...game.latestStats, ...game.state };
-    audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity, phase: game.run.phase, multiplier: game.score.multiplier });
+    if (!game.paused) audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity, phase: game.run.phase, multiplier: game.score.multiplier });
   };
 
   const touchOverlay = createTouchOverlay(document.getElementById('touch-overlay'), { touch: input.touch, canvas });
+
+  // Menus (owner ruling R17). The title menu is the one input from load to play: its buttons, a tap
+  // on the arena, Enter, Space or a gamepad face button start the run, and audio unlocks inside
+  // that same handler. While it shows the game does not start on stray movement (a menu cursor must
+  // not start the run), and the swarm keeps running behind it. The pause menu (Escape, the HUD
+  // button, Options, blur, a hidden tab) freezes the run and ducks the music; the rotate overlay
+  // pauses the run too, without a menu, and resumes it when the phone turns back.
+  const settingsOpen = () => window.__murmuration.settings?.isOpen === true;
+  const openSettings = () => window.__murmuration.settings?.open?.();
+  const openLab = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: LAB_PLACEHOLDER_KEY }));
+  const startRun = () => {
+    if (game.run.phase !== 'ready') return;
+    audio.unlock();
+    game.start();
+    menu.hide();
+  };
+  const restartFromGameOver = () => {
+    audio.unlock();
+    game.restart();
+  };
+  const resumeGame = () => {
+    pausedByRotate = false;
+    pauseMenu.hide();
+    game.resume();
+    audio.setPaused(false);
+  };
+  const pauseForMenu = () => {
+    if (game.paused && !pausedByRotate) return;
+    if (!game.paused && !game.pause()) return;
+    pausedByRotate = false;
+    audio.setPaused(true);
+    pauseMenu.show();
+  };
+  const menu = createMenu({ onStart: startRun, onLab: openLab, onSettings: openSettings });
+  const pauseMenu = createPauseMenu({
+    onResume: resumeGame,
+    onSettings: openSettings,
+    onRestart: () => {
+      resumeGame();
+      restartFromGameOver();
+    },
+    onQuit: () => {
+      resumeGame();
+      game.quitToTitle();
+      menu.show();
+    },
+  });
+  pauseMenu.hide();
+  document.getElementById('menu').append(menu.element, pauseMenu.element);
+  const rotateOverlay = createRotateOverlay({ isMobile: detectMobile() });
+  document.getElementById('rotate-overlay').append(rotateOverlay.element);
+  const menuInput = createMenuInput();
+  let pausedByRotate = false;
+  let rotateShowing = false;
+
+  function requestPause() {
+    if (rotateShowing || settingsOpen()) return;
+    if (game.paused && pauseMenu.visible) resumeGame();
+    else pauseForMenu();
+  }
+  window.addEventListener('blur', pauseForMenu);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) pauseForMenu(); });
+
+  const dispatchMenuAction = (action, phase) => {
+    if (action === 'pause') requestPause();
+    else if (pauseMenu.visible) pauseMenu.handleAction(action);
+    else if (menu.visible) menu.handleAction(action);
+    else if (phase === 'gameOver' && (action === 'confirm' || action === 'altConfirm') && game.gameOverSeconds > RESTART_GUARD_SECONDS) restartFromGameOver();
+  };
+
   let gameOverShown = false;
   const render = (alpha, deltaSeconds) => {
     game.render(alpha, deltaSeconds);
@@ -175,12 +252,24 @@ async function boot() {
     touchOverlay.update(state);
     lifeWatcher.update(state);
     const isGameOver = state.phase === 'gameOver';
-    if (isGameOver && !gameOverShown) hud.showGameOver(state.score, () => {
-      audio.unlock();
-      game.restart();
-    });
+    if (isGameOver && !gameOverShown) hud.showGameOver(state.score, restartFromGameOver);
     else if (!isGameOver && gameOverShown) hud.hideGameOver();
     gameOverShown = isGameOver;
+
+    const rotating = rotateOverlay.update();
+    if (rotating && !rotateShowing && game.pause()) {
+      pausedByRotate = true;
+      audio.setPaused(true);
+    } else if (!rotating && rotateShowing && pausedByRotate) {
+      resumeGame();
+    }
+    rotateShowing = rotating;
+    if (state.phase !== 'ready' && menu.visible) menu.hide();
+    game.startsOnGesture = !menu.visible;
+    // Gamepad edges and key presses are consumed every frame so none go stale; only a free screen acts on them.
+    const actions = menuInput.poll();
+    if (!rotating && !settingsOpen()) actions.forEach((action) => dispatchMenuAction(action, state.phase));
+
     window.__murmuration.frame = loop.frameCount;
     window.__murmuration.ready = true;
   };

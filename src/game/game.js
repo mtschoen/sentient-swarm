@@ -3,7 +3,13 @@
 // with player contact off) until start(), or until the first gesture: a press of fire, bomb, a
 // movement key or stick, or any touch (the spec's one tap, click or button press). At GameOver a
 // fresh fire or bomb press restarts once RESTART_GUARD_SECONDS of game time have passed (the
-// HUD's Play again button covers mouse and touch). One update is one step:
+// HUD's Play again button covers mouse and touch). pause() freezes the run (Playing, Dying or
+// Respawning only; Ready and GameOver have nothing to freeze): update() then returns at once, so no
+// step, stats read, hit, timer or score moves and every sequence guard stays as it was; stats a step
+// already submitted are read, and a hit in flight is honored or ignored by the usual rules, after
+// resume(). state.phase reads 'paused' meanwhile. startsOnGesture (default true) is switched off
+// by the title menu, which then owns the start (a menu cursor must not start the run). One update
+// is one step:
 //   1. input.update and read input.state (a gesture starts or restarts the run); a rising bomb
 //      edge that run.useBomb accepts calls simulation.requestKillAll before this step, so the
 //      bomb kills before projectiles and contact.
@@ -106,6 +112,8 @@ export class Game {
     this.lastHitSequenceRead = 0;
     this.bombHeld = false;
     this.firingHeld = false;
+    this.paused = false;
+    this.startsOnGesture = true;
     // Game time spent in GameOver, for the restart guard.
     this.gameOverSeconds = 0;
     this.pendingImpulses = [];
@@ -146,7 +154,7 @@ export class Game {
       tier: this.weapons.tier,
       charge: this.weapons.charge,
       offeredType: this.pickups.offeredType,
-      phase: this.run.phase,
+      phase: this.paused ? 'paused' : this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
       playerX: this.player.position.x,
       playerY: this.player.position.y,
@@ -164,9 +172,39 @@ export class Game {
   }
 
   beginRun() {
+    this.paused = false;
+    this.resetModules();
+    this.run.start();
+    this.bombHeld = true;
+  }
+
+  // Back to the title: every module reset and the run in Ready again (the arena is cleared once,
+  // the swarm keeps running behind the menu). Sequence guards stay monotonic as in beginRun.
+  quitToTitle() {
+    this.paused = false;
+    this.resetModules();
+    this.run = new RunState();
+  }
+
+  // Freezes the run; returns whether it paused (Ready and GameOver have nothing to freeze).
+  pause() {
+    const phase = this.run.phase;
+    if (this.paused || phase === RunPhase.Ready || phase === RunPhase.GameOver) return false;
+    this.paused = true;
+    return true;
+  }
+
+  // A button or key held through the pause needs a fresh press, as after a restart.
+  resume() {
+    if (!this.paused) return;
+    this.paused = false;
+    this.bombHeld = true;
+    this.firingHeld = true;
+  }
+
+  resetModules() {
     this.score.reset();
     this.awards = new Awards();
-    this.run.start();
     this.weapons.dropAll();
     this.pickups.reset();
     this.player.respawn();
@@ -180,8 +218,6 @@ export class Game {
     this.lastScoredFrameSequence = Math.max(this.lastScoredFrameSequence, this.simulation.frameSequence);
     this.pendingImpulses = [];
     this.gameOverSeconds = 0;
-    // A bomb button held through the restart needs a fresh press.
-    this.bombHeld = true;
   }
 
   // 'full' steps the simulation every update, 'half' every other update with twice the delta (the
@@ -196,16 +232,17 @@ export class Game {
 
   // The quality probe measures only real play: Playing, with no capacity change in flight.
   get acceptsProbeFrames() {
-    return this.run.phase === RunPhase.Playing && !this.capacitySwap.pending;
+    return this.run.phase === RunPhase.Playing && !this.paused && !this.capacitySwap.pending;
   }
 
   update(deltaSeconds) {
     this.freshStats = null;
+    if (this.paused) return;
     this.input.update();
     const inputState = this.input.state;
     const firingPressed = inputState.firing && !this.firingHeld;
     this.firingHeld = inputState.firing;
-    if (this.run.phase === RunPhase.Ready && isGesture(inputState)) this.start();
+    if (this.run.phase === RunPhase.Ready && this.startsOnGesture && isGesture(inputState)) this.start();
     else if (this.run.phase === RunPhase.GameOver) this.updateGameOver(deltaSeconds, firingPressed || (inputState.bomb && !this.bombHeld));
 
     const bombPressed = inputState.bomb && !this.bombHeld;

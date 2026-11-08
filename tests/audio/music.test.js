@@ -267,3 +267,52 @@ test('setMuted silences music and effects together and restores both', () => {
   assert.equal(engine.musicVolume, DEFAULT_MUSIC_VOLUME);
   assert.equal(engine.effectsVolume, DEFAULT_EFFECTS_VOLUME);
 });
+
+// Owner ruling R17 (Plan C task C4): the music ducks while the game is paused.
+function duckNodes(context) {
+  const filter = context.nodes.find((node) => node.kind === 'filter' && node.outputs.some((target) => target.kind === 'gain' && target.outputs.includes(engineMusicOutput(context))));
+  return filter ? { filter, gain: filter.outputs.find((target) => target.kind === 'gain') } : null;
+}
+function engineMusicOutput(context) {
+  // The music output is the gain whose gain was set to the default music volume at construction.
+  return context.nodes.find((node) => node.kind === 'gain' && node.gain.events[0]?.value === DEFAULT_MUSIC_VOLUME);
+}
+const lastTarget = (param) => param.events.filter((event) => event.kind === 'target').at(-1);
+
+test('setPaused ramps a lowpass and the gain down in about 150 ms and back up on resume', () => {
+  const { context, music } = startedMusic(0.5);
+  const duck = duckNodes(context);
+  assert.ok(duck, 'a duck filter and gain sit between the music bus and the music output');
+  context.currentTime = 4;
+  music.setPaused(true);
+  const closedFilter = lastTarget(duck.filter.frequency);
+  const closedGain = lastTarget(duck.gain.gain);
+  assert.ok(closedFilter.value < 1000, `the lowpass closes (${closedFilter.value} Hz)`);
+  assert.ok(closedGain.value < 1 && closedGain.value > 0, `the gain drops but does not mute (${closedGain.value})`);
+  assert.equal(closedFilter.time, 4);
+  assert.ok(closedFilter.extra * 3 <= 0.16 && closedFilter.extra * 3 >= 0.1, 'about 150 ms to settle');
+  context.currentTime = 9;
+  music.setPaused(false);
+  assert.equal(lastTarget(duck.filter.frequency).value, context.sampleRate / 2);
+  assert.equal(lastTarget(duck.gain.gain).value, 1);
+});
+
+test('pausing before the music starts takes effect when the graph is built', () => {
+  const context = new FakeAudioContext();
+  const engine = new AudioEngine({ contextFactory: () => context });
+  engine.unlock();
+  const music = new ProceduralMusic(engine);
+  music.setPaused(true);
+  music.start();
+  const duck = duckNodes(context);
+  assert.ok(lastTarget(duck.gain.gain).value < 1);
+});
+
+test('setPaused leaves the arrangement and the scheduled notes untouched', () => {
+  const unpaused = playBars(0.5, 2).notes.map((note) => [note.voice, note.step]);
+  const played = startedMusic(0.5);
+  played.music.setPaused(true);
+  play(played, played.music.sequencer.lookaheadSeconds + 2 * 16 * (60 / played.music.tempo / 4) - 0.1, { tick: 0.05 });
+  const paused = played.notes.filter((note) => note.step < 32).map((note) => [note.voice, note.step]);
+  assert.deepEqual(paused, unpaused);
+});

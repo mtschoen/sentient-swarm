@@ -148,3 +148,23 @@ test('showToast sets the text and restarts the fade; the settings button is touc
   assert.ok(toast.classList.contains('hud-toast-show'));
   assert.equal(hud.settingsButton.attributes['data-touch-exclusive'], '');
 });
+
+test('the pause button calls onPause, shows only while a run is live, and is excluded from touch sticks', () => {
+  const documentObject = createFakeDocument();
+  const root = documentObject.createElement('div');
+  let pauses = 0;
+  const hud = createHud(root, { documentObject, now: () => 0, onPause: () => { pauses += 1; } });
+  const pauseButton = find(root, 'hud-pause');
+  assert.ok(pauseButton, 'a pause button exists');
+  assert.ok('data-touch-exclusive' in pauseButton.attributes);
+  pauseButton.fire('click');
+  assert.equal(pauses, 1);
+  hud.update({ ...STATE, phase: 'ready' });
+  assert.equal(pauseButton.hidden, true);
+  hud.update({ ...STATE, phase: 'playing' });
+  assert.equal(pauseButton.hidden, false);
+  hud.update({ ...STATE, phase: 'paused' });
+  assert.equal(pauseButton.hidden, true);
+  hud.update({ ...STATE, phase: 'gameOver' });
+  assert.equal(pauseButton.hidden, true);
+});

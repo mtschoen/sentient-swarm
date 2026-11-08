@@ -25,6 +25,12 @@ const SUB_SHELF_HERTZ = 90;
 const SUB_SHELF_DECIBELS = -5;
 const PRESENCE_HERTZ = 2500;
 const PRESENCE_DECIBELS = 3;
+// Pause duck (owner ruling R17): the music bus passes through a lowpass and a gain that close to
+// these values while the game is paused and reopen on resume; the time constant settles in about
+// 150 ms (three constants). The open lowpass sits at Nyquist, where it passes everything.
+const DUCK_CLOSED_HERTZ = 500;
+const DUCK_CLOSED_GAIN = 0.4;
+const DUCK_TIME_CONSTANT_SECONDS = 0.05;
 
 export function levelsForIntensity(intensity) {
   return {
@@ -68,6 +74,7 @@ export class ProceduralMusic {
     this.nextHitStep = 0;
     this.hitCount = 0;
     this.delayTempo = null;
+    this.paused = false;
     this.intensity = -1;
     this.setIntensity(0.2);
     this.scheduleStep = this.scheduleStep.bind(this);
@@ -87,6 +94,7 @@ export class ProceduralMusic {
     this.barContext = null;
     this.started = true;
     this.applyParameters();
+    this.applyDuck();
     if (this.timers !== null && this.timer === null) {
       const tick = () => this.update(context.currentTime);
       tick();
@@ -98,6 +106,25 @@ export class ProceduralMusic {
     this.started = false;
     if (this.timer !== null) this.timers.clearInterval(this.timer);
     this.timer = null;
+  }
+
+  // Ducks (true) or restores (false) the music for a pause; the arrangement keeps running so it
+  // comes back on the beat. Safe before the graph exists: start() applies the current state.
+  setPaused(paused) {
+    this.paused = Boolean(paused);
+    this.applyDuck();
+  }
+
+  applyDuck() {
+    const context = this.engine.context;
+    if (context === null || this.nodes === null) return;
+    const { duckFilter, duckGain } = this.nodes;
+    const hertz = this.paused ? DUCK_CLOSED_HERTZ : context.sampleRate / 2;
+    const gain = this.paused ? DUCK_CLOSED_GAIN : 1;
+    for (const [parameter, value] of [[duckFilter.frequency, hertz], [duckGain.gain, gain]]) {
+      parameter.cancelScheduledValues(context.currentTime);
+      parameter.setTargetAtTime(value, context.currentTime, DUCK_TIME_CONSTANT_SECONDS);
+    }
   }
 
   setIntensity(value) {
@@ -152,7 +179,10 @@ export class ProceduralMusic {
     };
     // Laptop and phone speakers cannot play the sub below about 90 Hz, where it only eats the
     // output compressor's headroom: the bus trims it and lifts the presence band instead.
-    const lowShelf = filter('lowshelf', SUB_SHELF_HERTZ, 0.7, this.engine.musicOutput, SUB_SHELF_DECIBELS);
+    const duckGain = context.createGain();
+    duckGain.connect(this.engine.musicOutput);
+    const duckFilter = filter('lowpass', context.sampleRate / 2, 0.7, duckGain);
+    const lowShelf = filter('lowshelf', SUB_SHELF_HERTZ, 0.7, duckFilter, SUB_SHELF_DECIBELS);
     const presence = filter('peaking', PRESENCE_HERTZ, 0.8, lowShelf, PRESENCE_DECIBELS);
     const bus = context.createGain();
     bus.connect(presence);
@@ -187,7 +217,7 @@ export class ProceduralMusic {
     feedback.connect(delay);
     delay.connect(delayWet);
     return {
-      bus, pump, delay, leadFilter, melodyFilter, padFilter, hitFilter,
+      bus, pump, duckFilter, duckGain, delay, leadFilter, melodyFilter, padFilter, hitFilter,
       layers: { kick, hats, clap, bass, lead, melody, chords, hits, effects },
     };
   }

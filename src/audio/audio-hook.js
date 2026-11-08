@@ -153,8 +153,11 @@ export function installAudio({ windowObject = window, documentObject = document,
     hint.remove?.();
   };
 
+  // The pause menu ducks the music (a lowpass and a gain ramp, about 150 ms); false restores it.
+  const setPaused = (paused) => music.setPaused(paused);
+
   return {
-    engine, music, effects, intensity, cues, unlock, update, setMuted, dispose,
+    engine, music, effects, intensity, cues, unlock, update, setMuted, setPaused, dispose,
     get muted() { return engine.muted; },
     get listening() { return listening; },
   };

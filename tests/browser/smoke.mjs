@@ -267,7 +267,8 @@ function installSyntheticGamepad() {
 }
 
 async function setSticks(page, axes) {
-  await evaluateWithin(page, 'setting the sticks', (values) => { window.__smokeGamepad.axes = values; }, axes);
+  // The title menu owns the start now (the left stick would only move its cursor), so the first push starts the run.
+  await evaluateWithin(page, 'setting the sticks', (values) => { window.__smokeGamepad.axes = values; const { game } = window.__murmuration; if (game.run.phase === 'ready') game.start(); }, axes);
 }
 
 // Moves the ship 2 units left (the first stick push starts the run), then fires right toward the

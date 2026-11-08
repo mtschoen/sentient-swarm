@@ -172,3 +172,12 @@ test('update drives the intensity from multiplier, kills and survival, and kills
   frame('playing', 0);
   assert.ok(audio.intensity.survivalSeconds < 0.1, 'a new run starts the build over');
 });
+
+test('setPaused ducks the music and works before the first unlock', () => {
+  const { audio } = install(() => new FakeAudioContext());
+  audio.setPaused(true);
+  assert.equal(audio.music.paused, true);
+  audio.unlock();
+  audio.setPaused(false);
+  assert.equal(audio.music.paused, false);
+});

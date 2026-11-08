@@ -39,6 +39,12 @@
 .hud-play-again { font: inherit; font-size: clamp(16px, 4vmin, 28px); padding: 10px 28px; color: #05060a; background: #ffe84a;
   border: 0; border-radius: 6px; box-shadow: 0 0 18px #ffe84a; cursor: pointer; text-transform: uppercase; }
 
+/* Pause button (hud.js): the one clickable element in the bands besides the game-over overlay. */
+.hud-pause { position: absolute; width: 34px; height: 34px; padding: 0; box-sizing: border-box; pointer-events: auto; cursor: pointer;
+  font: inherit; font-size: 13px; letter-spacing: 1px; color: #cfe8ff; background: rgba(25, 230, 255, 0.08);
+  border: 2px solid rgba(25, 230, 255, 0.4); border-radius: 6px; opacity: 0.7; touch-action: manipulation; }
+.hud-pause[hidden] { display: none; }
+
 /* Touch overlay (touchOverlay.js): floating stick visuals and the bomb button. */
 #touch-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 6; font-family: system-ui, sans-serif; font-weight: 800; }
 .touch-stick-base, .touch-stick-knob { position: fixed; left: 0; top: 0; border-radius: 50%; pointer-events: none; }

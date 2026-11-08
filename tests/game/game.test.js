@@ -853,3 +853,84 @@ test('a capacity swap mid-run keeps the multiplier tier and the score earned so 
   assert.equal(game.score.multiplier, 3, 'one more kill at a quarter of the capacity stays on the third step');
   assert.equal(game.score.score, scoreBefore + 3 * 40, 'the kill scores at the new capacity (40 points) times 3');
 });
+
+// Owner ruling R17 (Plan C task C4): pause freezes the run without dropping it.
+test('pause then resume keeps score, lives, bombs and phase, and steps nothing meanwhile', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  simulation.scriptedStats.push(stats({ frameSequence: 1, killsSinceLastRead: 10 }));
+  game.update(STEP);
+  const before = { ...game.state };
+  const stepsBefore = simulation.frameSequence;
+  assert.equal(game.pause(), true);
+  assert.equal(game.paused, true);
+  assert.equal(game.state.phase, 'paused');
+  assert.equal(game.acceptsProbeFrames, false);
+  runFor(game, 1);
+  assert.equal(simulation.frameSequence, stepsBefore, 'no simulation step while paused');
+  game.resume();
+  assert.equal(game.paused, false);
+  assert.deepEqual(game.state, before);
+  game.update(STEP);
+  assert.equal(simulation.frameSequence, stepsBefore + 1);
+});
+
+test('pause does nothing in Ready', async () => {
+  const { game } = await createGame();
+  assert.equal(game.pause(), false);
+  assert.equal(game.paused, false);
+  assert.equal(game.state.phase, RunPhase.Ready);
+});
+
+test('a hit in flight at pause time is honored once after resume, exactly as without a pause', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  game.update(STEP);
+  const sequence = simulation.frameSequence + 1;
+  simulation.scriptedStats.push(stats({ frameSequence: sequence, playerHitSequence: sequence, hitLatch: 1 }));
+  game.pause();
+  runFor(game, 0.5);
+  assert.equal(game.run.lives, 3, 'not applied while paused');
+  assert.deepEqual(simulation.acknowledged, []);
+  game.resume();
+  game.update(STEP);
+  assert.equal(game.run.lives, 2);
+  assert.equal(game.state.phase, RunPhase.Dying);
+  assert.deepEqual(simulation.acknowledged, [sequence]);
+});
+
+test('a bomb held through the pause needs a fresh press after resume', async () => {
+  const { game, input } = await createGame();
+  game.start();
+  game.update(STEP);
+  game.pause();
+  input.state.bomb = true;
+  game.resume();
+  game.update(STEP);
+  assert.equal(game.state.bombs, 3);
+});
+
+test('gesture start can be switched off so a menu owns the start', async () => {
+  const { game, input } = await createGame();
+  game.startsOnGesture = false;
+  input.state.bomb = true;
+  input.state.move = { x: 1, y: 0 };
+  game.update(STEP);
+  assert.equal(game.state.phase, RunPhase.Ready);
+});
+
+test('quitToTitle returns to Ready with a fresh score, and a restart works', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  simulation.scriptedStats.push(stats({ frameSequence: 1, killsSinceLastRead: 10 }));
+  game.update(STEP);
+  assert.ok(game.state.score > 0);
+  game.pause();
+  game.quitToTitle();
+  assert.equal(game.paused, false);
+  assert.equal(game.state.phase, RunPhase.Ready);
+  assert.equal(game.state.score, 0);
+  game.start();
+  assert.equal(game.state.phase, RunPhase.Playing);
+  assert.equal(game.state.lives, 3);
+});
