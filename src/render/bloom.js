@@ -1,11 +1,21 @@
 // Bloom: downsample the scene plus the warp grid layer to half resolution (bloom_downsample.wgsl),
 // so threat-lit grid ripples glow too, then blur it separably
 // (bloom_blur.wgsl): horizontal from first into second, vertical from second back into first.
-// outputTexture holds the result after encode.
+// outputTexture holds the result after encode. Bloom quality sets the blur resolution: the scene
+// divided by BLOOM_DIVISORS[quality] (high is half resolution); a lower resolution blurs fewer
+// texels for a wider, softer glow.
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { SCENE_FORMAT, createFullscreenPipeline, loadRenderShader } from './render-shaders.js';
 
 const BLUR_UNIFORM_BYTES = 16;
+export const BLOOM_DIVISORS = Object.freeze({ high: 2, medium: 3, low: 4 });
+
+// Blur texture size for a scene of width by height device pixels at quality.
+export function bloomTextureSize(widthDevicePixels, heightDevicePixels, quality) {
+  const divisor = BLOOM_DIVISORS[quality];
+  if (divisor === undefined) throw new Error(`Unknown bloom quality: ${quality}`);
+  return [Math.max(1, Math.floor(widthDevicePixels / divisor)), Math.max(1, Math.floor(heightDevicePixels / divisor))];
+}
 
 function fullscreenDraw(encoder, label, view, pipeline, bindGroup) {
   const pass = encoder.beginRenderPass({
@@ -30,6 +40,7 @@ export class BloomPass {
     this.device.queue.writeBuffer(this.horizontalBuffer, 0, new Int32Array([1, 0, 0, 0]));
     this.device.queue.writeBuffer(this.verticalBuffer, 0, new Int32Array([0, 1, 0, 0]));
     this.textures = [];
+    this.quality = 'high';
   }
 
   async initialize() {
@@ -47,10 +58,11 @@ export class BloomPass {
 
   get outputTexture() { return this.textures[0]; }
 
-  // Recreates both half-resolution textures and every bind group that references a texture.
+  // Recreates both blur textures (sized by this.quality) and every bind group that references a
+  // texture. The caller sets quality before calling it.
   resize(sceneTextures, gridTexture, widthDevicePixels, heightDevicePixels) {
     this.destroyTextures();
-    const size = [Math.max(1, Math.floor(widthDevicePixels / 2)), Math.max(1, Math.floor(heightDevicePixels / 2))];
+    const size = bloomTextureSize(widthDevicePixels, heightDevicePixels, this.quality);
     this.textures = [0, 1].map((index) => this.device.createTexture({
       label: 'bloom-' + index,
       size,

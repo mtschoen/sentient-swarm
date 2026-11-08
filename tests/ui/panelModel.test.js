@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAPACITY_OPTIONS, DEFAULT_CAPACITY, FramesPerSecond, RENDER_SLIDERS, SPECIES_SLIDERS, capacityFromSearch, describeStats } from '../../src/ui/panelModel.js';
+import { CAPACITY_OPTIONS, DEFAULT_CAPACITY, FramesPerSecond, RENDER_SLIDERS, SPECIES_SLIDERS, capacityFromSearch, describeStats, pinnedCapacityFromSearch, probeDisabledFromSearch } from '../../src/ui/panelModel.js';
+import { PRESETS } from '../../src/settings/presets.js';
 import { SPECIES_FIELDS, defaultSpecies } from '../../src/sim/species.js';
 import { DEFAULT_RENDER_SETTINGS } from '../../src/render/renderer.js';
 
@@ -11,6 +12,21 @@ test('capacityFromSearch accepts exactly the panel choices', () => {
   for (const search of ['', '?capacity=1000', '?capacity=abc', '?capacity=', '?other=65536']) {
     assert.equal(capacityFromSearch(search), DEFAULT_CAPACITY);
   }
+});
+
+test('capacity options are the sorted union of the preset capacities and the earlier choices', () => {
+  const union = new Set([...Object.values(PRESETS).map((preset) => preset.capacity), 65536, 262144, 1048576, 4194304]);
+  assert.deepEqual(CAPACITY_OPTIONS, [...union].sort((first, second) => first - second));
+});
+
+test('a pinned capacity or probe=off disables the probe', () => {
+  assert.equal(pinnedCapacityFromSearch('?capacity=131072'), 131072);
+  assert.equal(pinnedCapacityFromSearch('?capacity=1000'), null);
+  assert.equal(probeDisabledFromSearch(''), false);
+  assert.equal(probeDisabledFromSearch('?capacity=1000'), false);
+  assert.equal(probeDisabledFromSearch('?capacity=262144'), true);
+  assert.equal(probeDisabledFromSearch('?probe=off'), true);
+  assert.equal(probeDisabledFromSearch('?probe=on'), false);
 });
 
 test('FramesPerSecond averages injected timestamps over its window', () => {

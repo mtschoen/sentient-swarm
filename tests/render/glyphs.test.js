@@ -16,13 +16,14 @@ function near(actual, expected, tolerance = 1e-9) {
   assert.ok(Math.abs(actual - expected) < tolerance, `expected ${expected}, got ${actual}`);
 }
 
-test('packShipView fills the 48-byte GlyphView layout', () => {
+test('packShipView fills the 64-byte GlyphView layout', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(1600, 900);
   const view = packShipView({ viewport, settings, alpha: 0.25, time: 3, emissionScale: 0.5 });
   assert.equal(view.byteLength, GLYPH_VIEW_BYTES);
   // A 900-pixel-tall arena gives an 18-pixel ship; its 25 by 25 pixel coarse cells give 324 / 625.
-  assert.deepEqual(Array.from(view.slice(4)), Array.from(new Float32Array([2 / 1600, 2 / 900, 18, 2, 0.25, 3, 324 / 625, 0.5])));
+  assert.deepEqual(Array.from(view.slice(4)), Array.from(new Float32Array([2 / 1600, 2 / 900, 18, 2, 0.25, 3, 324 / 625, 0.5, 0, 0, 0, 0])));
+  assert.equal(packShipView({ viewport, settings, alpha: 0.25, time: 3, interpolate: true })[12], 1);
 });
 
 test('ship size follows the arena height, with a minimum, and a zero fraction hides ships', () => {

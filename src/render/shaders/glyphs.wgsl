@@ -7,7 +7,9 @@
 // Shading: a one-pixel rim in the species hue, a fill at FILL_BRIGHTNESS of it, a soft halo and an
 // engine plume whose length follows speed / maximumSpeed and pulses with phase. Spawning ships are
 // rim only and fill in over SPAWN_IN_FRAMES.
-// Position is extrapolated by velocity * alpha * dt so rendering between fixed steps stays smooth.
+// Position is extrapolated by velocity * alpha * dt so rendering between fixed steps stays smooth;
+// at half simulation rate (view.interpolation 1) it is instead mixed from the previous step's
+// position (previousAgents, the last step's input) to the newest by alpha, one step behind.
 // Density attenuation works in screen coverage: the coarse density (agents per cell) times
 // coverageScale (ship body area over coarse cell area, in device pixels) is the fraction of the
 // cell that ship bodies cover, and each ship is divided by 1 + COVERAGE_ATTENUATION * coverage,
@@ -15,7 +17,7 @@
 // MAXIMUM_CROWD_RADIANCE), so dense cores stay bright and colored rather than murky.
 // emissionScale (trailFrameFactors) keeps steady-state brightness refresh-independent.
 
-// Uniform layout (byte offsets), total 48 bytes; packShipView in glyphs.js writes it.
+// Uniform layout (byte offsets), total 64 bytes; packShipView in glyphs.js writes it.
 //   0 worldToClipScale    vec2f
 //   8 worldToClipOffset   vec2f
 //  16 devicePixelToClip   vec2f
@@ -25,6 +27,8 @@
 //  36 time                f32
 //  40 coverageScale       f32 (ship body area / coarse cell area, on-screen device pixels)
 //  44 emissionScale       f32
+//  48 interpolation       f32 (1 interpolate from previousAgents, 0 extrapolate)
+//  52 padding             3 x f32
 struct GlyphView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
@@ -35,6 +39,10 @@ struct GlyphView {
   time: f32,
   coverageScale: f32,
   emissionScale: f32,
+  interpolation: f32,
+  paddingFirst: f32,
+  paddingSecond: f32,
+  paddingThird: f32,
 }
 
 @group(0) @binding(0) var<uniform> view: GlyphView;
@@ -42,6 +50,7 @@ struct GlyphView {
 @group(0) @binding(2) var<storage, read> agents: array<Agent>;
 @group(0) @binding(3) var<storage, read> field: array<vec4f>;
 @group(0) @binding(4) var<storage, read> speciesTable: array<f32>;
+@group(0) @binding(5) var<storage, read> previousAgents: array<Agent>;
 
 const HUE_JITTER_RANGE: f32 = 0.03;
 const GLYPH_SATURATION: f32 = 0.8;
@@ -105,7 +114,13 @@ fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
     return output;
   }
   let corner = vec2f(f32(vertexIndex & 1u), f32(vertexIndex >> 1u)) * 2.0 - vec2f(1.0);
-  let position = clampToArena(agent.position + agent.velocity * view.alpha * params.dt);
+  var position = clampToArena(agent.position + agent.velocity * view.alpha * params.dt);
+  if (view.interpolation > 0.5) {
+    // A slot dead in the previous step has no earlier position; it starts where it is.
+    let previous = previousAgents[instanceIndex];
+    let start = select(agent.position, previous.position, isAlive(previous.flags));
+    position = clampToArena(mix(start, agent.position, view.alpha));
+  }
   let forward = shipHeading(position, agent.velocity);
   let side = vec2f(-forward.y, forward.x);
   // World and device pixels both grow y downward, so the world direction is the screen direction.

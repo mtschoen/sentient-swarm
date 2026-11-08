@@ -36,6 +36,19 @@ export class ParticlePool {
     this.pipeline = await this.device.createComputePipelineAsync({ label: 'particles-step', layout: 'auto', compute: { module, entryPoint: 'main' } });
   }
 
+  // Replaces the ring with an empty one of capacity slots (live particles are dropped). Every
+  // shader takes the slot count from arrayLength, and every other bind group cache keys on the
+  // buffer, so only this pool's own cache (keyed on the params buffer) needs clearing. The old
+  // buffer is destroyed; WebGPU frees it after submitted work that uses it.
+  resize(capacity) {
+    if (capacity === this.capacity) return;
+    const previous = this.buffers.particles;
+    this.capacity = capacity;
+    this.buffers.particles = createStorageBuffer(this.device, PARTICLE_HEADER_BYTES + capacity * PARTICLE_STRIDE_BYTES, 'particles');
+    this.bindGroupCache.clear();
+    previous.destroy();
+  }
+
   encodeStep(encoder, paramsBuffer) {
     if (this.pipeline === null) throw new Error('ParticlePool.initialize() must finish before encodeStep()');
     const pass = encoder.beginComputePass({ label: 'particles-step' });

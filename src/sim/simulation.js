@@ -131,6 +131,9 @@ export class Simulation {
 
   get capacity() { return this.capacityValue; }
   get agentsBuffer() { return this.agentBuffers[this.inputIndex]; }
+  // The last step's input (with that step's spawns), so the glyph pass can interpolate from it
+  // to agentsBuffer at half simulation rate. Zero-filled until a new instance's first step.
+  get previousAgentsBuffer() { return this.agentBuffers[1 - this.inputIndex]; }
   get fieldBuffer() { return this.field.buffers.blurred; }
   get statsBuffer() { return this.statsBufferValue; }
   get gridBuffers() { return this.grid.buffers; }
@@ -211,27 +214,7 @@ export class Simulation {
   step(encoder, deltaSeconds, spawnPerSpecies = new Uint32Array(SPECIES_COUNT)) {
     this.frameSequenceValue += 1;
     this.timeValue += deltaSeconds;
-    this.device.queue.writeBuffer(this.paramsBufferValue, 0, packSimParams({
-      dt: deltaSeconds,
-      time: this.timeValue,
-      playerPosition: this.playerPosition,
-      neighborRadius: this.neighborRadius,
-      gridColumns: this.dimensions.columns,
-      gridRows: this.dimensions.rows,
-      cellSize: this.dimensions.cellSize,
-      capacity: this.capacityValue,
-      debugKillPosition: this.debugKillPosition,
-      debugKillRadius: this.debugKillRadius,
-      spawnPerSpecies: Array.from(spawnPerSpecies),
-      frameSequence: this.frameSequenceValue,
-      sameSpeciesCohesion: this.sameSpeciesCohesion ? 1 : 0,
-      seekScale: this.seekScale,
-      spawnDistanceFraction: this.spawnDistanceFraction,
-      playerRadius: this.playerContact?.radius ?? 0,
-      playerInvulnerable: this.playerContact?.invulnerable ? 1 : 0,
-      acknowledgedHitSequence: this.acknowledgedHitSequence,
-      killAllRequested: this.killAllRequested ? 1 : 0,
-    }));
+    this.writeParams(deltaSeconds, spawnPerSpecies);
     const killRadius = this.debugKillRadius;
     this.debugKillRadius = 0;
     const killAll = this.killAllRequested;
@@ -274,6 +257,31 @@ export class Simulation {
     this.inputIndex = 1 - this.inputIndex;
   }
 
+  // Queues the SimParams uniform for the current state (step, and commitCapacity with dt 0).
+  writeParams(deltaSeconds, spawnPerSpecies) {
+    this.device.queue.writeBuffer(this.paramsBufferValue, 0, packSimParams({
+      dt: deltaSeconds,
+      time: this.timeValue,
+      playerPosition: this.playerPosition,
+      neighborRadius: this.neighborRadius,
+      gridColumns: this.dimensions.columns,
+      gridRows: this.dimensions.rows,
+      cellSize: this.dimensions.cellSize,
+      capacity: this.capacityValue,
+      debugKillPosition: this.debugKillPosition,
+      debugKillRadius: this.debugKillRadius,
+      spawnPerSpecies: Array.from(spawnPerSpecies),
+      frameSequence: this.frameSequenceValue,
+      sameSpeciesCohesion: this.sameSpeciesCohesion ? 1 : 0,
+      seekScale: this.seekScale,
+      spawnDistanceFraction: this.spawnDistanceFraction,
+      playerRadius: this.playerContact?.radius ?? 0,
+      playerInvulnerable: this.playerContact?.invulnerable ? 1 : 0,
+      acknowledgedHitSequence: this.acknowledgedHitSequence,
+      killAllRequested: this.killAllRequested ? 1 : 0,
+    }));
+  }
+
   // Call immediately after device.queue.submit for the command buffer that holds step().
   afterSubmit() {
     this.stagingRing.markSubmitted();
@@ -300,46 +308,81 @@ export class Simulation {
     return { ...newest, killsSinceLastRead: frames.reduce((sum, stats) => sum + stats.killsSinceLastRead, 0) };
   }
 
-  // Builds a Simulation with the same settings at newCapacity, carries the alive agents over and
-  // destroys this one. The caller must not step this instance while the promise is pending
-  // (main.js pauses stepping through CapacitySwap), so the carried state is the final one.
-  // The alive agents are compacted into the first slots of the new buffer: the grid is rebuilt on
-  // the newest agents and compact.wgsl copies its listed agents in grid order, so a shrink keeps
-  // every alive agent that fits. The stats persistent tail (cumulative kills, hit latch and
-  // playerHitSequence), the registered passes, player state, acknowledged hit sequence and a
-  // pending kill-all carry over too. Species, matrix, shares and the cohesion mode are read again
-  // after the awaits, so edits made meanwhile are not lost. On a rejection (allocation or
-  // pipeline failure) this instance is untouched and still usable. Stats resume after the new
-  // instance's next step.
-  async recreateWithCapacity(newCapacity) {
+  // Builds a Simulation with the same settings at newCapacity (and optionally a new neighbor
+  // radius, so grid resolution, and particle budget), carries the alive agents over and destroys
+  // this one: prepareCapacity then commitCapacity. On a rejection (allocation or pipeline
+  // failure) this instance is untouched and still usable.
+  async recreateWithCapacity(newCapacity, options = {}) {
+    return this.commitCapacity(await this.prepareCapacity(newCapacity, options));
+  }
+
+  // The slow half of a capacity change: allocates the new instance and builds every pipeline,
+  // including the compaction one. This instance may keep stepping meanwhile; nothing is copied
+  // yet. Resolves with a prepared change for commitCapacity (or discardCapacity).
+  async prepareCapacity(newCapacity, { neighborRadius = this.neighborRadius, particleCapacity = this.particlePoolValue.capacity } = {}) {
     const next = await Simulation.create(this.gpu, {
       capacity: newCapacity,
-      neighborRadius: this.neighborRadius,
+      neighborRadius,
       species: this.species,
       matrix: this.matrix,
       shares: this.sharesValue,
-      particleCapacity: this.particlePoolValue.capacity,
+      particleCapacity,
     });
-    let compaction;
     try {
-      compaction = await AgentCompaction.create(this.gpu, { common: this.common });
+      const compaction = await AgentCompaction.create(this.gpu, { common: this.common });
+      return { next, compaction };
     } catch (error) {
       next.destroy();
       throw error;
     }
+  }
+
+  // Releases a prepared change that will not be committed.
+  discardCapacity({ next, compaction }) {
+    next.destroy();
+    compaction.destroy();
+  }
+
+  // The fast half, synchronous: encodes the copy of this instance's newest state into the
+  // prepared instance, submits it, carries the CPU state and destroys this instance. Queue order
+  // puts the copy after every step already submitted and before any step of the new instance, so
+  // no await is needed and no frame is skipped; WebGPU defers freeing the destroyed buffers until
+  // the submitted copy has finished with them. The caller must step only the returned instance
+  // from here on.
+  // The alive agents are compacted into the first slots of the new buffer: the grid is rebuilt on
+  // the newest agents and compact.wgsl copies its listed agents in grid order, so a shrink keeps
+  // every alive agent that fits. The stats persistent tail (cumulative kills, hit latch and
+  // playerHitSequence) is copied too, and lastKillsTotal carries, so kills in stats frames this
+  // instance never read back are counted by the new instance's first read. Registered passes,
+  // player state, acknowledged hit sequence, a pending kill-all, species, matrix, shares, seek
+  // scale, spawn distance and the cohesion mode carry over, read now so edits made while the
+  // change was prepared are not lost. Live particles are not copied. The same submission builds
+  // the new instance's grid and coarse field on the copied agents (with its params at dt 0), so
+  // the renderer can draw it before its first step. Stats resume after the new instance's next
+  // step.
+  commitCapacity({ next, compaction }) {
+    this.carryStateInto(next);
+    const nextAgents = next.agentBuffers[next.inputIndex];
+    next.writeParams(0, new Uint32Array(SPECIES_COUNT));
     const encoder = this.device.createCommandEncoder({ label: 'simulation-recreate' });
     this.grid.encode(encoder, this.agentsBuffer, this.paramsBufferValue);
     compaction.encode(encoder, {
       paramsBuffer: this.paramsBufferValue,
       gridBuffers: this.grid.buffers,
       agentsIn: this.agentsBuffer,
-      agentsOut: next.agentBuffers[next.inputIndex],
-      targetCapacity: newCapacity,
+      agentsOut: nextAgents,
+      targetCapacity: next.capacity,
     });
     encoder.copyBufferToBuffer(this.statsBufferValue, STATS_PERSISTENT_OFFSET_BYTES, next.statsBufferValue, STATS_PERSISTENT_OFFSET_BYTES, STATS_BYTES - STATS_PERSISTENT_OFFSET_BYTES);
+    next.grid.encode(encoder, nextAgents, next.paramsBufferValue);
+    next.field.encode(encoder, nextAgents, next.grid.buffers, next.paramsBufferValue);
     this.device.queue.submit([encoder.finish()]);
-    await this.device.queue.onSubmittedWorkDone();
     compaction.destroy();
+    this.destroy();
+    return next;
+  }
+
+  carryStateInto(next) {
     next.setSpecies(this.species, this.matrix);
     next.setShares(this.sharesValue);
     next.setSameSpeciesCohesion(this.sameSpeciesCohesion);
@@ -355,8 +398,6 @@ export class Simulation {
     next.lastKillsTotal = this.lastKillsTotal;
     next.killAllRequested = this.killAllRequested;
     next.setDebugKill(...this.debugKillPosition, this.debugKillRadius);
-    this.destroy();
-    return next;
   }
 
   // Destroys every GPU buffer this instance created, including the passes' internal buffers.

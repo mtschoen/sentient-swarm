@@ -56,6 +56,7 @@ function createFakeSimulation(name, frameSequence) {
     frameSequence,
     capacity: 1024,
     agentsBuffer: buffer('agents'),
+    previousAgentsBuffer: buffer('previous-agents'),
     paramsBuffer: buffer('params'),
     fieldBuffer: buffer('field'),
     speciesTableBuffer: buffer('species'),
@@ -95,22 +96,16 @@ test('resize rebuilds the scene, grid and bloom textures at the new size and des
   assert.ok(log.textures.filter((texture) => !texture.destroyed).every((texture) => texture.width === 1 && texture.height === 1));
 });
 
-test('setSimulation clears the caches, skips frames until the new simulation steps, then binds only its buffers', () => {
+test('setSimulation clears the caches and the next frame binds only the new simulation buffers', () => {
   const first = createFakeSimulation('first', 5);
   const { renderer, log } = createRenderer(first);
   assert.equal(renderer.render(createFakeEncoder(), { alpha: 0, time: 0 }), true);
   assert.ok(renderer.glyphs.bindGroupCache.entries.size > 0);
 
+  // commitCapacity builds the new simulation's field, so it draws before its first step.
   const second = createFakeSimulation('second', 5);
   renderer.setSimulation(second);
   for (const pass of [renderer.glyphs, renderer.particles, renderer.warpGrid]) assert.equal(pass.bindGroupCache.entries.size, 0);
-  const requestsBefore = log.currentTextureRequests;
-  const skipped = createFakeEncoder();
-  assert.equal(renderer.render(skipped, { alpha: 0, time: 0 }), false);
-  assert.equal(skipped.passes.length, 0);
-  assert.equal(log.currentTextureRequests, requestsBefore);
-
-  second.frameSequence = 6;
   const bindGroupsBefore = log.bindGroups.length;
   const drawn = createFakeEncoder();
   assert.equal(renderer.render(drawn, { alpha: 0, time: 0 }), true);
@@ -120,6 +115,27 @@ test('setSimulation clears the caches, skips frames until the new simulation ste
   assert.ok(labels.length > 0);
   assert.ok(labels.every((label) => label.startsWith('second-')), labels.join(', '));
   assert.ok(labels.includes('second-particles') && labels.includes('second-agents') && labels.includes('second-field'));
+  assert.ok(labels.includes('second-previous-agents'));
+});
+
+test('setBloomQuality resizes only the bloom textures and rebinds the composite', () => {
+  const { renderer, log } = createRenderer(createFakeSimulation('first', 0));
+  assert.equal(renderer.bloomQuality, 'high');
+  const scenes = log.textures.filter((texture) => texture.label.startsWith('scene-'));
+  const bindGroupsBefore = log.bindGroups.length;
+  renderer.setBloomQuality('low');
+  assert.equal(renderer.bloomQuality, 'low');
+  const live = log.textures.filter((texture) => !texture.destroyed);
+  const sizes = Object.fromEntries(live.map((texture) => [texture.label, [texture.width, texture.height]]));
+  assert.deepEqual(sizes['bloom-0'], [320, 180]);
+  assert.ok(scenes.every((texture) => !texture.destroyed), 'trails survive');
+  assert.ok(log.bindGroups.slice(bindGroupsBefore).some((group) => group.label === 'composite-0'));
+  renderer.setBloomQuality('medium');
+  const medium = log.textures.filter((texture) => !texture.destroyed && texture.label === 'bloom-0');
+  assert.deepEqual([medium[0].width, medium[0].height], [426, 240]);
+  renderer.resize(800, 450);
+  assert.deepEqual(log.textures.filter((texture) => !texture.destroyed && texture.label === 'bloom-0').map((texture) => texture.width), [266]);
+  assert.throws(() => renderer.setBloomQuality('ultra'), /Unknown bloom quality/);
 });
 
 test('destroy destroys every texture and the pass uniform buffers', () => {

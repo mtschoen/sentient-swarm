@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PRESETS, PRESET_ORDER, initialPresetFor, stepPreset } from '../../src/settings/presets.js';
+import { PRESETS, PRESET_ORDER, highestPresetFor, initialPresetFor, stepPreset } from '../../src/settings/presets.js';
 import { agentBufferBytes } from '../../src/sim/layout.js';
 
 const GIBIBYTE = 1024 * 1024 * 1024;
@@ -34,4 +34,10 @@ test('stepPreset moves one rung and clamps at both ends', () => {
   assert.equal(stepPreset('desktop', 'down'), 'phoneHigh');
   assert.equal(stepPreset('phoneLow', 'down'), 'phoneLow');
   assert.equal(stepPreset('desktopUltra', 'up'), 'desktopUltra');
+});
+
+test('highestPresetFor is the top preset that fits half the binding limit', () => {
+  assert.equal(highestPresetFor({ maxStorageBufferBindingSize: GIBIBYTE }), 'desktopUltra');
+  assert.equal(highestPresetFor({ maxStorageBufferBindingSize: 64 * 1024 * 1024 }), 'desktop');
+  assert.equal(highestPresetFor({ maxStorageBufferBindingSize: 1024 }), 'phoneLow');
 });

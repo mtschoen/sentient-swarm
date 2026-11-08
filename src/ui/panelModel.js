@@ -2,13 +2,24 @@
 // and the readout formatter. No DOM, so node:test covers all of it.
 import { SPECIES_NAMES } from '../sim/species.js';
 
-export const CAPACITY_OPTIONS = [65536, 262144, 1048576, 4194304];
+// The quality preset capacities (src/settings/presets.js) and the earlier panel choices, sorted.
+export const CAPACITY_OPTIONS = [65536, 131072, 262144, 524288, 1048576, 2097152, 4194304];
 export const DEFAULT_CAPACITY = 262144;
 
 // Reads ?capacity=N; only the panel's choices are accepted.
 export function capacityFromSearch(search) {
+  return pinnedCapacityFromSearch(search) ?? DEFAULT_CAPACITY;
+}
+
+// The ?capacity=N panel choice, or null when the URL pins none (or an unknown one).
+export function pinnedCapacityFromSearch(search) {
   const requested = Number(new URLSearchParams(search).get('capacity'));
-  return CAPACITY_OPTIONS.includes(requested) ? requested : DEFAULT_CAPACITY;
+  return CAPACITY_OPTIONS.includes(requested) ? requested : null;
+}
+
+// The quality probe is off when the URL pins a capacity or carries ?probe=off (browser checks).
+export function probeDisabledFromSearch(search) {
+  return pinnedCapacityFromSearch(search) !== null || new URLSearchParams(search).get('probe') === 'off';
 }
 
 // Each spec: the species row field (or renderer settings key), a label and the slider range.

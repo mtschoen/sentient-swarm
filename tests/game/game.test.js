@@ -565,42 +565,123 @@ test('freshStats is the newest frame read this update with the kills of every fr
   assert.equal(game.latestStats.frameSequence, 3);
 });
 
-test('a capacity change pauses stepping until the new simulation is installed, then follows it', async () => {
+test('the old simulation keeps stepping while a capacity change is prepared, then the new one is followed', async () => {
   const { game, simulation, renderer } = await createGame();
-  let finishRecreate;
+  let finishPrepare;
   const next = createFakeSimulation();
   next.capacity = CAPACITY * 4;
-  simulation.recreateWithCapacity = () => new Promise((resolve) => { finishRecreate = () => resolve(next); });
+  const changes = [];
+  simulation.prepareCapacity = (capacity, options) => {
+    changes.push({ capacity, ...options });
+    return new Promise((resolve) => { finishPrepare = () => resolve({ next }); });
+  };
+  simulation.commitCapacity = ({ next: prepared }) => {
+    prepared.frameSequence = simulation.frameSequence;
+    return prepared;
+  };
   let installed = null;
   renderer.setSimulation = (installedSimulation) => { installed = installedSimulation; };
   game.start();
   game.update(STEP);
   const stepsBefore = simulation.frameSequence;
-  const request = game.setCapacity(CAPACITY * 4);
+  const request = game.setCapacity(CAPACITY * 4, { particleCapacity: 1024 });
+  assert.deepEqual(changes, [{ capacity: CAPACITY * 4, neighborRadius: undefined, particleCapacity: 1024 }]);
   assert.equal(await game.setCapacity(CAPACITY * 2), false, 'one change at a time');
+  assert.equal(game.acceptsProbeFrames, false, 'no probe frames while a change is in flight');
   game.update(STEP);
   game.update(STEP);
-  assert.equal(simulation.frameSequence, stepsBefore, 'no step while the swap is pending');
-  finishRecreate();
+  assert.equal(simulation.frameSequence, stepsBefore + 2, 'play goes on while the change is prepared');
+  finishPrepare();
   assert.equal(await request, true);
   assert.equal(game.simulation, next);
   assert.equal(installed, next);
   assert.equal(game.spawnPressure.capacity, CAPACITY * 4);
   assert.equal(game.score.capacity, CAPACITY * 4);
+  assert.equal(game.acceptsProbeFrames, true);
   game.update(STEP);
-  assert.equal(next.frameSequence, 1);
-  assert.equal(simulation.frameSequence, stepsBefore);
+  assert.equal(next.frameSequence, stepsBefore + 3);
+  assert.equal(simulation.frameSequence, stepsBefore + 2);
 });
 
-test('a failed capacity change keeps the old simulation and resumes stepping', async () => {
+test('a failed capacity change keeps the old simulation and keeps stepping', async () => {
   const { game, simulation } = await createGame();
-  simulation.recreateWithCapacity = async () => { throw new Error('out of memory'); };
+  simulation.prepareCapacity = async () => { throw new Error('out of memory'); };
   game.start();
   await assert.rejects(game.setCapacity(CAPACITY * 4), /out of memory/);
   assert.equal(game.simulation, simulation);
   const before = simulation.frameSequence;
   game.update(STEP);
   assert.equal(simulation.frameSequence, before + 1);
+});
+
+test('at half rate the simulation steps every other update with both deltas; CPU play runs every update', async () => {
+  const { game, simulation, renderer, input } = await createGame();
+  game.setSimulationRate('half');
+  assert.equal(game.simulationRate, 'half');
+  game.start();
+  const deltas = [];
+  const step = simulation.step.bind(simulation);
+  simulation.step = (encoder, deltaSeconds, spawnPerSpecies) => { deltas.push(deltaSeconds); step(encoder, deltaSeconds, spawnPerSpecies); };
+  input.state.move = { x: 1, y: 0 };
+  const startX = game.player.position.x;
+  for (let update = 0; update < 6; update += 1) game.update(STEP);
+  assert.equal(deltas.length, 3);
+  deltas.forEach((delta) => assert.ok(Math.abs(delta - 2 * STEP) < 1e-12));
+  assert.ok(Math.abs(simulation.time - 6 * STEP) < 1e-12, 'simulated time matches game time');
+  const halfDistance = game.player.position.x - startX;
+
+  const full = await createGame();
+  full.game.start();
+  full.input.state.move = { x: 1, y: 0 };
+  const fullStartX = full.game.player.position.x;
+  for (let update = 0; update < 6; update += 1) full.game.update(STEP);
+  assert.equal(full.simulation.frameSequence, 6);
+  assert.ok(Math.abs(halfDistance - (full.game.player.position.x - fullStartX)) < 1e-12, 'ship speed does not change');
+
+  game.update(STEP);
+  game.render(0.5, STEP);
+  const frame = renderer.frames.at(-1);
+  assert.equal(frame.interpolate, true);
+  assert.equal(frame.alpha, (1 + 0.5) / 2);
+  game.setSimulationRate('full');
+  game.update(STEP);
+  game.render(0.25, STEP);
+  assert.equal(renderer.frames.at(-1).interpolate, false);
+  assert.equal(renderer.frames.at(-1).alpha, 0.25);
+});
+
+test('spawn pressure per second is the same at half rate', async () => {
+  const counts = [];
+  for (const rate of ['full', 'half']) {
+    const { game, simulation } = await createGame();
+    game.setSimulationRate(rate);
+    game.start();
+    for (let update = 0; update < 600; update += 1) game.update(STEP);
+    counts.push(simulation.spawnBudgets.flat().reduce((sum, count) => sum + count, 0));
+  }
+  assert.ok(counts[0] > 0);
+  assert.ok(Math.abs(counts[1] - counts[0]) <= 0.02 * counts[0], `full ${counts[0]} half ${counts[1]}`);
+});
+
+test('probe frames are accepted only while Playing', async () => {
+  const { game } = await createGame();
+  assert.equal(game.acceptsProbeFrames, false);
+  game.start();
+  assert.equal(game.acceptsProbeFrames, true);
+});
+
+test('the frame timer brackets each simulation step and the render, and closes the frame after it', async () => {
+  const { game } = await createGame();
+  const calls = [];
+  game.frameTimer = {
+    beginSection: () => calls.push('begin'),
+    endSection: () => calls.push('end'),
+    endFrame: () => calls.push('endFrame'),
+    afterFrameSubmit: () => calls.push('afterFrameSubmit'),
+  };
+  game.update(STEP);
+  game.render(0, STEP);
+  assert.deepEqual(calls, ['begin', 'end', 'begin', 'end', 'endFrame', 'afterFrameSubmit']);
 });
 
 test('every step hands the spawn pressure seek scale and spawn distance to the simulation before stepping', async () => {
@@ -623,11 +704,9 @@ test('a capacity swap mid-run keeps the multiplier tier and the score earned so 
   const { game, simulation } = await createGame();
   const next = createFakeSimulation();
   next.capacity = CAPACITY / 4;
-  // A swap carries the frame sequence (recreateWithCapacity does).
-  const carry = () => { next.frameSequence = simulation.frameSequence; return next; };
-  simulation.recreateWithCapacity = async () => carry();
-  simulation.prepareCapacity = async () => next;
-  simulation.commitCapacity = () => carry();
+  // A swap carries the frame sequence (commitCapacity does).
+  simulation.prepareCapacity = async () => ({ next });
+  simulation.commitCapacity = () => { next.frameSequence = simulation.frameSequence; return next; };
   game.start();
   game.update(STEP);
   // 150 kills at the reference capacity reach the third step (multiplier 3).

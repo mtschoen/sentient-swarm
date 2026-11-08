@@ -1,33 +1,51 @@
-// Capacity change coordinator. From request() until the new simulation is installed,
-// simulationPaused is true and the game freezes (Game.update returns early, so input, run timers,
-// invulnerability and pickups all wait; render keeps drawing the last state), so
-// recreateWithCapacity copies the final state and no step is lost to the instance being
-// replaced. One change at a time: a request while one is pending, or for the current capacity,
-// is ignored and resolves false. A rejected recreate leaves
-// the old simulation installed, clears the pause and rethrows for the UI to show.
+// Capacity change coordinator. A change is { capacity, neighborRadius?, particleCapacity? }.
+// request() first awaits prepare(change), the slow part (buffer allocation and pipeline
+// creation), while the game keeps stepping the old simulation, so play never freezes for it. Then
+// commit(prepared), which is synchronous (it queues the copy of the newest state on the GPU and
+// returns the new simulation), and install(next) run back to back in one task, between two
+// frames: no step sees a destroyed simulation and no step is lost. One change at a time: a
+// request while one is pending, or one matching the installed configuration, is ignored and
+// resolves false. A rejected prepare (or a throwing commit, after discard(prepared)) leaves the
+// old simulation installed and rethrows for the UI to show.
 export class CapacitySwap {
-  // getCapacity() returns the installed capacity; recreate(capacity) resolves with the new
-  // simulation; install(simulation) swaps it in synchronously.
-  constructor({ getCapacity, recreate, install }) {
-    this.getCapacity = getCapacity;
-    this.recreate = recreate;
+  // getConfiguration() returns the installed { capacity, neighborRadius, particleCapacity };
+  // prepare(change) resolves with a prepared change; commit(prepared) returns the new simulation;
+  // install(simulation) swaps it in synchronously; discard(prepared) releases an uncommitted one.
+  constructor({ getConfiguration, prepare, commit, install, discard = () => {} }) {
+    this.getConfiguration = getConfiguration;
+    this.prepare = prepare;
+    this.commit = commit;
     this.install = install;
-    this.pending = false;
+    this.discard = discard;
+    this.pendingValue = false;
   }
 
-  get simulationPaused() {
-    return this.pending;
+  // True from a request until its change is installed or has failed.
+  get pending() {
+    return this.pendingValue;
   }
 
-  async request(capacity) {
-    if (this.pending || capacity === this.getCapacity()) return false;
-    this.pending = true;
+  matchesInstalled(change) {
+    const installed = this.getConfiguration();
+    return Object.entries(change).every(([key, value]) => value === undefined || installed[key] === value);
+  }
+
+  async request(change) {
+    if (this.pendingValue || this.matchesInstalled(change)) return false;
+    this.pendingValue = true;
     try {
-      const next = await this.recreate(capacity);
+      const prepared = await this.prepare(change);
+      let next;
+      try {
+        next = this.commit(prepared);
+      } catch (error) {
+        this.discard(prepared);
+        throw error;
+      }
       this.install(next);
       return true;
     } finally {
-      this.pending = false;
+      this.pendingValue = false;
     }
   }
 }

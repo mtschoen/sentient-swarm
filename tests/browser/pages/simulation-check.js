@@ -11,6 +11,10 @@
 // per kill (capped at the pool capacity) all within 2.5 of the center, and adds threat near the center;
 // (g) shrinking a 131072-slot simulation whose only alive agents sit in slots 100000 and up to
 // 65536 slots keeps every one of them (compaction, not a slot prefix);
+// (i) kills in stats frames the old instance never read back count after a capacity change: with
+// a change prepared (prepareCapacity, also to a new particle budget), a debug kill step is
+// submitted and committed (commitCapacity) with no readback in between; the new instance's first
+// stats report exactly the agents removed as kills;
 // (h) main.js's cadence: one readStats per step with no await between steps, a 4-step frame every
 // CADENCE_BURST_INTERVAL frames, rAF between frames; stats then lag 2 or more steps (asserted, so
 // the check cannot fall back to the lag-1 case), and the peak alive / target ratio over the run,
@@ -46,6 +50,7 @@ const SHRINK_FROM_CAPACITY = 131072;
 const SHRINK_TO_CAPACITY = 65536;
 const SHRINK_FIRST_SLOT = 100000;
 const SHRINK_AGENT_COUNT = 1000;
+const SWAP_PARTICLE_CAPACITY = 32768;
 const CADENCE_FRAMES = 300;
 const CADENCE_BURST_INTERVAL = 50;
 const CADENCE_BURST_STEPS = 4;
@@ -194,6 +199,20 @@ async function runKillCheck(device, simulation) {
   };
 }
 
+// Writes count alive agents (spawn-in done, all species) on a grid over the arena from firstSlot.
+function seedAgents(device, simulation, firstSlot, count) {
+  const bytes = new ArrayBuffer(count * AGENT_STRIDE_BYTES);
+  const view = new DataView(bytes);
+  for (let agent = 0; agent < count; agent += 1) {
+    const base = agent * AGENT_STRIDE_BYTES;
+    view.setFloat32(base + AGENT_OFFSETS.position, 1 + (agent % 40) * 0.35, true);
+    view.setFloat32(base + AGENT_OFFSETS.position + 4, 1 + Math.floor(agent / 40) * 0.28, true);
+    view.setUint32(base + AGENT_OFFSETS.species, agent % SPECIES_COUNT, true);
+    view.setUint32(base + AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
+  }
+  device.queue.writeBuffer(simulation.agentsBuffer, firstSlot * AGENT_STRIDE_BYTES, bytes);
+}
+
 // Seeds SHRINK_AGENT_COUNT alive agents (spawn-in done, all species) in slots from
 // SHRINK_FIRST_SLOT of a fresh simulation, steps once so the params uniform is written, shrinks it
 // and counts the survivors after one more step.
@@ -201,16 +220,7 @@ async function runShrinkCheck(gpu) {
   const { device } = gpu;
   const zeroSpawns = () => new Uint32Array(SPECIES_COUNT);
   let simulation = await Simulation.create(gpu, { capacity: SHRINK_FROM_CAPACITY });
-  const bytes = new ArrayBuffer(SHRINK_AGENT_COUNT * AGENT_STRIDE_BYTES);
-  const view = new DataView(bytes);
-  for (let agent = 0; agent < SHRINK_AGENT_COUNT; agent += 1) {
-    const base = agent * AGENT_STRIDE_BYTES;
-    view.setFloat32(base + AGENT_OFFSETS.position, 1 + (agent % 40) * 0.35, true);
-    view.setFloat32(base + AGENT_OFFSETS.position + 4, 1 + Math.floor(agent / 40) * 0.28, true);
-    view.setUint32(base + AGENT_OFFSETS.species, agent % SPECIES_COUNT, true);
-    view.setUint32(base + AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
-  }
-  device.queue.writeBuffer(simulation.agentsBuffer, SHRINK_FIRST_SLOT * AGENT_STRIDE_BYTES, bytes);
+  seedAgents(device, simulation, SHRINK_FIRST_SLOT, SHRINK_AGENT_COUNT);
   const collected = new Map();
   await submitStep(device, simulation, zeroSpawns());
   const before = await waitForStats(device, simulation, collected, simulation.frameSequence);
@@ -222,6 +232,33 @@ async function runShrinkCheck(gpu) {
   return {
     pass,
     detail: `${pass ? 'PASS' : 'FAIL'} shrink ${SHRINK_FROM_CAPACITY} -> ${SHRINK_TO_CAPACITY} with ${SHRINK_AGENT_COUNT} alive agents from slot ${SHRINK_FIRST_SLOT}: alive ${before?.aliveTotal ?? 'none'} before, ${after?.aliveTotal ?? 'none'} after (need all ${SHRINK_AGENT_COUNT})`,
+  };
+}
+
+// (i) Regression for the Plan A minor "kills not yet read back from the old simulation are lost
+// across a capacity swap".
+async function runSwapKillCheck(gpu) {
+  const { device } = gpu;
+  const zeroSpawns = () => new Uint32Array(SPECIES_COUNT);
+  let simulation = await Simulation.create(gpu, { capacity: INITIAL_CAPACITY });
+  simulation.setPlayer(PLAYER[0], PLAYER[1]);
+  seedAgents(device, simulation, 0, SHRINK_AGENT_COUNT);
+  const collected = new Map();
+  await submitStep(device, simulation, zeroSpawns());
+  const before = await waitForStats(device, simulation, collected, simulation.frameSequence);
+  const prepared = await simulation.prepareCapacity(GROWN_CAPACITY, { particleCapacity: SWAP_PARTICLE_CAPACITY });
+  simulation.setDebugKill(PLAYER[0], PLAYER[1], KILL_RADIUS);
+  await submitStep(device, simulation, zeroSpawns());
+  simulation = simulation.commitCapacity(prepared);
+  await submitStep(device, simulation, zeroSpawns());
+  const after = await waitForStats(device, simulation, new Map(), simulation.frameSequence);
+  const particleCapacity = simulation.particlePool.capacity;
+  simulation.destroy();
+  const removed = (before?.aliveTotal ?? 0) - (after?.aliveTotal ?? 0);
+  const pass = before !== null && after !== null && removed > 0 && after.killsSinceLastRead === removed && particleCapacity === SWAP_PARTICLE_CAPACITY;
+  return {
+    pass,
+    detail: `${pass ? 'PASS' : 'FAIL'} unread kills across a swap ${INITIAL_CAPACITY} -> ${GROWN_CAPACITY}: alive ${before?.aliveTotal ?? 'none'} before, ${after?.aliveTotal ?? 'none'} after, removed ${removed}, kills read from the new instance ${after?.killsSinceLastRead ?? 'none'} (need equal and > 0), particle budget ${particleCapacity} (need ${SWAP_PARTICLE_CAPACITY})`,
   };
 }
 
@@ -331,10 +368,13 @@ async function runCheck() {
   const shrinkResult = await runShrinkCheck(gpu);
   if (lostReason !== null) return { pass: false, detail: `device lost during the shrink check: ${lostReason}` };
   details.push(shrinkResult.detail);
+  const swapKillResult = await runSwapKillCheck(gpu);
+  if (lostReason !== null) return { pass: false, detail: `device lost during the swap kill check: ${lostReason}` };
+  details.push(swapKillResult.detail);
   const cadenceResult = await runCadenceCheck(gpu);
   if (lostReason !== null) return { pass: false, detail: `device lost during the cadence check: ${lostReason}` };
   details.push(cadenceResult.detail);
-  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass && cadenceResult.pass;
+  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass && swapKillResult.pass && cadenceResult.pass;
   return { pass, detail: details.join('; ') };
 }
 

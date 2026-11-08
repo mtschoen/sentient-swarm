@@ -5,7 +5,7 @@
 //
 // Frame contract, its own submission after the simulation's:
 //   const encoder = device.createCommandEncoder();
-//   renderer.render(encoder, { alpha, time, deltaSeconds, impulses }); // deltaSeconds: since the last render
+//   renderer.render(encoder, { alpha, time, deltaSeconds, impulses, interpolate }); // deltaSeconds: since the last render
 //   device.queue.submit([encoder.finish()]);
 //   renderer.afterSubmit(); // maps a pending captureNextFrame readback
 // settings are read every frame, so they can be changed live. impulses (optional) are new
@@ -14,7 +14,7 @@
 // decaying back over BLOOM_BOOST_SECONDS.
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { SHADER_CONSTANTS } from '../sim/layout.js';
-import { BloomPass } from './bloom.js';
+import { BLOOM_DIVISORS, BloomPass } from './bloom.js';
 import { FrameCapture } from './capture.js';
 import { CompositePass } from './composite.js';
 import { GlyphPass } from './glyphs.js';
@@ -84,8 +84,7 @@ export class Renderer {
     this.sceneTextures = [];
     this.gridTexture = null;
     this.currentIndex = 0;
-    // render() draws only once simulation.frameSequence reaches this (see setSimulation).
-    this.firstDrawableSequence = 0;
+    this.sizeDevicePixels = [1, 1];
   }
 
   // Recreates every size-dependent texture; new textures start zeroed, which clears trail history.
@@ -98,6 +97,7 @@ export class Renderer {
       format: SCENE_FORMAT,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     }));
+    this.sizeDevicePixels = size;
     this.sceneViews = this.sceneTextures.map((texture) => texture.createView());
     this.gridTexture = this.device.createTexture({
       label: 'warp-grid-layer',
@@ -112,15 +112,28 @@ export class Renderer {
     this.currentIndex = 0;
   }
 
-  // Returns false, encoding nothing, while a just-installed simulation has not stepped yet.
-  // scene (optional, from the game): { projectiles: Projectiles, pickups: [{ x, y, type, fade }],
-  // ship: the ShipRenderer.encode state, or null to hide the ship }.
-  render(encoder, { alpha, time, deltaSeconds = 1 / 60, impulses = [], scene = null }) {
+  get bloomQuality() { return this.bloom.quality; }
+
+  // 'high', 'medium' or 'low' (BLOOM_DIVISORS); rebuilds only the bloom textures and the
+  // composite bind groups, so trails survive. Call between frames.
+  setBloomQuality(quality) {
+    if (BLOOM_DIVISORS[quality] === undefined) throw new Error(`Unknown bloom quality: ${quality}`);
+    if (quality === this.bloom.quality) return;
+    this.bloom.quality = quality;
+    const [width, height] = this.sizeDevicePixels;
+    this.bloom.resize(this.sceneTextures, this.gridTexture, width, height);
+    this.composite.setTextures(this.sceneTextures, this.bloom.outputTexture, this.gridTexture);
+  }
+
+  // Returns true (the frame was drawn). scene (optional, from the game): { projectiles: Projectiles, pickups: [{ x, y, type, fade }],
+  // ship: the ShipRenderer.encode state, or null to hide the ship }. interpolate (half simulation
+  // rate): glyphs are drawn between the last two steps at alpha instead of extrapolated from the
+  // newest one.
+  render(encoder, { alpha, time, deltaSeconds = 1 / 60, impulses = [], scene = null, interpolate = false }) {
     for (const impulse of impulses) {
       this.impulses.add(impulse, impulse.time);
       if (impulse.bloomBoost) this.bloomBoostTime = Math.max(this.bloomBoostTime, impulse.time);
     }
-    if (this.simulation.frameSequence < this.firstDrawableSequence) return false;
     const previousIndex = this.currentIndex;
     const currentIndex = 1 - previousIndex;
     const { settings, viewport, simulation } = this;
@@ -140,7 +153,7 @@ export class Renderer {
     });
     const { decay, emissionScale } = trailFrameFactors(settings.trailDecay, deltaSeconds);
     this.trails.draw(scenePass, previousIndex, decay);
-    this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time, emissionScale });
+    this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time, emissionScale, interpolate });
     if (scene?.projectiles) this.projectileRenderer.encode(scenePass, time, scene.projectiles);
     if (scene?.pickups) this.pickupRenderer.encode(scenePass, scene.pickups, time);
     this.particles.encode(scenePass, simulation.particlePool, emissionScale);
@@ -157,17 +170,13 @@ export class Renderer {
     return true;
   }
 
-  // Points the renderer at a new Simulation (after recreateWithCapacity). Every pass reads the
+  // Points the renderer at a new Simulation (after commitCapacity). Every pass reads the
   // simulation's buffers at draw time; the bind group caches that hold the old, destroyed buffers
-  // are cleared. The new simulation's coarse field stays zero until its first step, so drawing
-  // before that would show every copied glyph unattenuated (a bright spike that the trail
-  // textures would carry for many frames) over a flat grid. The old buffers are already
-  // destroyed, so instead render() skips frames, and the canvas keeps the last presented frame,
-  // until the first step of the new simulation (at most one frame on a 60 Hz display).
+  // are cleared. commitCapacity already built the new simulation's coarse field on the copied
+  // agents, so the next frame draws it with the right density attenuation and warp grid.
   setSimulation(simulation) {
     this.simulation = simulation;
     [this.glyphs, this.particles, this.warpGrid].forEach((pass) => pass.bindGroupCache.clear());
-    this.firstDrawableSequence = simulation.frameSequence + 1;
   }
 
   afterSubmit() {

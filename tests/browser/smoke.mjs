@@ -1,5 +1,7 @@
 // Browser smoke test. Serves the page with the Vite dev server (see server.mjs).
-// SMOKE_URL, when set, skips spawning and uses that URL instead.
+// SMOKE_URL, when set, skips spawning and uses that URL instead. Either way the page gets
+// ?probe=off&capacity=262144 (unless the URL already sets them), so the quality probe cannot
+// change the capacity under the checks.
 // Usage: node tests/browser/smoke.mjs [--frames N] [--play N]
 // Reads the composited frame back through window.__murmuration.capture (headless Chromium may never
 // composite a WebGPU canvas, so page.screenshot() is not trusted) and writes artifacts/smoke.png and
@@ -21,6 +23,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
 
+const SMOKE_SEARCH = { probe: 'off', capacity: '262144' };
 const READY_TIMEOUT_MILLISECONDS = 10_000;
 const EVALUATE_TIMEOUT_MILLISECONDS = 20_000;
 const SMOKE_DEADLINE_MILLISECONDS = 150_000;
@@ -294,6 +297,11 @@ async function run(resources) {
       resources.server = await startServer();
       url = resources.server.url;
     }
+    const pageUrl = new URL(url);
+    for (const [key, value] of Object.entries(SMOKE_SEARCH)) {
+      if (!pageUrl.searchParams.has(key)) pageUrl.searchParams.set(key, value);
+    }
+    url = pageUrl.href;
     const launched = await launchWebGpuBrowser();
     resources.browser = launched.browser;
     const { page } = launched;

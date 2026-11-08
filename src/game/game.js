@@ -15,7 +15,9 @@
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
 //   6. spawn pressure (paused while Dying and Respawning), its seek scale and its spawn distance
 //      (setSeekScale, setSpawnDistanceFraction: both ramp with the count), then the simulation
-//      step is submitted.
+//      step is submitted. At half simulation rate (setSimulationRate('half')) step 6 runs every
+//      other update with the two updates' summed delta, so speeds, spawn pressure per second,
+//      fire rate and charge drain (steps 1 to 5 still run every update) do not change.
 //   7. every ready stats frame (readAllStats, oldest first): kills (killsSinceLastRead) score once
 //      per stats frame and only while Playing; awards add lives and bombs; a frame with pulse ring
 //      detonations queues one RING_IMPULSE_STRENGTH impulse at its reported ring position; every
@@ -54,20 +56,27 @@ export class Game {
   // random and clock (seconds, used to stamp impulses) are injectable for tests. effects
   // (optional, the audio hook's EffectsSynth) gets bomb() for an accepted bomb press and death()
   // for an accepted hit.
-  static async create({ gpu, simulation, projectiles, renderer, input, capacity, clock, spawnPressure, random = Math.random, effects = null }) {
+  // frameTimer (optional, src/gpu/frame-timer.js) brackets every simulation step and render.
+  static async create({ gpu, simulation, projectiles, renderer, input, capacity, clock, spawnPressure, random = Math.random, effects = null, frameTimer = null }) {
     const projectileSet = projectiles ?? await Projectiles.create(gpu);
-    return new Game({ gpu, simulation, projectiles: projectileSet, renderer, input, capacity, clock, spawnPressure, random, effects });
+    return new Game({ gpu, simulation, projectiles: projectileSet, renderer, input, capacity, clock, spawnPressure, random, effects, frameTimer });
   }
 
   // Use Game.create.
-  constructor({ gpu, simulation, projectiles, renderer, input, capacity = simulation.capacity, clock, spawnPressure, random, effects = null }) {
+  constructor({ gpu, simulation, projectiles, renderer, input, capacity = simulation.capacity, clock, spawnPressure, random, effects = null, frameTimer = null }) {
     this.gpu = gpu;
     this.simulation = simulation;
     this.projectiles = projectiles;
     this.renderer = renderer;
     this.input = input;
     this.effects = effects;
+    this.frameTimer = frameTimer;
     this.capacity = capacity;
+    // Updates per simulation step (1 full rate, 2 half rate), updates since the last step and the
+    // game seconds they covered (the next step's delta).
+    this.simulationStepInterval = 1;
+    this.updatesSinceSimulationStep = 0;
+    this.pendingSimulationSeconds = 0;
     this.clock = clock ?? (() => this.simulation.time);
     this.spawnPressure = spawnPressure ?? new SpawnPressure({ capacity });
     this.player = new PlayerShip({ arenaWidth: ARENA_WIDTH, arenaHeight: ARENA_HEIGHT });
@@ -87,12 +96,18 @@ export class Game {
     // Game time spent in GameOver, for the restart guard.
     this.gameOverSeconds = 0;
     this.pendingImpulses = [];
-    // Stepping pauses from a capacity request until the new simulation is installed (CapacitySwap).
-    // install runs synchronously in the recreate's continuation, so no frame sees a destroyed
-    // simulation; spawn pressure keeps its ramp and the score its normalization follows.
+    // The old simulation keeps stepping while a capacity change is prepared (CapacitySwap); commit
+    // and install run synchronously together between two updates, so no frame sees a destroyed
+    // simulation; spawn pressure keeps its ramp and the score carries its streak (ScoreKeeper).
     this.capacitySwap = new CapacitySwap({
-      getCapacity: () => this.simulation.capacity,
-      recreate: (nextCapacity) => this.simulation.recreateWithCapacity(nextCapacity),
+      getConfiguration: () => ({
+        capacity: this.simulation.capacity,
+        neighborRadius: this.simulation.neighborRadius,
+        particleCapacity: this.simulation.particlePool?.capacity,
+      }),
+      prepare: ({ capacity: nextCapacity, ...options }) => this.simulation.prepareCapacity(nextCapacity, options),
+      commit: (prepared) => this.simulation.commitCapacity(prepared),
+      discard: (prepared) => this.simulation.discardCapacity(prepared),
       install: (next) => {
         this.simulation = next;
         this.renderer.setSimulation(next);
@@ -151,10 +166,23 @@ export class Game {
     this.bombHeld = true;
   }
 
+  // 'full' steps the simulation every update, 'half' every other update with twice the delta (the
+  // renderer then interpolates glyphs between the last two steps).
+  setSimulationRate(rate) {
+    this.simulationStepInterval = rate === 'half' ? 2 : 1;
+  }
+
+  get simulationRate() {
+    return this.simulationStepInterval === 2 ? 'half' : 'full';
+  }
+
+  // The quality probe measures only real play: Playing, with no capacity change in flight.
+  get acceptsProbeFrames() {
+    return this.run.phase === RunPhase.Playing && !this.capacitySwap.pending;
+  }
+
   update(deltaSeconds) {
-    // The old simulation is being copied into a new one; stepping it now would lose those steps.
     this.freshStats = null;
-    if (this.capacitySwap.simulationPaused) return;
     this.input.update();
     const inputState = this.input.state;
     const firingPressed = inputState.firing && !this.firingHeld;
@@ -200,10 +228,17 @@ export class Game {
       this.simulation.setPlayerState({ x, y, radius: this.player.radius, invulnerable: !playing || this.run.invulnerable });
     }
 
-    const spawnPerSpecies = this.spawnCounts(deltaSeconds);
-    this.simulation.setSeekScale(this.spawnPressure.seekScale);
-    this.simulation.setSpawnDistanceFraction(this.spawnPressure.spawnDistanceFraction);
-    this.stepSimulation(deltaSeconds, spawnPerSpecies);
+    this.pendingSimulationSeconds += deltaSeconds;
+    this.updatesSinceSimulationStep += 1;
+    if (this.updatesSinceSimulationStep >= this.simulationStepInterval) {
+      const simulationSeconds = this.pendingSimulationSeconds;
+      this.pendingSimulationSeconds = 0;
+      this.updatesSinceSimulationStep = 0;
+      const spawnPerSpecies = this.spawnCounts(simulationSeconds);
+      this.simulation.setSeekScale(this.spawnPressure.seekScale);
+      this.simulation.setSpawnDistanceFraction(this.spawnPressure.spawnDistanceFraction);
+      this.stepSimulation(simulationSeconds, spawnPerSpecies);
+    }
     const frames = this.simulation.readAllStats();
     frames.forEach((stats) => this.processStats(stats));
     if (frames.length > 0) {
@@ -242,7 +277,9 @@ export class Game {
   stepSimulation(deltaSeconds, spawnPerSpecies) {
     const { device } = this.gpu;
     const encoder = device.createCommandEncoder();
+    this.frameTimer?.beginSection(encoder);
     this.simulation.step(encoder, deltaSeconds, spawnPerSpecies);
+    this.frameTimer?.endSection(encoder);
     device.queue.submit([encoder.finish()]);
     this.simulation.afterSubmit();
   }
@@ -337,21 +374,36 @@ export class Game {
     for (let upgrade = 1; upgrade < tier; upgrade += 1) this.weapons.collect(type);
   }
 
-  // deltaSeconds is the frame's elapsed time (FrameLoop), for the time-based trail decay.
+  // alpha is FrameLoop's fraction of an update; it becomes the fraction of the current simulation
+  // step interval, so at half rate glyphs interpolate across both updates of a step. deltaSeconds
+  // is the frame's elapsed time (FrameLoop), for the time-based trail decay.
   render(alpha, deltaSeconds) {
     const { device } = this.gpu;
     const encoder = device.createCommandEncoder();
-    this.renderer.render(encoder, { alpha, time: this.simulation.time, deltaSeconds, impulses: this.takeImpulses(), scene: this.scene() });
+    const interval = this.simulationStepInterval;
+    this.frameTimer?.beginSection(encoder);
+    this.renderer.render(encoder, {
+      alpha: (this.updatesSinceSimulationStep + alpha) / interval,
+      interpolate: interval > 1,
+      time: this.simulation.time,
+      deltaSeconds,
+      impulses: this.takeImpulses(),
+      scene: this.scene(),
+    });
+    this.frameTimer?.endSection(encoder);
+    this.frameTimer?.endFrame(encoder);
     device.queue.submit([encoder.finish()]);
     this.renderer.afterSubmit();
+    this.frameTimer?.afterFrameSubmit();
   }
 
-  // The capacity swap goes through the game's CapacitySwap: stepping pauses while the new
-  // simulation is built (recreateWithCapacity compacts the alive agents and carries registered
-  // passes, player state and the stats persistent tail), then the renderer, spawn pressure
-  // (keeping its ramp) and score normalization follow. One swap at a time; resolves false for an
-  // ignored request and rethrows a failed one, leaving the old simulation installed.
-  setCapacity(capacity) {
-    return this.capacitySwap.request(capacity);
+  // The capacity swap goes through the game's CapacitySwap: the new simulation is prepared while
+  // the old one keeps stepping, then commitCapacity compacts the alive agents and carries
+  // registered passes, player state and the stats persistent tail, and the renderer, spawn
+  // pressure (keeping its ramp) and score normalization follow. options: neighborRadius and
+  // particleCapacity (default: unchanged). One swap at a time; resolves false for an ignored
+  // request and rethrows a failed one, leaving the old simulation installed.
+  setCapacity(capacity, { neighborRadius, particleCapacity } = {}) {
+    return this.capacitySwap.request({ capacity, neighborRadius, particleCapacity });
   }
 }

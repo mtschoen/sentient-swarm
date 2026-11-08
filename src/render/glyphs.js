@@ -1,14 +1,14 @@
 // Glyph pass (glyphs.wgsl, with the ship shapes of ships.wgsl prepended after common.wgsl): one
 // instanced triangle strip per agent slot, additively blended into the scene target. Bindings:
-// view uniform, SimParams uniform, agents, coarse field, species table (3 storage buffers). Bind
-// groups are cached per agent buffer, which ping-pongs every step.
+// view uniform, SimParams uniform, agents, coarse field, species table, previous agents (4
+// storage buffers). Bind groups are cached per agent buffer pair, which ping-pongs every step.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { prependCommon } from '../gpu/shaders.js';
 import { COARSE_COLUMNS, COARSE_ROWS } from '../sim/layout.js';
 import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
 
-export const GLYPH_VIEW_BYTES = 48;
+export const GLYPH_VIEW_BYTES = 64;
 const VERTICES_PER_GLYPH = 4;
 const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 
@@ -44,8 +44,9 @@ export function shipCoverageScale(viewport, shipPixels) {
 
 // Matches the GlyphView table in glyphs.wgsl. World to clip is affine, so two worldToClip samples
 // give its scale and offset (inspectZoom included); the ship size comes from shipDevicePixels.
-// emissionScale comes from trailFrameFactors.
-export function packShipView({ viewport, settings, alpha, time, emissionScale = 1 }) {
+// emissionScale comes from trailFrameFactors; interpolate (half simulation rate) blends from the
+// previous step's position to the newest by alpha instead of extrapolating by velocity.
+export function packShipView({ viewport, settings, alpha, time, emissionScale = 1, interpolate = false }) {
   const origin = viewport.worldToClip(0, 0);
   const unit = viewport.worldToClip(1, 1);
   const shipPixels = shipDevicePixels(viewport, settings.shipArenaFraction);
@@ -56,6 +57,7 @@ export function packShipView({ viewport, settings, alpha, time, emissionScale = 
     shipPixels, settings.glowScale,
     alpha, time,
     shipCoverageScale(viewport, shipPixels), emissionScale,
+    interpolate ? 1 : 0, 0, 0, 0,
   ]);
 }
 
@@ -89,11 +91,12 @@ export class GlyphPass {
   }
 
   // Draws into an open render pass whose color target is a scene texture.
-  draw(pass, { simulation, viewport, settings, alpha, time, emissionScale }) {
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packShipView({ viewport, settings, alpha, time, emissionScale }));
+  draw(pass, { simulation, viewport, settings, alpha, time, emissionScale, interpolate = false }) {
+    this.device.queue.writeBuffer(this.viewBuffer, 0, packShipView({ viewport, settings, alpha, time, emissionScale, interpolate }));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([
       this.viewBuffer, simulation.paramsBuffer, simulation.agentsBuffer, simulation.fieldBuffer, simulation.speciesTableBuffer,
+      simulation.previousAgentsBuffer,
     ]));
     pass.draw(VERTICES_PER_GLYPH, simulation.capacity);
   }

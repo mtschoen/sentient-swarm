@@ -32,3 +32,13 @@ export function stepPreset(name, direction) {
   const next = Math.min(PRESET_ORDER.length - 1, Math.max(0, index + offset));
   return PRESET_ORDER[next];
 }
+
+// The highest preset this adapter may reach (probe 'up' steps stop here): the same binding-limit
+// rule initialPresetFor applies, from the top of the order.
+export function highestPresetFor({ maxStorageBufferBindingSize }) {
+  let index = PRESET_ORDER.length - 1;
+  while (index > 0 && !fitsBindingLimit(PRESET_ORDER[index], maxStorageBufferBindingSize)) {
+    index -= 1;
+  }
+  return PRESET_ORDER[index];
+}
