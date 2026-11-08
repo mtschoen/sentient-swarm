@@ -21,11 +21,18 @@
 // the columns lying wholly inside the inner circle, in row-major order. At most RING_CELL_BUDGET
 // cells per ring. Each cell's agents are still looped by one thread, as for capsules: the work
 // is bounded by cell count, not by agent count.
-// Entry beam, one workgroup: slot 0 when it is an alive beam. The ray from position along
-// velocity (a unit direction) to the arena edge is a capsule of reach radius walked the same way,
-// with the workgroup's threads taking interleaved major-axis steps (at most columns + rows
-// steps in total); every step also adds BEAM_THREAT_UNITS threat at the ray's coarse cell so the
-// trench shows where nothing dies.
+// Entry beam, one workgroup: slot 0 when it is an alive beam. The beam kills the sector swept
+// since the previous step: from position, between the previous direction (seed, extra) and the
+// current one (velocity), both unit, over the shortest arc, out to the arena edge, padded by the
+// half width (radius) around both edge rays, so a fast turn leaves no gaps between steps. A first
+// step has both directions equal, which is the plain capsule. The shortest arc is never wider
+// than 180 degrees, so no clamp is needed; an exact reversal takes the counterclockwise half
+// disc from the previous direction. Only the grid cells of the sector's bounding box (its origin,
+// the two edge ray ends and the arena corners inside it, widened by the reach) are visited, in
+// row-major order interleaved across the workgroup; a cell is collided when its center is within
+// the reach plus its half diagonal of the sector, at most BEAM_CELL_BUDGET collided cells per
+// thread. Every major-axis step of the current ray also adds BEAM_THREAT_UNITS threat at the
+// ray's coarse cell so the trench shows where nothing dies.
 //
 // A kill is the Plan A kill: the agent must be alive and past its spawn-in frames; atomicAnd
 // clears the alive bit and only the thread that saw it set counts the kill, so overlapping
@@ -61,8 +68,11 @@ const CAPSULE_CELL_BUDGET: u32 = 64u;
 const RING_MINIMUM_BAND: f32 = 0.08;
 const RING_CELL_BUDGET: u32 = 1024u;
 const BEAM_THREAT_UNITS: f32 = 4.0;
-// Per beam thread; with fewer major-axis steps than threads each thread walks one step.
+// Collided cells per beam thread: 65536 for the workgroup, more than the whole grid at the default
+// cell size (14400 cells), so a sweep wide enough to cover half the arena is never cut short.
 const BEAM_CELL_BUDGET: u32 = 256u;
+// The beam slot's previous direction is unit; anything shorter (a zero-filled slot) is a line.
+const BEAM_MINIMUM_PREVIOUS_LENGTH_SQUARED: f32 = 0.25;
 const BEAM_SLOT: u32 = 0u;
 const NO_THREAT: f32 = 0.0;
 
@@ -324,13 +334,141 @@ fn distanceToArenaEdge(origin: vec2f, direction: vec2f) -> f32 {
   return nearest;
 }
 
+// The beam's swept sector (see the header): start and finish are its edge directions in
+// counterclockwise order (start to finish turns from +x toward +y), and startEnd, finishEnd the
+// ends of the edge rays on the arena edge.
+struct BeamSector {
+  origin: vec2f,
+  start: vec2f,
+  finish: vec2f,
+  bisector: vec2f,
+  startEnd: vec2f,
+  finishEnd: vec2f,
+  reach: f32,
+}
+
+fn crossProduct(first: vec2f, second: vec2f) -> f32 {
+  return first.x * second.y - first.y * second.x;
+}
+
+fn beamSector(projectile: Projectile) -> BeamSector {
+  var sector: BeamSector;
+  sector.origin = clampToArena(projectile.position);
+  let current = projectile.velocity;
+  var previous = vec2f(projectile.seed, projectile.extra);
+  if (dot(previous, previous) < BEAM_MINIMUM_PREVIOUS_LENGTH_SQUARED) {
+    previous = current;
+  }
+  let clockwise = crossProduct(previous, current) < 0.0;
+  sector.start = select(previous, current, clockwise);
+  sector.finish = select(current, previous, clockwise);
+  sector.bisector = sector.start + sector.finish;
+  if (dot(sector.bisector, sector.bisector) < 1e-8) {
+    sector.bisector = vec2f(-sector.start.y, sector.start.x);
+  }
+  sector.startEnd = sector.origin + sector.start * distanceToArenaEdge(sector.origin, sector.start);
+  sector.finishEnd = sector.origin + sector.finish * distanceToArenaEdge(sector.origin, sector.finish);
+  sector.reach = projectile.radius;
+  return sector;
+}
+
+// True when the offset from the origin points between start and finish (the arc is at most 180
+// degrees, so the two half planes and the bisector side bound it exactly).
+fn insideSectorArc(sector: BeamSector, offset: vec2f) -> bool {
+  return crossProduct(sector.start, offset) >= 0.0 && crossProduct(offset, sector.finish) >= 0.0 && dot(offset, sector.bisector) >= 0.0;
+}
+
+// Distance from an arena point to the sector clipped by the arena: 0 inside the arc, else the
+// distance to the nearer edge ray.
+fn distanceToSector(sector: BeamSector, point: vec2f) -> f32 {
+  if (insideSectorArc(sector, point - sector.origin)) {
+    return 0.0;
+  }
+  return min(distanceToSegment(point, sector.origin, sector.startEnd), distanceToSegment(point, sector.origin, sector.finishEnd));
+}
+
+fn collideCellWithSector(cell: u32, sector: BeamSector) {
+  let first = cellOffsets[cell];
+  let count = cellCounts[cell];
+  for (var index = 0u; index < count; index = index + 1u) {
+    let agentIndex = sortedIndices[first + index];
+    if (isKillable(atomicLoad(&agents[agentIndex].flags))) {
+      let position = agents[agentIndex].position;
+      if (distanceToSector(sector, position) <= sector.reach) {
+        kill(agentIndex, position);
+      }
+    }
+  }
+}
+
+// bounds is (minimum x, minimum y, maximum x, maximum y).
+fn includeCorner(sector: BeamSector, corner: vec2f, bounds: vec4f) -> vec4f {
+  if (insideSectorArc(sector, corner - sector.origin)) {
+    return vec4f(min(bounds.xy, corner), max(bounds.zw, corner));
+  }
+  return bounds;
+}
+
+// Walks the cells of the sector's bounding box, taking the row-major cell indices firstCell,
+// firstCell + cellStride, ... and colliding at most BEAM_CELL_BUDGET cells near the sector.
+fn collideSector(sector: BeamSector, firstCell: u32, cellStride: u32) {
+  var bounds = vec4f(min(sector.origin, min(sector.startEnd, sector.finishEnd)), max(sector.origin, max(sector.startEnd, sector.finishEnd)));
+  bounds = includeCorner(sector, vec2f(0.0, 0.0), bounds);
+  bounds = includeCorner(sector, vec2f(ARENA_WIDTH, 0.0), bounds);
+  bounds = includeCorner(sector, vec2f(0.0, ARENA_HEIGHT), bounds);
+  bounds = includeCorner(sector, vec2f(ARENA_WIDTH, ARENA_HEIGHT), bounds);
+  let firstColumn = gridCoordinate(bounds.x - sector.reach, params.gridColumns);
+  let lastColumn = gridCoordinate(bounds.z + sector.reach, params.gridColumns);
+  let firstRow = gridCoordinate(bounds.y - sector.reach, params.gridRows);
+  let lastRow = gridCoordinate(bounds.w + sector.reach, params.gridRows);
+  let width = lastColumn - firstColumn + 1u;
+  let total = width * (lastRow - firstRow + 1u);
+  let size = params.cellSize;
+  // The reach plus half a cell diagonal: every point of a cell is that close to its center.
+  let cellReach = sector.reach + size * 0.70710678;
+  var budget = BEAM_CELL_BUDGET;
+  for (var cellIndex = firstCell; cellIndex < total && budget > 0u; cellIndex = cellIndex + cellStride) {
+    let column = firstColumn + cellIndex % width;
+    let row = firstRow + cellIndex / width;
+    let center = (vec2f(f32(column), f32(row)) + vec2f(0.5)) * size;
+    if (distanceToSector(sector, center) <= cellReach) {
+      collideCellWithSector(column + row * params.gridColumns, sector);
+      budget = budget - 1u;
+    }
+  }
+}
+
+// Adds BEAM_THREAT_UNITS threat at every major-axis step of the ray from start to end, taking the
+// steps firstStep, firstStep + stepStride, ...
+fn addRayThreat(start: vec2f, end: vec2f, firstStep: u32, stepStride: u32) {
+  let delta = end - start;
+  let majorIsX = abs(delta.x) >= abs(delta.y);
+  let startAxes = select(start.yx, start, majorIsX);
+  let endAxes = select(end.yx, end, majorIsX);
+  let majorCount = select(params.gridRows, params.gridColumns, majorIsX);
+  let lowMajor = min(startAxes.x, endAxes.x);
+  let highMajor = max(startAxes.x, endAxes.x);
+  var slope = 0.0;
+  if (highMajor > lowMajor) {
+    slope = (endAxes.y - startAxes.y) / (endAxes.x - startAxes.x);
+  }
+  let size = params.cellSize;
+  let lastMajor = gridCoordinate(highMajor, majorCount);
+  for (var major = gridCoordinate(lowMajor, majorCount) + firstStep; major <= lastMajor; major = major + stepStride) {
+    let middle = clamp((f32(major) + 0.5) * size, lowMajor, highMajor);
+    let point = vec2f(middle, startAxes.y + (middle - startAxes.x) * slope);
+    atomicAdd(&threatAccumulator[coarseCellIndexFor(select(point.yx, point, majorIsX))], u32(BEAM_THREAT_UNITS * THREAT_FIXED_POINT_SCALE));
+  }
+}
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn beam(@builtin(local_invocation_index) localIndex: u32) {
   let projectile = projectiles[BEAM_SLOT];
   if ((projectile.flags & PROJECTILE_FLAG_ALIVE) != 0u && projectile.kind == PROJECTILE_KIND_BEAM) {
-    let origin = clampToArena(projectile.position);
-    let end = origin + projectile.velocity * distanceToArenaEdge(origin, projectile.velocity);
-    collideCapsule(origin, end, projectile.radius, localIndex, WORKGROUP_SIZE, BEAM_CELL_BUDGET, BEAM_THREAT_UNITS);
+    let sector = beamSector(projectile);
+    collideSector(sector, localIndex, WORKGROUP_SIZE);
+    let origin = sector.origin;
+    addRayThreat(origin, origin + projectile.velocity * distanceToArenaEdge(origin, projectile.velocity), localIndex, WORKGROUP_SIZE);
   }
   workgroupBarrier();
   flushKills(localIndex);

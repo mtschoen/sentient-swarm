@@ -4,7 +4,8 @@
 // The CPU only writes: queueSpawn assigns slots round-robin (slot 0 is reserved for the beam)
 // and encode writes the queued spawns with one queue.writeBuffer per contiguous run of slots (a
 // second run only when the cursor wraps in that frame); setBeam keeps slot 0 rewritten every
-// frame while firing and clears it once afterwards. The GPU clears a slot's alive bit when its
+// frame while firing and clears it once afterwards; it also carries the previous step's aim, so the
+// beam kills and draws the whole sector swept between two steps. The GPU clears a slot's alive bit when its
 // lifetime expires or it leaves the arena (projectiles_step.wgsl) and kills agents through the
 // spatial grid (projectiles_collide.wgsl, which adds to the stats kills index like the debug kill).
 // The step pass counts pulse ring detonations into the stats ringsThisFrame index.
@@ -71,20 +72,55 @@ export function contiguousRuns(slots) {
   return runs;
 }
 
-// The beam as a Projectile spawn, or null for no beam (or a zero direction).
-export function beamSpawn(beam) {
+// The beam as a Projectile spawn, or null for no beam (or a zero direction). The beam slot's seed
+// and extra hold the previous step's unit direction (previousDirection { x, y }; a missing or zero
+// one means the current direction, a line), so the collide and render passes cover the sector swept
+// between the two steps.
+export function beamSpawn(beam, previousDirection = null) {
   if (beam === null) return null;
   const length = Math.hypot(beam.directionX, beam.directionY);
   if (!(length > 0)) return null;
+  const velocityX = beam.directionX / length;
+  const velocityY = beam.directionY / length;
+  const previousLength = previousDirection === null ? 0 : Math.hypot(previousDirection.x, previousDirection.y);
+  const hasPrevious = previousLength > 0;
   return {
     x: beam.x,
     y: beam.y,
-    velocityX: beam.directionX / length,
-    velocityY: beam.directionY / length,
+    velocityX,
+    velocityY,
     radius: beam.halfWidth,
     lifetime: BEAM_LIFETIME,
     kind: BEAM_KIND,
+    seed: hasPrevious ? previousDirection.x / previousLength : velocityX,
+    extra: hasPrevious ? previousDirection.y / previousLength : velocityY,
   };
+}
+
+// The beam request plus the direction last written to the GPU. set takes every Game update's
+// request (null stops the beam and forgets the direction, so a restarted beam is a line); next
+// runs once per Simulation step and sweeps from the last written direction, so several updates
+// per step still sweep the whole turn.
+export class BeamTracker {
+  constructor() {
+    this.clear();
+  }
+
+  set(beam) {
+    if (beam === null) this.previousDirection = null;
+    this.beam = beam === null ? null : { ...beam };
+  }
+
+  next() {
+    const spawn = beamSpawn(this.beam, this.previousDirection);
+    this.previousDirection = spawn === null ? null : { x: spawn.velocityX, y: spawn.velocityY };
+    return spawn;
+  }
+
+  clear() {
+    this.beam = null;
+    this.previousDirection = null;
+  }
 }
 
 export class Projectiles {
@@ -103,7 +139,7 @@ export class Projectiles {
     this.common = common;
     this.slots = new ProjectileSlots(capacity);
     this.pending = [];
-    this.beam = null;
+    this.beamTracker = new BeamTracker();
     this.beamWritten = false;
     // New buffers are zero-filled, so every slot starts dead.
     this.bufferValue = createStorageBuffer(this.device, capacity * PROJECTILE_STRIDE_BYTES, 'projectiles');
@@ -158,9 +194,10 @@ export class Projectiles {
     return slot;
   }
 
-  // { x, y, directionX, directionY, halfWidth } fires the beam from the next encode on; null stops it.
+  // { x, y, directionX, directionY, halfWidth } fires the beam from the next encode on; null stops it
+  // and resets the swept direction (BeamTracker).
   setBeam(beam) {
-    this.beam = beam === null ? null : { ...beam };
+    this.beamTracker.set(beam);
   }
 
   // Kills every projectile now (queue.writeBuffer, ahead of any later submit) and drops queued
@@ -168,7 +205,7 @@ export class Projectiles {
   clear() {
     this.device.queue.writeBuffer(this.bufferValue, 0, new Uint8Array(this.bufferValue.size));
     this.pending = [];
-    this.beam = null;
+    this.beamTracker.clear();
     this.beamWritten = false;
   }
 
@@ -183,7 +220,7 @@ export class Projectiles {
       this.device.queue.writeBuffer(this.bufferValue, run.firstSlot * PROJECTILE_STRIDE_BYTES, bytes);
     }
     this.pending = [];
-    const beam = beamSpawn(this.beam);
+    const beam = this.beamTracker.next();
     if (beam === null && !this.beamWritten) return;
     const bytes = new ArrayBuffer(PROJECTILE_STRIDE_BYTES);
     if (beam !== null) packProjectile(new DataView(bytes), 0, beam);

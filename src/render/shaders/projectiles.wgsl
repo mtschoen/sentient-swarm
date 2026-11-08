@@ -6,8 +6,10 @@
 //   bullet     short bright streak with a white head          scatter  tiny flickering orange spark
 //   rail       very long thin streak, white head, fading tail  orb      pulsing glow disc
 //   ring       thin expanding circle                           sidewinder  weaving short trail
-//   beam       the fat laser from the ship to the arena edge, white core inside a coloured body
-// Slot 0 is the beam; the CPU rewrites it every frame while firing.
+//   beam       the fat laser from the ship to the arena edge, white core inside a coloured body,
+//              plus a fan over the sector swept since the previous step, fading toward the previous aim
+// Slot 0 is the beam; the CPU rewrites it every frame while firing, with the previous step's unit
+// direction in seed and extra (projectiles_collide.wgsl kills the same sector).
 
 // Uniform layout, total 64 bytes; ProjectileRenderer in projectiles.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
@@ -38,6 +40,11 @@ const RING_LIFETIME: f32 = 0.5;
 const SCATTER_FADE_SECONDS: f32 = 0.12;
 const GLOW_SATURATION: f32 = 0.85;
 const PIXEL_FEATHER: f32 = 0.75;
+// Sweeps narrower than this (radians) draw as the plain beam quad.
+const BEAM_MINIMUM_SWEEP: f32 = 0.002;
+// The fan's brightness at the previous aim and at the current one (times the body brightness).
+const BEAM_FAN_TAIL: f32 = 0.35;
+const BEAM_FAN_HEAD: f32 = 1.0;
 
 struct ProjectileVaryings {
   @builtin(position) position: vec4f,
@@ -46,6 +53,10 @@ struct ProjectileVaryings {
   @location(2) @interpolate(flat) kind: u32,
   // x radius (or half beam width), y half extent along the heading, z seed, w fade 0..1.
   @location(3) @interpolate(flat) shape: vec4f,
+  // Beam only: xy the current unit direction, zw the previous one (equal for no sweep).
+  @location(4) @interpolate(flat) beamDirections: vec4f,
+  // Beam only: the ship position the beam starts from.
+  @location(5) @interpolate(flat) beamOrigin: vec2f,
 }
 
 fn kindHue(kind: u32) -> f32 {
@@ -81,6 +92,8 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
   output.hue = 0.0;
   output.kind = 0u;
   output.shape = vec4f(0.0);
+  output.beamDirections = vec4f(0.0);
+  output.beamOrigin = vec2f(0.0);
   let projectile = projectiles[instanceIndex];
   if ((projectile.flags & PROJECTILE_FLAG_ALIVE) == 0u) {
     return output;
@@ -92,6 +105,8 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
   var center = projectile.position;
   var halfExtent = vec2f(0.1);
   var fade = 1.0;
+  // The swept beam's quad is the sector's world-axis bounding box instead of a heading frame.
+  var axisAligned = false;
   switch kind {
     case PROJECTILE_KIND_BULLET: {
       // Centred on the streak (-BULLET_TAIL to 0.04) with a 0.14 margin all round, where the
@@ -123,22 +138,78 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
     default: {
       // Beam: from the ship (position) along the unit direction to the arena edge.
       let length = distanceToArenaEdge(projectile.position, direction);
-      halfExtent = vec2f(length * 0.5 + 0.05, projectile.radius * BEAM_GLOW_FACTOR + BEAM_GLOW_MARGIN);
+      let glowWidth = projectile.radius * BEAM_GLOW_FACTOR + BEAM_GLOW_MARGIN;
+      halfExtent = vec2f(length * 0.5 + 0.05, glowWidth);
       center = projectile.position + direction * (length * 0.5);
+      let previous = beamPreviousDirection(projectile, direction);
+      output.beamDirections = vec4f(direction, previous);
+      output.beamOrigin = projectile.position;
+      if (sweptAngle(previous, direction) > BEAM_MINIMUM_SWEEP) {
+        let bounds = beamSweepBounds(projectile.position, previous, direction, glowWidth + 0.05);
+        center = (bounds.xy + bounds.zw) * 0.5;
+        halfExtent = (bounds.zw - bounds.xy) * 0.5;
+        axisAligned = true;
+      }
+      // shape.w carries the beam length to the fragment.
+      fade = length;
     }
   }
   let corner = vec2f(f32(vertexIndex & 1u), f32(vertexIndex >> 1u)) * 2.0 - vec2f(1.0);
   let local = corner * halfExtent;
+  let quadDirection = select(direction, vec2f(1.0, 0.0), axisAligned);
+  let quadSide = vec2f(-quadDirection.y, quadDirection.x);
   // World y grows downward like the screen, so the world offset maps through the signed scale.
-  let world = center + direction * local.x + side * local.y;
+  let world = center + quadDirection * local.x + quadSide * local.y;
   output.position = vec4f(world * view.worldToClipScale + view.worldToClipOffset, 0.0, 1.0);
-  // Fragment coordinates are relative to the projectile's position (its head), except the beam,
-  // which is relative to the middle of its quad.
-  output.local = select(local + vec2f(dot(center - projectile.position, direction), 0.0), local, kind == PROJECTILE_KIND_BEAM);
+  // Fragment coordinates are relative to the projectile's position (its head) in its heading frame,
+  // except the beam's, which are the world offset from the ship.
+  output.local = select(local + vec2f(dot(center - projectile.position, direction), 0.0), world - projectile.position, kind == PROJECTILE_KIND_BEAM);
   output.hue = kindHue(kind);
   output.kind = kind;
   output.shape = vec4f(projectile.radius, halfExtent.x, projectile.seed, fade);
   return output;
+}
+
+fn crossProduct(first: vec2f, second: vec2f) -> f32 {
+  return first.x * second.y - first.y * second.x;
+}
+
+// The beam slot's previous unit direction (seed, extra), or current when it is unset.
+fn beamPreviousDirection(projectile: Projectile, current: vec2f) -> vec2f {
+  let previous = vec2f(projectile.seed, projectile.extra);
+  return select(current, normalize(previous), dot(previous, previous) > 0.25);
+}
+
+fn sweptAngle(previous: vec2f, current: vec2f) -> f32 {
+  return acos(clamp(dot(previous, current), -1.0, 1.0));
+}
+
+// Signed angle of offset from previous, positive in the sweep's turning sense: counterclockwise
+// unless the shortest arc to current is clockwise (an exact reversal turns counterclockwise, as
+// in projectiles_collide.wgsl).
+fn angleFromPrevious(previous: vec2f, current: vec2f, offset: vec2f) -> f32 {
+  let turn = select(1.0, -1.0, crossProduct(previous, current) < 0.0);
+  return atan2(turn * crossProduct(previous, offset), dot(previous, offset));
+}
+
+// The world-axis box (minimum xy, maximum xy) around the sector swept from previous to current,
+// clipped by the arena: the origin, both edge ray ends and the arena corners inside the arc,
+// widened by margin.
+fn beamSweepBounds(origin: vec2f, previous: vec2f, current: vec2f, margin: f32) -> vec4f {
+  let previousEnd = origin + previous * distanceToArenaEdge(origin, previous);
+  let currentEnd = origin + current * distanceToArenaEdge(origin, current);
+  var low = min(origin, min(previousEnd, currentEnd));
+  var high = max(origin, max(previousEnd, currentEnd));
+  let sweep = sweptAngle(previous, current);
+  for (var index = 0u; index < 4u; index = index + 1u) {
+    let corner = vec2f(f32(index & 1u) * ARENA_WIDTH, f32(index >> 1u) * ARENA_HEIGHT);
+    let angle = angleFromPrevious(previous, current, corner - origin);
+    if (angle >= 0.0 && angle <= sweep) {
+      low = min(low, corner);
+      high = max(high, corner);
+    }
+  }
+  return vec4f(low - vec2f(margin), high + vec2f(margin));
 }
 
 fn segmentDistance(point: vec2f, start: vec2f, end: vec2f) -> f32 {
@@ -208,16 +279,39 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
       color = (vec3f(1.0, 0.9, 1.0) * trail.x + neon(input.hue, 1.0) * trail.y * 0.9) * pow(progress, 1.3) + neon(input.hue, 0.5) * head * 1.4;
     }
     default: {
-      // Beam: local.y is the distance across; radius is the half width.
-      let across = abs(local.y);
-      let ripple = 0.88 + 0.12 * sin(local.x * 7.0 - time * 45.0);
+      // Beam: local is the world offset from the ship, shape.w the beam length, radius the half width.
+      let current = input.beamDirections.xy;
+      let previous = input.beamDirections.zw;
+      let origin = input.beamOrigin;
+      let beamLength = fade;
+      let along = dot(local, current);
+      let across = abs(crossProduct(current, local));
+      let ripple = 0.88 + 0.12 * sin(along * 7.0 - time * 45.0);
       let flicker = 0.92 + 0.08 * sin(time * 70.0);
+      let glowExtent = max(radius * (BEAM_GLOW_FACTOR - 1.0) + BEAM_GLOW_MARGIN, 0.001);
       let body = 1.0 - smoothstep(radius * 0.85 - feather, radius + feather, across);
       let core = 1.0 - smoothstep(radius * 0.25, radius * 0.5 + feather, across);
-      let glowExtent = max(radius * (BEAM_GLOW_FACTOR - 1.0) + BEAM_GLOW_MARGIN, 0.001);
       let glow = pow(clamp(1.0 - max(across - radius, 0.0) / glowExtent, 0.0, 1.0), 2.5);
-      let endFade = smoothstep(0.0, 0.05, halfLength - abs(local.x));
+      let endFade = smoothstep(0.0, 0.05, 0.05 + min(along, beamLength - along));
       color = (neon(input.hue, GLOW_SATURATION) * (body * 0.9 * ripple + glow * 0.8) + vec3f(core * 1.6)) * flicker * endFade;
+      let sweep = sweptAngle(previous, current);
+      if (sweep > BEAM_MINIMUM_SWEEP) {
+        // The swept fan: the kill sector padded by the half width, brightening toward the current aim.
+        let angle = angleFromPrevious(previous, current, local);
+        let inside = angle >= 0.0 && angle <= sweep;
+        let previousEnd = previous * distanceToArenaEdge(origin, previous);
+        let currentEnd = current * distanceToArenaEdge(origin, current);
+        let edgeDistance = min(segmentDistance(local, vec2f(0.0), previousEnd), segmentDistance(local, vec2f(0.0), currentEnd));
+        let sectorDistance = select(edgeDistance, 0.0, inside);
+        let fanBody = 1.0 - smoothstep(radius * 0.85 - feather, radius + feather, sectorDistance);
+        let fanGlow = pow(clamp(1.0 - max(sectorDistance - radius, 0.0) / glowExtent, 0.0, 1.0), 2.5);
+        let progress = clamp(angle / sweep, 0.0, 1.0);
+        let world = origin + local;
+        let inArena = f32(all(world >= vec2f(0.0)) && all(world <= vec2f(ARENA_WIDTH, ARENA_HEIGHT)));
+        let ramp = mix(BEAM_FAN_TAIL, BEAM_FAN_HEAD, progress);
+        let fan = neon(input.hue, GLOW_SATURATION) * (fanBody * 0.9 * ripple + fanGlow * 0.5) * ramp * flicker * inArena;
+        color = max(color, fan);
+      }
     }
   }
   return vec4f(color, 0.0);

@@ -2,7 +2,7 @@
 // SMOKE_URL, when set, skips spawning and uses that URL instead. Either way the page gets
 // ?probe=off&capacity=262144 (unless the URL already sets them), so the quality probe cannot
 // change the capacity under the checks.
-// Usage: node tests/browser/smoke.mjs [--frames N] [--play N | --pulse | --corridor | --bursts]
+// Usage: node tests/browser/smoke.mjs [--frames N] [--play N | --pulse | --sweep | --corridor | --bursts]
 // Reads the composited frame back through window.__murmuration.capture (headless Chromium may never
 // composite a WebGPU canvas, so page.screenshot() is not trusted) and writes artifacts/smoke.png and
 // artifacts/smoke-zoom.png (4x inspect zoom, trails off) and artifacts/smoke-ships.png (1x, trails
@@ -17,6 +17,8 @@
 // --pulse instead arms the pulse weapon through the debug panel's arm select, fires toward the arena
 // center with the synthetic gamepad, and writes artifacts/pulse-ring.png, captured the moment the
 // stats report a ring detonation (ringsThisFrame), so a ring is expanding on screen.
+// --sweep (task C0d) arms the beam the same way, fires it, turns the aim 120 degrees in 4 frames
+// and writes artifacts/beam-sweep.png of the frame after the turn: a swept fan, not comb lines.
 // --corridor and --bursts (task C0b, smoke-clearing.mjs): the beam corridor density metric, and the
 // kill burst and bomb captures (artifacts/kill-burst.png, artifacts/bomb-burst.png).
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
@@ -192,14 +194,19 @@ const PULSE_TIMEOUT_MILLISECONDS = 60_000;
 // Arms the pulse weapon (tier 3) from the debug panel, fires right from 2 units left of center, and
 // captures the frame right after the first ring detonation shows in the stats. Returns a failure
 // message, or null.
-async function checkPulse(page) {
+// Moves the ship 2 units left (starting the run), then arms weapon from the debug panel.
+async function armFromPanel(page, weapon) {
   const begin = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
   await setSticks(page, [-1, 0, 0, 0]);
   await waitForFrame(page, begin + PLAY_MOVE_FRAMES);
   await page.keyboard.press('Backquote');
-  await page.locator('select', { has: page.locator('option[value="pulse"]') }).selectOption('pulse');
+  await page.locator('select', { has: page.locator(`option[value="${weapon}"]`) }).selectOption(weapon);
   await page.keyboard.press('Backquote');
   await page.evaluate(() => document.activeElement?.blur());
+}
+
+async function checkPulse(page) {
+  await armFromPanel(page, 'pulse');
   await setSticks(page, [0, 0, 1, 0]);
   const captured = await withTimeout(page.evaluate(() => new Promise((resolve) => {
     const watch = () => {
@@ -212,6 +219,35 @@ async function checkPulse(page) {
   await writeDataUrl('pulse-ring.png', captured.pngDataUrl);
   console.log(`smoke: pulse ring captured, arena mean ${captured.meanLuminance.toFixed(4)}`);
   return page.consoleErrors.length > 0 ? `smoke: console errors during the pulse capture: ${page.consoleErrors.join(' | ')}` : null;
+}
+
+// --sweep: the beam fires at the first angle for SWEEP_HOLD_FRAMES, then the aim turns
+// SWEEP_DEGREES in SWEEP_TURN_FRAMES animation frames and the next frame is captured.
+const SWEEP_START_DEGREES = -60;
+const SWEEP_DEGREES = 120;
+const SWEEP_TURN_FRAMES = 4;
+const SWEEP_HOLD_FRAMES = 20;
+
+async function checkSweep(page) {
+  await armFromPanel(page, 'beam');
+  const radians = (degrees) => (degrees * Math.PI) / 180;
+  await setSticks(page, [0, 0, Math.cos(radians(SWEEP_START_DEGREES)), Math.sin(radians(SWEEP_START_DEGREES))]);
+  await waitForFrame(page, (await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame)) + SWEEP_HOLD_FRAMES);
+  const captured = await evaluateWithin(page, 'the sweep capture', ({ start, degrees, frames }) => new Promise((resolve) => {
+    let frame = 0;
+    const turn = () => {
+      frame += 1;
+      const angle = ((start + (degrees * frame) / frames) * Math.PI) / 180;
+      window.__smokeGamepad.axes = [0, 0, Math.cos(angle), Math.sin(angle)];
+      if (frame < frames) requestAnimationFrame(turn);
+      else resolve(window.__murmuration.capture());
+    };
+    requestAnimationFrame(turn);
+  }), { start: SWEEP_START_DEGREES, degrees: SWEEP_DEGREES, frames: SWEEP_TURN_FRAMES });
+  await setSticks(page, [0, 0, 0, 0]);
+  await writeDataUrl('beam-sweep.png', captured.pngDataUrl);
+  console.log(`smoke: beam sweep captured, arena mean ${captured.meanLuminance.toFixed(4)}`);
+  return page.consoleErrors.length > 0 ? `smoke: console errors during the sweep capture: ${page.consoleErrors.join(' | ')}` : null;
 }
 
 // Replaces navigator.getGamepads, before any page script runs, with one standard pad whose axes
@@ -339,8 +375,9 @@ async function run(resources) {
     resources.browser = launched.browser;
     const { page } = launched;
     const pulseMode = process.argv.includes('--pulse');
+    const sweepMode = process.argv.includes('--sweep');
     const clearingMode = ['--corridor', '--bursts'].find((flag) => process.argv.includes(flag)) ?? null;
-    if (playFrames !== null || pulseMode || clearingMode) await page.addInitScript(installSyntheticGamepad);
+    if (playFrames !== null || pulseMode || sweepMode || clearingMode) await page.addInitScript(installSyntheticGamepad);
 
     await page.goto(url);
     const adapterAvailable = await evaluateWithin(page, 'the adapter probe', async () => {
@@ -381,13 +418,13 @@ async function run(resources) {
       console.log(`smoke: ok (${clearingMode.slice(2)})`);
       return EXIT_OK;
     }
-    if (pulseMode) {
-      const pulseFailure = await checkPulse(page);
-      if (pulseFailure) {
-        console.error(pulseFailure);
+    if (pulseMode || sweepMode) {
+      const failure = pulseMode ? await checkPulse(page) : await checkSweep(page);
+      if (failure) {
+        console.error(failure);
         return EXIT_FAILURE;
       }
-      console.log('smoke: ok (pulse)');
+      console.log(`smoke: ok (${pulseMode ? 'pulse' : 'sweep'})`);
       return EXIT_OK;
     }
     if (playFrames !== null) {

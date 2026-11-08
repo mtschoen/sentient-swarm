@@ -220,8 +220,9 @@ fn thinnedBurstCount(expected: f32, random: f32) -> u32 {
 
 // 48 bytes, 16-byte aligned for storage arrays. flags bit 0 is alive. extra is the ring growth
 // speed for a pulseRing, the detonation density threshold for a pulseOrb and the turn rate in
-// radians per second for a sidewinder. A beam's velocity is its unit direction and its radius its
-// half width.
+// radians per second for a sidewinder. A beam's velocity is its unit direction, its radius its
+// half width, and (seed, extra) the previous step's unit direction, so the beam sweeps the sector
+// between the two (equal on a beam's first step); its lifetime is never read.
 struct Projectile {
   position: vec2f,
   previousPosition: vec2f,

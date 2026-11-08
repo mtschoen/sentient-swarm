@@ -17,7 +17,15 @@
 //     ring slot is dead after its lifetime; stats ringsThisFrame is 1 in the detonation step only,
 //     with lastRingX and lastRingY at the ring;
 // (e) a sidewinder flying along the block's lower edge turns toward the block (positive y
-//     velocity) and keeps its speed.
+//     velocity) and keeps its speed;
+// (f) swept beam: agents spread uniformly over radii 1 to 6 from the ship at (4, 4.5) and angles
+//     within 70 degrees of +x; the beam holds at -45 degrees for one step, then jumps to +45 for
+//     one step. Every one of 18 angular bins across the 90 degree wedge has kills, no agent inside
+//     the wedge survives, and every agent farther than the half width from the wedge survives.
+//     Control: a straight beam at 0 degrees for one step, then (reseeded) 0 then 1 degree: the
+//     1 degree sweep kills exactly the agents within the half width of its sector, which is no
+//     more than the straight beam plus the sliver and the padding past its far edge. Prints the
+//     histogram.
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
@@ -80,20 +88,25 @@ class Harness {
   // Positions are clamped just inside the arena; returns them as [x, y] pairs by slot.
   seedBlock(center) {
     const random = seededRandom(12345);
+    const positions = Array.from({ length: AGENT_COUNT }, () => [
+      Math.min(ARENA_WIDTH - ARENA_INSET, Math.max(ARENA_INSET, center[0] + (random() * 2 - 1) * BLOCK_HALF_SIZE)),
+      Math.min(ARENA_HEIGHT - ARENA_INSET, Math.max(ARENA_INSET, center[1] + (random() * 2 - 1) * BLOCK_HALF_SIZE)),
+    ]);
+    return this.seedPositions(positions, random);
+  }
+
+  // Writes the given [x, y] positions as alive agents (at most AGENT_COUNT), every other slot dead.
+  seedPositions(positions, random = seededRandom(54321)) {
     const bytes = new ArrayBuffer(CAPACITY * AGENT_STRIDE_BYTES);
     const view = new DataView(bytes);
-    const positions = [];
-    for (let slot = 0; slot < AGENT_COUNT; slot += 1) {
-      const x = Math.min(ARENA_WIDTH - ARENA_INSET, Math.max(ARENA_INSET, center[0] + (random() * 2 - 1) * BLOCK_HALF_SIZE));
-      const y = Math.min(ARENA_HEIGHT - ARENA_INSET, Math.max(ARENA_INSET, center[1] + (random() * 2 - 1) * BLOCK_HALF_SIZE));
+    positions.forEach(([x, y], slot) => {
       const base = slot * AGENT_STRIDE_BYTES;
       view.setFloat32(base + AGENT_OFFSETS.position, x, true);
       view.setFloat32(base + AGENT_OFFSETS.position + 4, y, true);
       view.setUint32(base + AGENT_OFFSETS.species, 0, true);
       view.setUint32(base + AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
       view.setFloat32(base + AGENT_OFFSETS.hueJitter, random() * 2 - 1, true);
-      positions.push([x, y]);
-    }
+    });
     this.device.queue.writeBuffer(this.simulation.agentsBuffer, 0, bytes);
     this.projectiles.clear();
     return positions;
@@ -297,6 +310,94 @@ async function runSidewinderCase(harness) {
   ]);
 }
 
+const SWEEP_ORIGIN = [4, 4.5];
+const SWEEP_HALF_WIDTH = 0.1;
+const WEDGE_FIRST_DEGREES = -45;
+const WEDGE_LAST_DEGREES = 45;
+const SEED_MARGIN_DEGREES = 25;
+const WEDGE_BINS = 18;
+const SWEEP_RADII = [1, 6];
+// Float tolerance on the half width when splitting agents into must-die and must-live sets.
+const SWEEP_TOLERANCE = 1e-4;
+const toRadians = (degrees) => (degrees * Math.PI) / 180;
+
+// Positions uniform by area over radii SWEEP_RADII and the wedge widened by SEED_MARGIN_DEGREES,
+// inside the arena, rounded to float32 like the agents buffer.
+function wedgePositions() {
+  const random = seededRandom(777);
+  const positions = [];
+  while (positions.length < AGENT_COUNT) {
+    const radius = Math.sqrt(SWEEP_RADII[0] ** 2 + random() * (SWEEP_RADII[1] ** 2 - SWEEP_RADII[0] ** 2));
+    const angle = toRadians(WEDGE_FIRST_DEGREES - SEED_MARGIN_DEGREES + random() * (WEDGE_LAST_DEGREES - WEDGE_FIRST_DEGREES + 2 * SEED_MARGIN_DEGREES));
+    const x = Math.fround(SWEEP_ORIGIN[0] + Math.cos(angle) * radius);
+    const y = Math.fround(SWEEP_ORIGIN[1] + Math.sin(angle) * radius);
+    if (x > ARENA_INSET && x < ARENA_WIDTH - ARENA_INSET && y > ARENA_INSET && y < ARENA_HEIGHT - ARENA_INSET) positions.push([x, y]);
+  }
+  return positions;
+}
+
+const angleOf = (position) => Math.atan2(position[1] - SWEEP_ORIGIN[1], position[0] - SWEEP_ORIGIN[0]);
+
+// Distance from position to the sector from the origin between the angles (radians, first below
+// last, under 180 degrees apart) out to a radius past every seeded agent: 0 inside, else the
+// distance to the nearer edge ray.
+function distanceToWedge(position, first, last) {
+  const angle = angleOf(position);
+  if (angle >= first && angle <= last) return 0;
+  const reach = 100;
+  const edge = (theta) => [SWEEP_ORIGIN[0] + Math.cos(theta) * reach, SWEEP_ORIGIN[1] + Math.sin(theta) * reach];
+  return Math.min(distanceToSegment(position, SWEEP_ORIGIN, edge(first)), distanceToSegment(position, SWEEP_ORIGIN, edge(last)));
+}
+
+async function fireBeamSteps(harness, anglesDegrees) {
+  let kills = 0;
+  for (const degrees of anglesDegrees) {
+    const angle = toRadians(degrees);
+    harness.projectiles.setBeam({ x: SWEEP_ORIGIN[0], y: SWEEP_ORIGIN[1], directionX: Math.cos(angle), directionY: Math.sin(angle), halfWidth: SWEEP_HALF_WIDTH });
+    kills += await harness.step();
+  }
+  harness.projectiles.setBeam(null);
+  kills += await harness.step();
+  return kills;
+}
+
+async function runSweptBeamCase(harness) {
+  const positions = wedgePositions();
+  harness.seedPositions(positions);
+  const kills = await fireBeamSteps(harness, [WEDGE_FIRST_DEGREES, WEDGE_LAST_DEGREES]);
+  const alive = await harness.aliveFlags();
+  const first = toRadians(WEDGE_FIRST_DEGREES);
+  const last = toRadians(WEDGE_LAST_DEGREES);
+  const histogram = new Array(WEDGE_BINS).fill(0);
+  positions.forEach((position, index) => {
+    const fraction = (angleOf(position) - first) / (last - first);
+    if (!alive[index] && fraction >= 0 && fraction < 1) histogram[Math.floor(fraction * WEDGE_BINS)] += 1;
+  });
+  const distances = positions.map((position) => distanceToWedge(position, first, last));
+  const aliveInside = distances.filter((distance, index) => alive[index] && distance === 0).length;
+  const deadOutside = distances.filter((distance, index) => !alive[index] && distance > SWEEP_HALF_WIDTH + SWEEP_TOLERANCE).length;
+  const dropped = alive.filter((flag) => !flag).length;
+
+  harness.seedPositions(positions);
+  const straight = await fireBeamSteps(harness, [0]);
+  harness.seedPositions(positions);
+  const narrow = await fireBeamSteps(harness, [0, 1]);
+  const narrowDistances = positions.map((position) => distanceToWedge(position, 0, toRadians(1)));
+  const mustDie = narrowDistances.filter((distance) => distance <= SWEEP_HALF_WIDTH - SWEEP_TOLERANCE).length;
+  const mayDie = narrowDistances.filter((distance) => distance <= SWEEP_HALF_WIDTH + SWEEP_TOLERANCE).length;
+  // The sweep's addition: agents within the half width of the 1 degree sector (the sliver plus the
+  // padding past its far edge) that the straight beam at 0 degrees leaves alive.
+  const added = positions.filter((position, index) => narrowDistances[index] <= SWEEP_HALF_WIDTH + SWEEP_TOLERANCE && distanceToWedge(position, 0, 0) > SWEEP_HALF_WIDTH - SWEEP_TOLERANCE).length;
+  return verdictLine([
+    [histogram.every((count) => count > 0), `(f) swept kill histogram over ${WEDGE_BINS} bins of ${(WEDGE_LAST_DEGREES - WEDGE_FIRST_DEGREES) / WEDGE_BINS} degrees [${histogram.join(' ')}] (need no empty bin)`],
+    [aliveInside === 0, `(f) alive agents inside the swept wedge ${aliveInside} (need 0)`],
+    [deadOutside === 0, `(f) dead agents beyond the half width ${SWEEP_HALF_WIDTH} of the wedge ${deadOutside} (need 0)`],
+    [dropped === kills, `(f) alive drop ${dropped} equals kills ${kills}`],
+    [narrow >= mustDie && narrow <= mayDie, `(f) 1 degree sweep kills ${narrow} (need the ${mustDie} to ${mayDie} agents within the half width of its sector)`],
+    [straight > 0 && narrow <= straight + added, `(f) 1 degree sweep kills ${narrow}, straight beam ${straight} plus the sliver and padding's ${added} (need no more)`],
+  ]);
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   const { device } = gpu;
@@ -311,7 +412,7 @@ async function runCheck() {
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const harness = new Harness(device, simulation, projectiles);
   const lines = [];
-  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase]) {
+  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runSweptBeamCase]) {
     lines.push(await run(harness));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${lines.join('; ')}` };
   }
