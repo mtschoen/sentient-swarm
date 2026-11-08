@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { DENSITY_READBACK_INTERVAL, DensityReadback } from '../../src/sim/density-readback.js';
 import { COARSE_COLUMNS, COARSE_ROWS } from '../../src/sim/layout.js';
 
@@ -7,6 +9,14 @@ globalThis.GPUBufferUsage = { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, UNIFORM: 64
 globalThis.GPUMapMode = { READ: 1 };
 
 const CELLS = COARSE_COLUMNS * COARSE_ROWS;
+
+// Serves shader files from disk so the test never fetches a file: URL; records each requested URL.
+function diskFetch(requested = []) {
+  return async (url) => {
+    requested.push(String(url));
+    return { ok: true, text: async () => readFileSync(fileURLToPath(url), 'utf8') };
+  };
+}
 
 function fakeDevice() {
   const device = {
@@ -24,7 +34,8 @@ function fakeDevice() {
       device.buffers.push(buffer);
       return buffer;
     },
-    createShaderModule: () => ({}),
+    shaderCode: null,
+    createShaderModule(descriptor) { device.shaderCode = descriptor.code; return {}; },
     createComputePipelineAsync: async () => ({ getBindGroupLayout: () => ({}) }),
     createBindGroup() { device.bindGroups += 1; return {}; },
   };
@@ -45,7 +56,7 @@ function fakeEncoder() {
 
 async function ready(device = fakeDevice()) {
   const readback = new DensityReadback(device);
-  await readback.initialize();
+  await readback.initialize({ fetchFunction: diskFetch() });
   return { readback, device };
 }
 
@@ -120,4 +131,26 @@ test('the staging maps are 9 KB, three deep', async () => {
   const staging = device.buffers.filter((buffer) => buffer.usage === (1 | 8));
   assert.equal(staging.length, 3);
   assert.ok(staging.every((buffer) => buffer.size === CELLS * 4));
+});
+
+test('initialize loads density_sum.wgsl through the injected fetch with every constant substituted', async () => {
+  const requested = [];
+  const device = fakeDevice();
+  const readback = new DensityReadback(device);
+  await readback.initialize({ fetchFunction: diskFetch(requested) });
+  assert.equal(requested.length, 1);
+  assert.ok(requested[0].endsWith('/src/sim/shaders/density_sum.wgsl'));
+  assert.ok(device.shaderCode.includes('fn sum('));
+  assert.ok(device.shaderCode.includes('@workgroup_size(256)'));
+  assert.ok(device.shaderCode.includes('64u * 36u'));
+  assert.ok(device.shaderCode.includes('species < 5u'));
+  assert.ok(device.shaderCode.includes('cell * 8u + species'));
+  assert.equal(device.shaderCode.match(/__[A-Z_]+__/), null);
+});
+
+test('initialize rejects when the shader fetch fails', async () => {
+  const readback = new DensityReadback(fakeDevice());
+  const failing = async () => ({ ok: false, status: 404 });
+  await assert.rejects(readback.initialize({ fetchFunction: failing }), /density_sum: 404/);
+  assert.equal(readback.pipeline, null);
 });

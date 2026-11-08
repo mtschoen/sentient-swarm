@@ -3,32 +3,15 @@
 // (64 by 36, about 9 KB; threat and padding channels are never read), copies it into its own
 // staging ring (three buffers) and the CPU samples the newest mapped map with densityAt. The ring
 // never blocks: a busy ring skips the copy and a map arrives a few frames later. Before the first
-// map arrives densityAt returns 0. The shader is inline so the module needs no fetch.
+// map arrives densityAt returns 0. The shader is shaders/density_sum.wgsl.
 import { createStorageBuffer, StagingRing } from '../gpu/buffers.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT, WORKGROUP_SIZE } from './layout.js';
+import { loadShader, substituteConstants } from '../gpu/shaders.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, COARSE_COLUMNS, COARSE_ROWS, SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
 
 export const DENSITY_READBACK_INTERVAL = 15;
 const CELL_COUNT = COARSE_COLUMNS * COARSE_ROWS;
 const MAP_BYTES = CELL_COUNT * 4;
 const RING_DEPTH = 3;
-
-const SHADER = `
-@group(0) @binding(0) var<storage, read> field: array<f32>;
-@group(0) @binding(1) var<storage, read_write> density: array<f32>;
-
-@compute @workgroup_size(${WORKGROUP_SIZE})
-fn sum(@builtin(global_invocation_id) globalId: vec3u) {
-  let cell = globalId.x;
-  if (cell >= ${CELL_COUNT}u) {
-    return;
-  }
-  var total = 0.0;
-  for (var species = 0u; species < ${SPECIES_COUNT}u; species = species + 1u) {
-    total = total + field[cell * ${COARSE_CHANNELS}u + species];
-  }
-  density[cell] = total;
-}
-`;
 
 export class DensityReadback {
   constructor(device) {
@@ -44,8 +27,10 @@ export class DensityReadback {
     this.map = null;
   }
 
-  async initialize() {
-    const module = this.device.createShaderModule({ label: 'density-sum', code: SHADER });
+  // fetchFunction is passed through to loadShader (tests inject one; the browser uses fetch).
+  async initialize({ fetchFunction } = {}) {
+    const code = substituteConstants(await loadShader('density_sum', { fetchFunction }), SHADER_CONSTANTS);
+    const module = this.device.createShaderModule({ label: 'density-sum', code });
     this.pipeline = await this.device.createComputePipelineAsync({ label: 'density-sum', layout: 'auto', compute: { module, entryPoint: 'sum' } });
   }
 

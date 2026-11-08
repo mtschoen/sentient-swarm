@@ -16,9 +16,9 @@
 //   (pool size minus liveCount and the death flood) cover the whole clear; past that each kill's
 //   burst is thinned (thinnedBurstCount, seeded per slot) to an expected free / killAllAlive
 //   particles, so a clear through a full arena spreads the pool evenly over the arena instead
-//   of spending it on the first slots. The step's shared budget (grantedParticleCount) still caps the total, so
-//   the bursts never ask for more particles than were free; slots are reused from the cursor,
-//   oldest first.
+//   of spending it on the first slots. The step's shared budget (grantedParticleCount) still caps
+//   the total, so the bursts never ask for more particles than were free; slots are reused from
+//   the cursor, oldest first.
 //   Every kill adds 1 / THREAT_KILLS_PER_UNIT of a threat unit to its coarse cell (one unit per
 //   THREAT_KILLS_PER_UNIT kills per cell, in fixed point).
 // The barriers sit outside every branch; threads past capacity still reach them.
