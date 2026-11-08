@@ -616,3 +616,29 @@ test('every step hands the spawn pressure seek scale and spawn distance to the s
   assert.ok(simulation.spawnDistanceFractions.at(-1) < simulation.spawnDistanceFractions[0], 'spawns move closer during play');
   assert.equal(simulation.seekScales.at(-1), game.spawnPressure.seekScale);
 });
+
+// Regression (Plan B minor): ScoreKeeper.capacity was a mutable public field the swap overwrote,
+// so the raw streak met the new capacity's thresholds and the multiplier jumped tiers.
+test('a capacity swap mid-run keeps the multiplier tier and the score earned so far', async () => {
+  const { game, simulation } = await createGame();
+  const next = createFakeSimulation();
+  next.capacity = CAPACITY / 4;
+  // A swap carries the frame sequence (recreateWithCapacity does).
+  const carry = () => { next.frameSequence = simulation.frameSequence; return next; };
+  simulation.recreateWithCapacity = async () => carry();
+  simulation.prepareCapacity = async () => next;
+  simulation.commitCapacity = () => carry();
+  game.start();
+  game.update(STEP);
+  // 150 kills at the reference capacity reach the third step (multiplier 3).
+  simulation.scriptedStats.push(stats({ frameSequence: simulation.frameSequence + 1, killsSinceLastRead: 150 }));
+  game.update(STEP);
+  assert.equal(game.score.multiplier, 3);
+  const scoreBefore = game.score.score;
+  assert.equal(await game.setCapacity(CAPACITY / 4), true);
+  assert.equal(game.score.score, scoreBefore, 'the swap leaves past score alone');
+  next.scriptedStats.push(stats({ frameSequence: next.frameSequence + 1, killsSinceLastRead: 1 }));
+  game.update(STEP);
+  assert.equal(game.score.multiplier, 3, 'one more kill at a quarter of the capacity stays on the third step');
+  assert.equal(game.score.score, scoreBefore + 3 * 40, 'the kill scores at the new capacity (40 points) times 3');
+});

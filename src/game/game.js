@@ -97,7 +97,7 @@ export class Game {
         this.simulation = next;
         this.renderer.setSimulation(next);
         this.spawnPressure.setCapacity(next.capacity);
-        this.score.capacity = next.capacity;
+        this.score.setCapacity(next.capacity);
         this.capacity = next.capacity;
       },
     });

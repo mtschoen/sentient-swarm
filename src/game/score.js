@@ -1,4 +1,9 @@
 // Score keeping: capacity-normalized points, kill-streak multiplier, and extra life and bomb awards.
+// Normalization across a capacity change: each kill is converted to reference-capacity kills
+// (REFERENCE_CAPACITY / capacity) when it is recorded, so the streak is stored in reference units
+// and compared with the unscaled STREAK_THRESHOLDS, and points use the capacity in effect for that
+// kill. setCapacity therefore changes only the kills after it: past score and the multiplier tier
+// never jump, and the streak keeps the same fraction of the way to the next step.
 
 export const REFERENCE_CAPACITY = 262144;
 export const MULTIPLIER_STEPS = [1, 2, 3, 4, 5, 6, 8, 10];
@@ -18,8 +23,15 @@ export function nextBombThreshold(index) {
 
 export class ScoreKeeper {
   constructor({ capacity }) {
-    this.capacity = capacity;
+    this.capacityValue = capacity;
     this.reset();
+  }
+
+  get capacity() { return this.capacityValue; }
+
+  // A capacity swap (Game's CapacitySwap install); see the header for what carries.
+  setCapacity(capacity) {
+    this.capacityValue = capacity;
   }
 
   reset() {
@@ -32,26 +44,24 @@ export class ScoreKeeper {
   get score() { return this._score; }
   get streak() { return this._streak; }
   get multiplier() { return MULTIPLIER_STEPS[this._stepIndex]; }
-  get pointsPerKill() { return BASE_POINTS_PER_KILL * REFERENCE_CAPACITY / this.capacity; }
+  get pointsPerKill() { return BASE_POINTS_PER_KILL * this._referenceKillsPerKill; }
+  get _referenceKillsPerKill() { return REFERENCE_CAPACITY / this.capacityValue; }
 
-  // Streak count at which the next multiplier step is reached, or null at the top step.
+  // Streak (in reference-capacity kills, see the header) at which the next multiplier step is
+  // reached, or null at the top step.
   get nextMultiplierAt() {
     const next = this._stepIndex + 1;
     if (next >= MULTIPLIER_STEPS.length) return null;
-    return this._scaledThreshold(next);
-  }
-
-  _scaledThreshold(index) {
-    return STREAK_THRESHOLDS[index] * this.capacity / REFERENCE_CAPACITY;
+    return STREAK_THRESHOLDS[next];
   }
 
   // Kills score at the multiplier in effect before this batch steps it.
   recordKills(count) {
     if (!(count > 0)) return;
     this._score += count * this.pointsPerKill * this.multiplier;
-    this._streak += count;
+    this._streak += count * this._referenceKillsPerKill;
     let index = this._stepIndex;
-    while (index + 1 < MULTIPLIER_STEPS.length && this._streak >= this._scaledThreshold(index + 1)) {
+    while (index + 1 < MULTIPLIER_STEPS.length && this._streak >= STREAK_THRESHOLDS[index + 1]) {
       index += 1;
     }
     if (index !== this._stepIndex) {

@@ -62,3 +62,25 @@ test('awards report newly earned lives and bombs once', () => {
   assert.deepEqual(awards.update(76000), { lives: 0, bombs: 0 });
   assert.deepEqual(awards.update(100000), { lives: 0, bombs: 1 });
 });
+
+test('setCapacity changes only later kills: past score and the tier stay, the streak carries in reference units', () => {
+  const keeper = new ScoreKeeper({ capacity: REFERENCE_CAPACITY * 4 });
+  keeper.recordKills(600);
+  assert.equal(keeper.multiplier, 3);
+  assert.equal(keeper.streak, 150);
+  const score = keeper.score;
+  keeper.setCapacity(REFERENCE_CAPACITY);
+  assert.equal(keeper.score, score);
+  assert.equal(keeper.multiplier, 3);
+  assert.equal(keeper.nextMultiplierAt, 400);
+  keeper.recordKills(249);
+  assert.equal(keeper.multiplier, 3);
+  keeper.recordKills(1);
+  assert.equal(keeper.multiplier, 4);
+  assert.equal(keeper.score, score + 250 * 10 * 3);
+});
+
+test('capacity is read-only outside setCapacity', () => {
+  const keeper = new ScoreKeeper({ capacity: REFERENCE_CAPACITY });
+  assert.throws(() => { keeper.capacity = 1; }, TypeError);
+});
