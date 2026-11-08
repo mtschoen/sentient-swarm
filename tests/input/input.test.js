@@ -10,12 +10,14 @@ function createFakeCanvas(width = 1000, height = 500) {
   return canvas;
 }
 
-function createFixture() {
+// The right-button inspect zoom is a lab feature (viewport.inspectZoomEnabled, off in play); most
+// pointer tests run with it on, as in the lab.
+function createFixture({ inspectZoomEnabled = true } = {}) {
   const canvas = createFakeCanvas();
   const windowObject = new EventTarget();
   const gamepads = [null];
   const navigatorObject = { getGamepads: () => gamepads };
-  const viewport = { inspectZoom: 1, screenToWorld: (x, y) => ({ x: x / 100, y: y / 100 }) };
+  const viewport = { inspectZoom: 1, inspectZoomEnabled, screenToWorld: (x, y) => ({ x: x / 100, y: y / 100 }) };
   const input = createInput(canvas, viewport, { windowObject, navigatorObject });
   return { canvas, windowObject, gamepads, viewport, input };
 }
@@ -95,6 +97,18 @@ test('pointer converts to world, tracks primary button and right-button zoom', (
   const menu = new Event('contextmenu', { cancelable: true });
   canvas.dispatchEvent(menu);
   assert.equal(menu.defaultPrevented, true);
+});
+
+test('outside the lab the right button bombs without zooming', () => {
+  const { canvas, windowObject, viewport, input } = createFixture({ inspectZoomEnabled: false });
+  canvas.dispatchEvent(pointerEvent('pointerdown', { clientX: 300, clientY: 100, button: 2, buttons: 2 }));
+  input.update();
+  assert.equal(input.state.bomb, true);
+  assert.equal(viewport.inspectZoom, 1);
+  windowObject.dispatchEvent(pointerEvent('pointerup', { button: 2, buttons: 0 }));
+  input.update();
+  assert.equal(input.state.bomb, false);
+  assert.equal(viewport.inspectZoom, 1);
 });
 
 test('chord: down 0, down 2, up 0 with buttons 2, up 2 ends neutral', () => {

@@ -10,11 +10,19 @@
 // spatial grid (projectiles_collide.wgsl, which adds to the stats kills index like the debug kill).
 // The step pass counts pulse ring detonations into the stats ringsThisFrame index.
 // A spawn that lands on a still-alive slot replaces it.
+// Lab knobs (task C6b, both off by default): setBaseKillBudget writes a kill budget into every
+// base bullet's extra (the collide pass spends it and kills the bullet at 0); setBeamSweepThreshold
+// shrinks the beam's kill reach on fast turns through the beam slot's lifetime (its reach scale,
+// 1 = to the arena edge; nothing else reads a beam's lifetime).
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
 import { SHADER_CONSTANTS, SPECIES_COUNT, WORKGROUP_SIZE } from '../sim/layout.js';
 import { SPECIES_FIELDS } from '../sim/species.js';
+import {
+  BEAM_SWEEP_MINIMUM_REACH_SCALE, DEFAULT_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, MAXIMUM_BASE_KILL_BUDGET,
+  MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES, PROJECTILE_KINDS,
+} from './weaponTypes.js';
 
 export const PROJECTILE_STRIDE_BYTES = 48;
 export const DEFAULT_PROJECTILE_CAPACITY = 8192;
@@ -22,8 +30,9 @@ export const BEAM_SLOT = 0;
 // Matches PROJECTILE_KIND_BEAM and PROJECTILE_FLAG_ALIVE in common.wgsl.
 const BEAM_KIND = 6;
 const FLAG_ALIVE = 1;
-// The beam's lifetime is never read: the step pass leaves the beam slot alone.
-const BEAM_LIFETIME = 1;
+// The beam's lifetime is its kill reach scale (the step pass leaves the beam slot alone): 1 is full.
+const FULL_BEAM_REACH = 1;
+const DEGREES_PER_RADIAN = 180 / Math.PI;
 const BYTES_PER_FLOAT = 4;
 // Workgroups of the rings entry (projectiles_collide.wgsl): every one scans the slots, then their
 // 8192 threads share the pulse rings' cells (8 rings of RING_CELL_BUDGET cells without overlap).
@@ -72,11 +81,44 @@ export function contiguousRuns(slots) {
   return runs;
 }
 
+export function validatedBaseKillBudget(count) {
+  if (!(Number.isInteger(count) && count >= 0 && count <= MAXIMUM_BASE_KILL_BUDGET)) {
+    throw new RangeError(`baseKillBudget must be an integer in [0, ${MAXIMUM_BASE_KILL_BUDGET}], got ${count}`);
+  }
+  return count;
+}
+
+export function validatedBeamSweepThreshold(degrees) {
+  if (!(degrees >= 0 && degrees <= MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES)) {
+    throw new RangeError(`beamSweepThresholdDegrees must lie in [0, ${MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES}], got ${degrees}`);
+  }
+  return degrees;
+}
+
+// The spawn with the base gun's kill budget in extra (a copy), or the spawn itself when the budget
+// is 0 (unlimited) or the kind is not the base bullet.
+export function withKillBudget(spawn, budget) {
+  if (budget === 0 || spawn.kind !== PROJECTILE_KINDS.bullet) return spawn;
+  return { ...spawn, extra: budget };
+}
+
+// Kill reach scale for a beam turning from previous to current (unit directions) in one step:
+// clamp(threshold / swept, BEAM_SWEEP_MINIMUM_REACH_SCALE, 1) in degrees, 1 when the threshold is 0
+// (off) or there is no previous direction.
+export function beamReachScale(previous, current, thresholdDegrees) {
+  if (!(thresholdDegrees > 0) || previous === null) return FULL_BEAM_REACH;
+  const cosine = Math.min(1, Math.max(-1, previous.x * current.x + previous.y * current.y));
+  const sweptDegrees = Math.acos(cosine) * DEGREES_PER_RADIAN;
+  if (sweptDegrees <= thresholdDegrees) return FULL_BEAM_REACH;
+  return Math.max(BEAM_SWEEP_MINIMUM_REACH_SCALE, thresholdDegrees / sweptDegrees);
+}
+
 // The beam as a Projectile spawn, or null for no beam (or a zero direction). The beam slot's seed
 // and extra hold the previous step's unit direction (previousDirection { x, y }; a missing or zero
 // one means the current direction, a line), so the collide and render passes cover the sector swept
-// between the two steps.
-export function beamSpawn(beam, previousDirection = null) {
+// between the two steps. sweepThresholdDegrees (0, off, by default) sets the lifetime, the reach
+// scale (beamReachScale).
+export function beamSpawn(beam, previousDirection = null, sweepThresholdDegrees = DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES) {
   if (beam === null) return null;
   const length = Math.hypot(beam.directionX, beam.directionY);
   if (!(length > 0)) return null;
@@ -84,16 +126,17 @@ export function beamSpawn(beam, previousDirection = null) {
   const velocityY = beam.directionY / length;
   const previousLength = previousDirection === null ? 0 : Math.hypot(previousDirection.x, previousDirection.y);
   const hasPrevious = previousLength > 0;
+  const previousUnit = hasPrevious ? { x: previousDirection.x / previousLength, y: previousDirection.y / previousLength } : null;
   return {
     x: beam.x,
     y: beam.y,
     velocityX,
     velocityY,
     radius: beam.halfWidth,
-    lifetime: BEAM_LIFETIME,
+    lifetime: beamReachScale(previousUnit, { x: velocityX, y: velocityY }, sweepThresholdDegrees),
     kind: BEAM_KIND,
-    seed: hasPrevious ? previousDirection.x / previousLength : velocityX,
-    extra: hasPrevious ? previousDirection.y / previousLength : velocityY,
+    seed: hasPrevious ? previousUnit.x : velocityX,
+    extra: hasPrevious ? previousUnit.y : velocityY,
   };
 }
 
@@ -103,6 +146,8 @@ export function beamSpawn(beam, previousDirection = null) {
 // per step still sweep the whole turn.
 export class BeamTracker {
   constructor() {
+    // Lab beam sweep budget (Projectiles.setBeamSweepThreshold); 0 is off.
+    this.sweepThresholdDegrees = DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES;
     this.clear();
   }
 
@@ -112,7 +157,7 @@ export class BeamTracker {
   }
 
   next() {
-    const spawn = beamSpawn(this.beam, this.previousDirection);
+    const spawn = beamSpawn(this.beam, this.previousDirection, this.sweepThresholdDegrees);
     this.previousDirection = spawn === null ? null : { x: spawn.velocityX, y: spawn.velocityY };
     return spawn;
   }
@@ -141,6 +186,7 @@ export class Projectiles {
     this.pending = [];
     this.beamTracker = new BeamTracker();
     this.beamWritten = false;
+    this.baseKillBudgetValue = DEFAULT_BASE_KILL_BUDGET;
     // New buffers are zero-filled, so every slot starts dead.
     this.bufferValue = createStorageBuffer(this.device, capacity * PROJECTILE_STRIDE_BYTES, 'projectiles');
     this.huesBuffer = createUniformBuffer(this.device, HUES_UNIFORM_BYTES, 'projectile-species-hues');
@@ -159,6 +205,18 @@ export class Projectiles {
 
   get buffer() { return this.bufferValue; }
   get capacity() { return this.capacityValue; }
+  get baseKillBudget() { return this.baseKillBudgetValue; }
+  get beamSweepThresholdDegrees() { return this.beamTracker.sweepThresholdDegrees; }
+
+  // Lab: kills per base bullet (0 unlimited), for spawns queued from now on. Throws RangeError.
+  setBaseKillBudget(count) {
+    this.baseKillBudgetValue = validatedBaseKillBudget(count);
+  }
+
+  // Lab: the beam sweep budget in degrees per step (0 off). Throws RangeError.
+  setBeamSweepThreshold(degrees) {
+    this.beamTracker.sweepThresholdDegrees = validatedBeamSweepThreshold(degrees);
+  }
 
   async initialize() {
     const module = async (name) => this.device.createShaderModule({
@@ -171,8 +229,9 @@ export class Projectiles {
     // cellOffsets, sortedIndices, particles, threatAccumulator, stats.
     this.collideLayout = this.device.createBindGroupLayout({
       label: 'projectiles-collide-layout',
+      // projectiles is writable: the base gun kill budget is spent in place (task C6b).
       entries: [
-        entry(0, 'uniform'), entry(1, 'uniform'), entry(2, 'read-only-storage'), entry(3, 'storage'),
+        entry(0, 'uniform'), entry(1, 'uniform'), entry(2, 'storage'), entry(3, 'storage'),
         entry(4, 'read-only-storage'), entry(5, 'read-only-storage'), entry(6, 'read-only-storage'),
         entry(7, 'storage'), entry(8, 'storage'), entry(9, 'storage'),
       ],
@@ -190,7 +249,7 @@ export class Projectiles {
   // Queues a projectile for the next encode and returns the slot it will occupy.
   queueSpawn(spawn) {
     const slot = this.slots.next();
-    this.pending.push({ slot, spawn });
+    this.pending.push({ slot, spawn: withKillBudget(spawn, this.baseKillBudgetValue) });
     return slot;
   }
 

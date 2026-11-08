@@ -9,6 +9,9 @@ export class Viewport {
     this.canvasHeight = 1;
     this.devicePixelRatio = 1;
     this.inspectZoom = 1;
+    // The right-button inspect zoom is a lab feature (owner ruling R7): off in play, where the right
+    // button only bombs; the lab turns it on (setInspectZoomEnabled).
+    this.inspectZoomEnabled = false;
     this.arenaRectDevicePixels = { x: 0, y: 0, width: 1, height: 1 };
   }
 
@@ -28,6 +31,12 @@ export class Viewport {
       width,
       height,
     };
+  }
+
+  // Turning the zoom off also drops a zoom held at that moment.
+  setInspectZoomEnabled(enabled) {
+    this.inspectZoomEnabled = Boolean(enabled);
+    if (!this.inspectZoomEnabled) this.inspectZoom = 1;
   }
 
   // A zoom of 0 or less (never set by the app) is treated as 1 rather than dividing by it.

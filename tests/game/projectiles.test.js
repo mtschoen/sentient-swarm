@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BEAM_SLOT, BeamTracker, PROJECTILE_STRIDE_BYTES, ProjectileSlots, beamSpawn, contiguousRuns, packProjectile } from '../../src/game/projectiles.js';
+import {
+  BEAM_SLOT, BeamTracker, PROJECTILE_STRIDE_BYTES, ProjectileSlots, beamReachScale, beamSpawn, contiguousRuns, packProjectile,
+  validatedBaseKillBudget, validatedBeamSweepThreshold, withKillBudget,
+} from '../../src/game/projectiles.js';
+import {
+  BEAM_SWEEP_MINIMUM_REACH_SCALE, MAXIMUM_BASE_KILL_BUDGET, MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES, PROJECTILE_KINDS,
+} from '../../src/game/weaponTypes.js';
 
 test('ProjectileSlots assigns round-robin and never hands out the beam slot', () => {
   const slots = new ProjectileSlots(4);
@@ -110,4 +116,54 @@ test('BeamTracker: clear drops the beam and the previous direction', () => {
   tracker.set(beamToward(0, -1));
   const spawn = tracker.next();
   assert.ok(close(spawn.seed, 0) && close(spawn.extra, -1));
+});
+
+test('beamReachScale is 1 with the sweep budget off, for a line, and under the threshold', () => {
+  const right = { x: 1, y: 0 };
+  const turned = { x: Math.cos(Math.PI / 4), y: Math.sin(Math.PI / 4) };
+  assert.equal(beamReachScale(right, turned, 0), 1);
+  assert.equal(beamReachScale(null, turned, 10), 1);
+  assert.equal(beamReachScale(right, right, 10), 1);
+  assert.equal(beamReachScale(right, turned, 60), 1);
+});
+
+test('beamReachScale shrinks as threshold over swept angle, floored at the minimum scale', () => {
+  const right = { x: 1, y: 0 };
+  const turned = { x: Math.cos(Math.PI / 4), y: Math.sin(Math.PI / 4) };
+  assert.ok(Math.abs(beamReachScale(right, turned, 15) - 15 / 45) < 1e-9);
+  assert.equal(beamReachScale(right, { x: -1, y: 0 }, 1), BEAM_SWEEP_MINIMUM_REACH_SCALE);
+});
+
+test('beamSpawn writes the reach scale as the beam lifetime (1 by default, so nothing changes)', () => {
+  const beam = { x: 1, y: 1, directionX: 0, directionY: 1, halfWidth: 0.1 };
+  assert.equal(beamSpawn(beam, { x: 1, y: 0 }).lifetime, 1);
+  assert.ok(Math.abs(beamSpawn(beam, { x: 1, y: 0 }, 30).lifetime - 30 / 90) < 1e-9);
+});
+
+test('BeamTracker applies its sweep threshold to the written beam', () => {
+  const tracker = new BeamTracker();
+  tracker.sweepThresholdDegrees = 9;
+  tracker.set({ x: 1, y: 1, directionX: 1, directionY: 0, halfWidth: 0.1 });
+  assert.equal(tracker.next().lifetime, 1);
+  tracker.set({ x: 1, y: 1, directionX: 0, directionY: 1, halfWidth: 0.1 });
+  assert.ok(Math.abs(tracker.next().lifetime - 0.25) < 1e-9);
+});
+
+test('withKillBudget writes the base gun budget into extra and leaves other kinds and unlimited alone', () => {
+  const bullet = { kind: PROJECTILE_KINDS.bullet, extra: 0 };
+  const sidewinder = { kind: PROJECTILE_KINDS.sidewinder, extra: 5 };
+  assert.equal(withKillBudget(bullet, 0), bullet);
+  assert.equal(withKillBudget(bullet, 3).extra, 3);
+  assert.equal(bullet.extra, 0);
+  assert.equal(withKillBudget(sidewinder, 3), sidewinder);
+});
+
+test('kill budget and sweep threshold validators reject out-of-range values', () => {
+  assert.equal(validatedBaseKillBudget(0), 0);
+  assert.equal(validatedBaseKillBudget(MAXIMUM_BASE_KILL_BUDGET), MAXIMUM_BASE_KILL_BUDGET);
+  assert.throws(() => validatedBaseKillBudget(1.5), RangeError);
+  assert.throws(() => validatedBaseKillBudget(-1), RangeError);
+  assert.equal(validatedBeamSweepThreshold(MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES), MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES);
+  assert.throws(() => validatedBeamSweepThreshold(91), RangeError);
+  assert.throws(() => validatedBeamSweepThreshold(Number.NaN), RangeError);
 });

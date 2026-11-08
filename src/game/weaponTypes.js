@@ -93,3 +93,15 @@ export const WEAPON_TYPES = Object.freeze({
     ),
   }),
 });
+
+// Lab knobs, both off by default so the shipped game is unchanged (task C6b).
+// Base gun kill budget (owner ruling R6): kills one base bullet may make before it dies; 0 is
+// unlimited (every kind pierces). Enforced in projectiles_collide.wgsl through the bullet's extra.
+export const DEFAULT_BASE_KILL_BUDGET = 0;
+export const MAXIMUM_BASE_KILL_BUDGET = 64;
+// Beam sweep budget (owner note R25, ruling P30): above this many degrees swept per step the
+// beam's kill reach shrinks to threshold / swept of its length, never under the minimum scale;
+// 0 is off.
+export const DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES = 0;
+export const MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES = 90;
+export const BEAM_SWEEP_MINIMUM_REACH_SCALE = 0.25;

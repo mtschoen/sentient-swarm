@@ -1,6 +1,9 @@
 // Projectile collision against the spatial grid, run after projectiles_step.wgsl on the freshly
 // integrated agents. The grid was built from the step's input agents, so cell membership is one
-// step stale while distances use current positions. Every kind pierces.
+// step stale while distances use current positions. Every kind pierces; a base bullet (kind
+// bullet) with extra of 1 or more (the lab's base gun kill budget, task C6b; 0 is unlimited, the
+// default) stops killing once it has spent extra kills, writes the rest back into extra and dies
+// at 0. Its thread is the only one walking it, so a private counter is exact.
 //
 // Entry main, one thread per projectile slot (the beam slot is skipped):
 // - bullet, scatter, rail, pulseOrb, sidewinder: that thread walks the capsule from previousPosition to position
@@ -33,7 +36,10 @@
 // the two edge ray ends and the arena corners inside it, widened by the reach) are visited, in
 // row-major order interleaved across the workgroup; a cell is collided when its center is within
 // the reach plus its half diagonal of the sector, at most BEAM_CELL_BUDGET collided cells per
-// thread. Every major-axis step of the current ray also adds BEAM_THREAT_UNITS threat at the
+// thread. The beam slot's lifetime is its kill reach scale (task C6b, the lab's beam sweep budget):
+// below 1 the sector is also cut at scale times the current ray's length to the edge (the reach
+// limit), and the threat trench stops there; at 1 (the default) every path is the full sector.
+// Every major-axis step of the current ray also adds BEAM_THREAT_UNITS threat at the
 // ray's coarse cell so the trench shows where nothing dies.
 //
 // A kill is the Plan A kill: the agent must be alive and past its spawn-in frames; atomicAnd
@@ -56,7 +62,7 @@ struct SpeciesHues {
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<uniform> hues: SpeciesHues;
-@group(0) @binding(2) var<storage, read> projectiles: array<Projectile>;
+@group(0) @binding(2) var<storage, read_write> projectiles: array<Projectile>;
 @group(0) @binding(3) var<storage, read_write> agents: array<AtomicAgent>;
 @group(0) @binding(4) var<storage, read> cellCounts: array<u32>;
 @group(0) @binding(5) var<storage, read> cellOffsets: array<u32>;
@@ -77,6 +83,12 @@ const BEAM_CELL_BUDGET: u32 = 256u;
 const BEAM_MINIMUM_PREVIOUS_LENGTH_SQUARED: f32 = 0.25;
 const BEAM_SLOT: u32 = 0u;
 const NO_THREAT: f32 = 0.0;
+const UNLIMITED_KILLS: u32 = 0xffffffffu;
+// Longer than any ray in the arena: the reach limit of an unscaled beam.
+const UNLIMITED_REACH: f32 = 1e9;
+
+// Kills this invocation may still make (the base gun kill budget); unlimited unless main sets it.
+var<private> killBudget: u32 = UNLIMITED_KILLS;
 
 var<workgroup> workgroupKills: atomic<u32>;
 // Alive pulse ring slots found by this workgroup's scan (zero-initialized per workgroup). The
@@ -112,13 +124,20 @@ fn emitKillParticles(agentIndex: u32, position: vec2f, species: u32, hueJitter: 
   }
 }
 
-fn kill(agentIndex: u32, position: vec2f) {
+// Returns whether this call made the kill (the alive bit was set), after spending one unit of a
+// limited kill budget.
+fn kill(agentIndex: u32, position: vec2f) -> bool {
   let previousFlags = atomicAnd(&agents[agentIndex].flags, ~FLAG_ALIVE);
   if (isAlive(previousFlags)) {
+    if (killBudget != UNLIMITED_KILLS) {
+      killBudget = killBudget - 1u;
+    }
     atomicAdd(&workgroupKills, 1u);
     emitKillParticles(agentIndex, position, min(agents[agentIndex].species, SPECIES_COUNT - 1u), agents[agentIndex].hueJitter, params.killBurstParticles + params.killFragmentParticles);
     atomicAdd(&threatAccumulator[coarseCellIndexFor(position)], u32(THREAT_FIXED_POINT_SCALE));
+    return true;
   }
+  return false;
 }
 
 fn isKillable(flags: u32) -> bool {
@@ -138,12 +157,12 @@ fn distanceToSegment(point: vec2f, start: vec2f, end: vec2f) -> f32 {
 fn collideCellWithSegment(cell: u32, start: vec2f, end: vec2f, reach: f32) {
   let first = cellOffsets[cell];
   let count = cellCounts[cell];
-  for (var index = 0u; index < count; index = index + 1u) {
+  for (var index = 0u; index < count && killBudget > 0u; index = index + 1u) {
     let agentIndex = sortedIndices[first + index];
     if (isKillable(atomicLoad(&agents[agentIndex].flags))) {
       let position = agents[agentIndex].position;
       if (distanceToSegment(position, start, end) <= reach) {
-        kill(agentIndex, position);
+        _ = kill(agentIndex, position);
       }
     }
   }
@@ -158,7 +177,7 @@ fn collideCellWithRing(cell: u32, center: vec2f, inner: f32, outer: f32) {
       let position = agents[agentIndex].position;
       let separation = distance(position, center);
       if (separation >= inner && separation <= outer) {
-        kill(agentIndex, position);
+        _ = kill(agentIndex, position);
       }
     }
   }
@@ -198,7 +217,7 @@ fn collideCapsule(start: vec2f, end: vec2f, reach: f32, firstStep: u32, stepStri
     let minorAtHigh = startAxes.y + (nearHigh - startAxes.x) * slope;
     let firstMinor = gridCoordinate(min(minorAtLow, minorAtHigh) - reach, minorCount);
     let lastMinor = gridCoordinate(max(minorAtLow, minorAtHigh) + reach, minorCount);
-    for (var minor = firstMinor; minor <= lastMinor && budget > 0u; minor = minor + 1u) {
+    for (var minor = firstMinor; minor <= lastMinor && budget > 0u && killBudget > 0u; minor = minor + 1u) {
       let cell = select(minor + major * params.gridColumns, major + minor * params.gridColumns, majorIsX);
       collideCellWithSegment(cell, start, end, reach);
       budget = budget - 1u;
@@ -286,7 +305,17 @@ fn main(
     let projectile = projectiles[slot];
     let isCapsule = projectile.kind != PROJECTILE_KIND_BEAM && projectile.kind != PROJECTILE_KIND_PULSE_RING;
     if ((projectile.flags & PROJECTILE_FLAG_ALIVE) != 0u && isCapsule) {
+      let budgeted = projectile.kind == PROJECTILE_KIND_BULLET && projectile.extra >= 1.0;
+      if (budgeted) {
+        killBudget = u32(projectile.extra);
+      }
       collideCapsule(projectile.previousPosition, projectile.position, projectile.radius + CAPSULE_KILL_MARGIN, 0u, 1u, CAPSULE_CELL_BUDGET, NO_THREAT);
+      if (budgeted) {
+        projectiles[slot].extra = f32(killBudget);
+        if (killBudget == 0u) {
+          projectiles[slot].flags = projectile.flags & ~PROJECTILE_FLAG_ALIVE;
+        }
+      }
     }
   }
   workgroupBarrier();
@@ -347,6 +376,8 @@ struct BeamSector {
   startEnd: vec2f,
   finishEnd: vec2f,
   reach: f32,
+  // Distance from the origin past which nothing is killed (UNLIMITED_REACH for an unscaled beam).
+  limit: f32,
 }
 
 fn crossProduct(first: vec2f, second: vec2f) -> f32 {
@@ -368,8 +399,12 @@ fn beamSector(projectile: Projectile) -> BeamSector {
   if (dot(sector.bisector, sector.bisector) < 1e-8) {
     sector.bisector = vec2f(-sector.start.y, sector.start.x);
   }
-  sector.startEnd = sector.origin + sector.start * distanceToArenaEdge(sector.origin, sector.start);
-  sector.finishEnd = sector.origin + sector.finish * distanceToArenaEdge(sector.origin, sector.finish);
+  sector.limit = UNLIMITED_REACH;
+  if (projectile.lifetime < 1.0) {
+    sector.limit = max(projectile.lifetime, 0.0) * distanceToArenaEdge(sector.origin, current);
+  }
+  sector.startEnd = sector.origin + sector.start * min(distanceToArenaEdge(sector.origin, sector.start), sector.limit);
+  sector.finishEnd = sector.origin + sector.finish * min(distanceToArenaEdge(sector.origin, sector.finish), sector.limit);
   sector.reach = projectile.radius;
   return sector;
 }
@@ -383,8 +418,10 @@ fn insideSectorArc(sector: BeamSector, offset: vec2f) -> bool {
 // Distance from an arena point to the sector clipped by the arena: 0 inside the arc, else the
 // distance to the nearer edge ray.
 fn distanceToSector(sector: BeamSector, point: vec2f) -> f32 {
-  if (insideSectorArc(sector, point - sector.origin)) {
-    return 0.0;
+  let offset = point - sector.origin;
+  if (insideSectorArc(sector, offset)) {
+    // Past the reach limit the nearest sector point lies on the limit's arc.
+    return max(length(offset) - sector.limit, 0.0);
   }
   return min(distanceToSegment(point, sector.origin, sector.startEnd), distanceToSegment(point, sector.origin, sector.finishEnd));
 }
@@ -397,7 +434,7 @@ fn collideCellWithSector(cell: u32, sector: BeamSector) {
     if (isKillable(atomicLoad(&agents[agentIndex].flags))) {
       let position = agents[agentIndex].position;
       if (distanceToSector(sector, position) <= sector.reach) {
-        kill(agentIndex, position);
+        _ = kill(agentIndex, position);
       }
     }
   }
@@ -405,7 +442,7 @@ fn collideCellWithSector(cell: u32, sector: BeamSector) {
 
 // bounds is (minimum x, minimum y, maximum x, maximum y).
 fn includeCorner(sector: BeamSector, corner: vec2f, bounds: vec4f) -> vec4f {
-  if (insideSectorArc(sector, corner - sector.origin)) {
+  if (insideSectorArc(sector, corner - sector.origin) && length(corner - sector.origin) <= sector.limit) {
     return vec4f(min(bounds.xy, corner), max(bounds.zw, corner));
   }
   return bounds;
@@ -419,6 +456,10 @@ fn collideSector(sector: BeamSector, firstCell: u32, cellStride: u32) {
   bounds = includeCorner(sector, vec2f(ARENA_WIDTH, 0.0), bounds);
   bounds = includeCorner(sector, vec2f(0.0, ARENA_HEIGHT), bounds);
   bounds = includeCorner(sector, vec2f(ARENA_WIDTH, ARENA_HEIGHT), bounds);
+  if (sector.limit < UNLIMITED_REACH) {
+    // The limit's arc can bulge past the edge ray ends: the square around the origin bounds it.
+    bounds = vec4f(min(bounds.xy, sector.origin - vec2f(sector.limit)), max(bounds.zw, sector.origin + vec2f(sector.limit)));
+  }
   let firstColumn = gridCoordinate(bounds.x - sector.reach, params.gridColumns);
   let lastColumn = gridCoordinate(bounds.z + sector.reach, params.gridColumns);
   let firstRow = gridCoordinate(bounds.y - sector.reach, params.gridRows);
@@ -470,7 +511,7 @@ fn beam(@builtin(local_invocation_index) localIndex: u32) {
     let sector = beamSector(projectile);
     collideSector(sector, localIndex, WORKGROUP_SIZE);
     let origin = sector.origin;
-    addRayThreat(origin, origin + projectile.velocity * distanceToArenaEdge(origin, projectile.velocity), localIndex, WORKGROUP_SIZE);
+    addRayThreat(origin, origin + projectile.velocity * min(distanceToArenaEdge(origin, projectile.velocity), sector.limit), localIndex, WORKGROUP_SIZE);
   }
   workgroupBarrier();
   flushKills(localIndex);

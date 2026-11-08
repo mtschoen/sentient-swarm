@@ -1,3 +1,4 @@
+// Over 500 lines: every projectile case shares the one seeded harness and readback helpers here.
 // Projectile collision check. A 65536-slot Simulation whose species all have maximumSpeed 0, so
 // seeded agents never move, gets 10000 alive Chasers (species 0, no spawn-in frames) seeded in a
 // 2 by 2 block from a fixed pseudo-random sequence; nothing spawns. Projectiles register as a
@@ -31,6 +32,11 @@
 //     the path (no cell skipped by CAPSULE_CELL_BUDGET), no dead agent beyond its kill reach, and
 //     kills farther than twice the Plan B bullet's reach (0.04 + 0.02) from the path, so the
 //     tunnel is at least twice the old one wide.
+// (h) lab base gun kill budget (task C6b): with setBaseKillBudget(7) the same energy ball kills
+//     exactly 7 and its slot dies at once; the budget then returns to 0 (unlimited).
+// (i) lab beam sweep budget: with setBeamSweepThreshold(15) the (f) sweep of 90 degrees in one
+//     step has reach scale 0.25 (the floor), so off the first step's full-length line no agent
+//     dies farther than the reach limit plus the half width from the ship, and some die inside it.
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
@@ -443,6 +449,59 @@ async function runEnergyBallCase(harness) {
   ]);
 }
 
+const BUDGET_KILLS = 7;
+
+async function runKillBudgetCase(harness) {
+  harness.seedBlock(CENTER);
+  harness.projectiles.setBaseKillBudget(BUDGET_KILLS);
+  const ball = WEAPON_TYPES.base.tiers[0];
+  const direction = [Math.cos(BALL_ANGLE), Math.sin(BALL_ANGLE)];
+  const slot = harness.projectiles.queueSpawn({
+    x: CENTER[0] - direction[0] * 1.5, y: CENTER[1] - direction[1] * 1.5, velocityX: direction[0] * ball.speed, velocityY: direction[1] * ball.speed,
+    radius: ball.radius, lifetime: ball.lifetime, kind: KIND.bullet,
+  });
+  let kills = 0;
+  let frames = 0;
+  for (; frames < BALL_FRAME_LIMIT; frames += 1) {
+    kills += await harness.step();
+    if (!(await harness.projectileSlot(slot)).alive) break;
+  }
+  harness.projectiles.setBaseKillBudget(0);
+  const dropped = (await harness.aliveFlags()).filter((flag) => !flag).length;
+  return verdictLine([
+    [kills === BUDGET_KILLS && dropped === kills, `(h) budgeted ball kills ${kills}, alive drop ${dropped} (need ${BUDGET_KILLS})`],
+    [frames < 10, `(h) budgeted ball dead after ${frames + 1} frames (need under 11, it dies when the budget is spent)`],
+  ]);
+}
+
+const SWEEP_BUDGET_DEGREES = 15;
+const SWEEP_MINIMUM_SCALE = 0.25;
+
+async function runSweepBudgetCase(harness) {
+  const positions = wedgePositions();
+  harness.seedPositions(positions);
+  harness.projectiles.setBeamSweepThreshold(SWEEP_BUDGET_DEGREES);
+  const kills = await fireBeamSteps(harness, [WEDGE_FIRST_DEGREES, WEDGE_LAST_DEGREES]);
+  harness.projectiles.setBeamSweepThreshold(0);
+  const alive = await harness.aliveFlags();
+  const last = toRadians(WEDGE_LAST_DEGREES);
+  // distanceToArenaEdge along the current (last) direction from the ship.
+  const edge = Math.min((ARENA_WIDTH - SWEEP_ORIGIN[0]) / Math.cos(last), (ARENA_HEIGHT - SWEEP_ORIGIN[1]) / Math.sin(last));
+  const limit = SWEEP_MINIMUM_SCALE * edge;
+  // The first step is a line at full reach (no previous direction): agents on its ray may die.
+  const first = toRadians(WEDGE_FIRST_DEGREES);
+  const firstLength = Math.min((ARENA_WIDTH - SWEEP_ORIGIN[0]) / Math.cos(first), SWEEP_ORIGIN[1] / -Math.sin(first));
+  const firstEnd = [SWEEP_ORIGIN[0] + Math.cos(first) * firstLength, SWEEP_ORIGIN[1] + Math.sin(first) * firstLength];
+  const farDead = positions.filter((position, index) => !alive[index]
+    && distanceToSegment(position, SWEEP_ORIGIN, firstEnd) > SWEEP_HALF_WIDTH + SWEEP_TOLERANCE
+    && Math.hypot(position[0] - SWEEP_ORIGIN[0], position[1] - SWEEP_ORIGIN[1]) > limit + SWEEP_HALF_WIDTH + SWEEP_TOLERANCE).length;
+  const dropped = alive.filter((flag) => !flag).length;
+  return verdictLine([
+    [kills > 0 && dropped === kills, `(i) sweep budget kills ${kills}, alive drop ${dropped} (need equal and > 0)`],
+    [farDead === 0, `(i) dead agents past the reach limit ${limit.toFixed(3)} plus the half width ${farDead} (need 0)`],
+  ]);
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   const { device } = gpu;
@@ -457,7 +516,7 @@ async function runCheck() {
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const harness = new Harness(device, simulation, projectiles);
   const lines = [];
-  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runSweptBeamCase, runEnergyBallCase]) {
+  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase]) {
     lines.push(await run(harness));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${lines.join('; ')}` };
   }

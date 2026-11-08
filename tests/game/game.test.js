@@ -945,3 +945,50 @@ test('quitToTitle with the bomb held does not restart the run before the menu ow
   game.update(STEP);
   assert.equal(game.state.phase, RunPhase.Ready);
 });
+
+test('watch mode (lab): no start on a gesture, no weapons, no contact, the player point follows the pointer', async () => {
+  const { game, simulation, input, projectiles } = await createGame();
+  game.start();
+  game.setWatch(0.3);
+  assert.equal(game.watching, true);
+  assert.equal(game.state.phase, RunPhase.Ready);
+  input.state.pointerWorld = { x: 3, y: 2 };
+  input.state.pointerPrimaryDown = true;
+  input.state.firing = true;
+  input.state.bomb = true;
+  const playerStatesBefore = simulation.playerStates.length;
+  runFor(game, 0.5);
+  assert.equal(game.state.phase, RunPhase.Ready);
+  assert.equal(projectiles.spawns.length, 0);
+  assert.equal(simulation.playerStates.length, playerStatesBefore);
+  assert.deepEqual(simulation.playerPositions[simulation.playerPositions.length - 1], { x: 3, y: 2 });
+  assert.deepEqual(game.player.position, { x: 3, y: 2 });
+});
+
+test('watch mode holds the alive target at its fraction of capacity with full seek, and leaving restores the ramp', async () => {
+  const { game, simulation } = await createGame();
+  game.setWatch(0.25);
+  assert.equal(game.watchPressure.targetAlive, CAPACITY * 0.25);
+  game.update(STEP);
+  assert.equal(simulation.seekScales[simulation.seekScales.length - 1], 1);
+  // The first fill spawns at the frame cap (capacity / 60), well over the play ramp's 1 percent floor.
+  const spawned = simulation.spawnBudgets[simulation.spawnBudgets.length - 1].reduce((sum, count) => sum + count, 0);
+  assert.equal(spawned, Math.floor(CAPACITY / 60));
+  game.setWatch(0.5);
+  assert.equal(game.watchPressure.targetAlive, CAPACITY * 0.5);
+  assert.throws(() => game.setWatch(1.5), RangeError);
+  game.setWatch(null);
+  assert.equal(game.watching, false);
+  game.update(STEP);
+  assert.ok(simulation.seekScales[simulation.seekScales.length - 1] < 1);
+});
+
+test('watch mode without a pointer moves the point with the move stick', async () => {
+  const { game, input } = await createGame();
+  game.setWatch(0.3);
+  const start = game.player.position;
+  input.state.move = { x: 1, y: 0 };
+  runFor(game, 0.25);
+  assert.ok(game.player.position.x > start.x);
+  assert.equal(game.state.phase, RunPhase.Ready);
+});

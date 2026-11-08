@@ -1,3 +1,4 @@
+// Over 500 lines: the frame order is one sequence (header) that the update steps implement in place.
 // Game orchestration: joins input, the player ship, weapons, pickups, score, run state and spawn
 // pressure to the GPU simulation and its projectiles. The game waits in Ready (the swarm runs
 // with player contact off) until start(), or until the first gesture: a press of fire, bomb, a
@@ -38,6 +39,11 @@
 //      (with the death flood) and clears projectiles, shockwave (bomb and death) queues an impulse that also boosts
 //      bloom, respawn recenters the player, sets the respawn sequence to the next step and
 //      resets spawn pressure and the spawn director; gameOver leaves the run frozen until restart.
+// Watch mode (the lab, task C6b): setWatch(fraction) puts the run in Ready and keeps it there (no
+// gesture starts it, so weapons and contact stay off); the player point follows the pointer (or
+// the move stick without one) so the swarm chases it, and a watch SpawnPressure with full seek
+// holds the alive target at fraction of capacity in place of the play ramp. setWatch(null) leaves
+// it; start() (the lab's Play) leaves it too.
 import { Projectiles } from './projectiles.js';
 import { PlayerShip } from './player.js';
 import { WeaponState } from './weapons.js';
@@ -45,7 +51,7 @@ import { PickupDirector } from './pickups.js';
 import { Awards, ScoreKeeper } from './score.js';
 import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
-import { SpawnPressure } from '../sim/spawner.js';
+import { SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../sim/spawner.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '../sim/layout.js';
 
@@ -58,6 +64,10 @@ const PICKUP_BLAST_IMPULSE_STRENGTH = 0.5;
 export const DEFAULT_PICKUP_BLAST_RADIUS = 1.5;
 // Matches the HUD's touch restart guard, so the press that ended the run cannot restart it.
 export const RESTART_GUARD_SECONDS = 0.7;
+
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
 
 function isGesture(inputState) {
   const { move, aim } = inputState;
@@ -96,6 +106,8 @@ export class Game {
     this.clock = clock ?? (() => this.simulation.time);
     this.spawnPressure = spawnPressure ?? new SpawnPressure({ capacity });
     this.spawnDirector = spawnDirector ?? new SpawnDirector({ random });
+    // The lab's watch mode spawn pressure (setWatch), or null in play.
+    this.watchPressure = null;
     // The gate table for the next simulation step (null while Dying and Respawning).
     this.stepGates = null;
     this.player = new PlayerShip({ arenaWidth: ARENA_WIDTH, arenaHeight: ARENA_HEIGHT });
@@ -137,6 +149,7 @@ export class Game {
         this.simulation = next;
         this.renderer.setSimulation(next);
         this.spawnPressure.setCapacity(next.capacity);
+        this.watchPressure?.setCapacity(next.capacity);
         this.score.setCapacity(next.capacity);
         this.capacity = next.capacity;
       },
@@ -172,6 +185,7 @@ export class Game {
   }
 
   beginRun() {
+    this.watchPressure = null;
     this.paused = false;
     this.resetModules();
     this.run.start();
@@ -186,6 +200,43 @@ export class Game {
     this.run = new RunState();
     // The title menu takes over the start; the confirming press (Space, a face button) must not start the run.
     this.startsOnGesture = false;
+  }
+
+  // Lab watch mode: fraction in [0, 1] is the alive target as a fraction of capacity (held, no
+  // ramp, full seek, spawns at the spec's quarter of the arena); null leaves watch mode. Entering
+  // it resets the run to Ready as quitToTitle does; a new fraction while watching only moves the
+  // target (the in-flight spawn estimate carries over). Throws RangeError for any other value.
+  setWatch(fraction) {
+    if (fraction === null) {
+      this.watchPressure = null;
+      return;
+    }
+    if (!(typeof fraction === 'number' && fraction >= 0 && fraction <= 1)) throw new RangeError(`watch fraction must lie in [0, 1], got ${fraction}`);
+    const previous = this.watchPressure;
+    if (previous === null) {
+      this.paused = false;
+      this.resetModules();
+      this.run = new RunState();
+    }
+    const next = new SpawnPressure({
+      capacity: this.capacity, floorFraction: fraction, ceilingFraction: fraction, seekFloorFraction: 1,
+      spawnDistanceStartFraction: SPEC_SPAWN_DISTANCE_FRACTION,
+    });
+    if (previous !== null) {
+      next.newestStats = previous.newestStats;
+      next.requests = previous.requests;
+      next.filling = previous.filling;
+    }
+    this.watchPressure = next;
+  }
+
+  get watching() {
+    return this.watchPressure !== null;
+  }
+
+  // The spawn pressure in effect: the watch one in the lab's watch mode, else the play ramp.
+  get activeSpawnPressure() {
+    return this.watchPressure ?? this.spawnPressure;
   }
 
   // Freezes the run; returns whether it paused (Ready and GameOver have nothing to freeze).
@@ -244,7 +295,7 @@ export class Game {
     const inputState = this.input.state;
     const firingPressed = inputState.firing && !this.firingHeld;
     this.firingHeld = inputState.firing;
-    if (this.run.phase === RunPhase.Ready && this.startsOnGesture && isGesture(inputState)) this.start();
+    if (this.run.phase === RunPhase.Ready && this.startsOnGesture && !this.watching && isGesture(inputState)) this.start();
     else if (this.run.phase === RunPhase.GameOver) this.updateGameOver(deltaSeconds, firingPressed || (inputState.bomb && !this.bombHeld));
 
     const bombPressed = inputState.bomb && !this.bombHeld;
@@ -257,6 +308,7 @@ export class Game {
     const playing = this.run.phase === RunPhase.Playing;
     const controls = this.controlsFrom(inputState);
     if (playing) this.player.update(deltaSeconds, controls);
+    else if (this.watching) this.moveWatchPoint(deltaSeconds, inputState, controls);
     const { x, y } = this.player.position;
 
     this.pickups.update(deltaSeconds, {
@@ -304,8 +356,9 @@ export class Game {
       this.pendingSimulationSeconds = 0;
       this.updatesSinceSimulationStep = 0;
       const spawnPerSpecies = this.spawnCounts(simulationSeconds);
-      this.simulation.setSeekScale(this.spawnPressure.seekScale);
-      this.simulation.setSpawnDistanceFraction(this.spawnPressure.spawnDistanceFraction);
+      const pressure = this.activeSpawnPressure;
+      this.simulation.setSeekScale(pressure.seekScale);
+      this.simulation.setSpawnDistanceFraction(pressure.spawnDistanceFraction);
       this.stepSimulation(simulationSeconds, spawnPerSpecies, this.stepGates);
     }
     this.simulation.pollDensity();
@@ -324,6 +377,18 @@ export class Game {
     if (pressed && this.gameOverSeconds > RESTART_GUARD_SECONDS) this.restart();
   }
 
+  // Watch mode: the point sits on the pointer (clamped inside the arena), else moves with the stick.
+  moveWatchPoint(deltaSeconds, inputState, controls) {
+    const pointer = inputState.pointerWorld;
+    if (!pointer) {
+      this.player.update(deltaSeconds, { ...controls, firing: false });
+      return;
+    }
+    const { radius, arenaWidth, arenaHeight } = this.player;
+    this.player.positionX = clamp(pointer.x, radius, arenaWidth - radius);
+    this.player.positionY = clamp(pointer.y, radius, arenaHeight - radius);
+  }
+
   // Stick or touch aim wins while it is pushed; otherwise the mouse aims from the ship to the
   // pointer. A pointer on top of the ship gives no aim, so the ship keeps its last one.
   controlsFrom(inputState) {
@@ -340,13 +405,14 @@ export class Game {
   // No spawns and no gates between death and respawn: the arena stays clear for the pause.
   spawnCounts(deltaSeconds) {
     const phase = this.run.phase;
+    const pressure = this.activeSpawnPressure;
     this.stepGates = null;
     if (phase === RunPhase.Dying || phase === RunPhase.Respawning) return NO_SPAWNS;
     this.spawnDirector.update(deltaSeconds, {
       playerX: this.player.position.x,
       playerY: this.player.position.y,
-      safeDistance: this.spawnPressure.spawnDistanceFraction * ARENA_WIDTH,
-      filling: this.spawnPressure.filling,
+      safeDistance: pressure.spawnDistanceFraction * ARENA_WIDTH,
+      filling: pressure.filling,
       shares: this.simulation.shares,
       // The Ready arena (before a run) trickles from every gate; waves start with the run.
       continuous: phase === RunPhase.Ready,
@@ -355,7 +421,7 @@ export class Game {
       aimY: this.player.aim.y,
     });
     this.stepGates = this.spawnDirector.spawnGates;
-    return this.spawnPressure.update(deltaSeconds, this.latestStats, this.simulation.shares, this.simulation.frameSequence + 1, this.spawnDirector.wave);
+    return pressure.update(deltaSeconds, this.latestStats, this.simulation.shares, this.simulation.frameSequence + 1, this.spawnDirector.wave);
   }
 
   stepSimulation(deltaSeconds, spawnPerSpecies, spawnGates = null) {

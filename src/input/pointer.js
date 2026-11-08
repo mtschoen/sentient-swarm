@@ -1,5 +1,5 @@
 // Mouse input: world position, primary button, and the right button (held: secondaryDown, the
-// game's bomb button, plus the temporary inspect zoom).
+// game's bomb button, plus the temporary inspect zoom while viewport.inspectZoomEnabled, the lab).
 // Button state follows event.buttons on every pointer event, because a mouse sends pointerdown
 // only for the first pressed button and pointerup only for the last released one (chord changes
 // in between arrive as pointermove). pointercancel, lostpointercapture and window blur release
@@ -15,7 +15,8 @@ export function createPointerSource(canvas, viewport, windowObject) {
   let zoomHeld = false;
 
   // Writes inspectZoom only on a change, so other writers (the capture hook) are not overridden.
-  function setZoomHeld(held) {
+  function setZoomHeld(requested) {
+    const held = requested && viewport.inspectZoomEnabled === true;
     if (held === zoomHeld) return;
     zoomHeld = held;
     viewport.inspectZoom = held ? INSPECT_ZOOM : 1;

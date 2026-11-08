@@ -103,3 +103,14 @@ test('worldToClip maps the center to the origin and honors inspectZoom', () => {
   assert.ok(Math.abs(zoomed.x - normal.x * 4) < 1e-9);
   assert.ok(Math.abs(zoomed.y - normal.y * 4) < 1e-9);
 });
+
+test('the inspect zoom is off until the lab enables it, and disabling it drops a held zoom', () => {
+  const viewport = new Viewport();
+  assert.equal(viewport.inspectZoomEnabled, false);
+  viewport.setInspectZoomEnabled(true);
+  assert.equal(viewport.inspectZoomEnabled, true);
+  viewport.inspectZoom = 4;
+  viewport.setInspectZoomEnabled(false);
+  assert.equal(viewport.inspectZoomEnabled, false);
+  assert.equal(viewport.inspectZoom, 1);
+});
