@@ -51,3 +51,14 @@ test('throwing storage is tolerated', () => {
 test('constructing without storage does not touch localStorage', () => {
   assert.doesNotThrow(() => new SettingsStore({}));
 });
+
+// Regression (Task C1 minor): an unknown stored preset name loaded as if it were valid.
+test('an unknown stored preset loads as absent', () => {
+  const raw = JSON.stringify({ preset: 'phoneMedium', adapterKey: 'k', music: 50 });
+  const loaded = new SettingsStore({ storage: fakeStorage({ 'murmuration.settings.v1': raw }) }).load();
+  assert.equal(loaded.preset, null);
+  assert.equal(loaded.adapterKey, 'k');
+  assert.equal(loaded.music, 50);
+  const known = JSON.stringify({ preset: 'phoneHigh' });
+  assert.equal(new SettingsStore({ storage: fakeStorage({ 'murmuration.settings.v1': known }) }).load().preset, 'phoneHigh');
+});

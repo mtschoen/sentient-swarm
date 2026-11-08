@@ -1,3 +1,5 @@
+import { PRESETS } from './presets.js';
+
 export const DEFAULT_SETTINGS = Object.freeze({
   preset: null,
   adapterKey: null,
@@ -11,9 +13,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   stickRadius: 1.0,
 });
 
-// preset and adapterKey are nullable strings; the rest match their default's type.
+// preset and adapterKey are nullable strings (preset only a known PRESETS name, so an unknown one
+// loads as absent); the rest match their default's type.
 function matchesDefault(key, value) {
-  if (key === 'preset' || key === 'adapterKey') {
+  if (key === 'preset') {
+    return value === null || (typeof value === 'string' && Object.hasOwn(PRESETS, value));
+  }
+  if (key === 'adapterKey') {
     return value === null || typeof value === 'string';
   }
   if (typeof DEFAULT_SETTINGS[key] === 'number') {
