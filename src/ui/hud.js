@@ -39,6 +39,12 @@ function weaponText(armed, tier) {
   return `${armed.toUpperCase()} ${ROMAN[tier] ?? tier}`;
 }
 
+// The rail turrets (owner ruling R29), for example RAIL x3, with the tier numeral above tier 1.
+function turretText(count, tier) {
+  if (!(count > 0)) return '';
+  return tier > 1 ? `RAIL x${count} ${ROMAN[tier] ?? tier}` : `RAIL x${count}`;
+}
+
 const PAUSE_BUTTON_SIZE_CSS_PIXELS = 34;
 // Phases in which the pause button shows (pausing a Ready or GameOver screen means nothing).
 const PAUSABLE_PHASES = new Set(['playing', 'dying', 'respawning']);
@@ -64,13 +70,15 @@ export function createHud(rootElement, {
   const score = make('div', 'hud-score', '0');
   const multiplier = make('div', 'hud-multiplier', 'x1');
   const weapon = make('div', 'hud-weapon', 'BASE');
+  // Under the weapon text; hidden by visibility at 0 turrets so its row stays reserved (hud.css).
+  const turrets = make('div', 'hud-turrets');
   const chargeFill = make('div', 'hud-charge-fill');
   const charge = row('hud-charge', [chargeFill]);
   const offer = make('div', 'hud-offer');
   const lives = make('div', 'hud-lives');
   const bombs = make('div', 'hud-bombs');
   const leftPanel = row('hud-panel hud-left', [score, multiplier]);
-  const rightPanel = row('hud-panel hud-right', [weapon, charge, offer, row('hud-icons', [lives, bombs])]);
+  const rightPanel = row('hud-panel hud-right', [weapon, turrets, charge, offer, row('hud-icons', [lives, bombs])]);
 
   const finalScore = make('div', 'hud-final-score');
   const playAgain = make('button', 'hud-play-again', 'Play again');
@@ -138,6 +146,8 @@ export function createHud(rootElement, {
       setText(multiplier, `x${state.multiplier ?? 1}`);
       pauseButton.hidden = !PAUSABLE_PHASES.has(state.phase);
       setText(weapon, weaponText(state.armed, state.tier));
+      setText(turrets, turretText(state.railTurrets, state.railTier));
+      turrets.style.visibility = state.railTurrets > 0 ? 'visible' : 'hidden';
       setText(lives, LIFE_ICON.repeat(Math.max(0, state.lives ?? 0)));
       setText(bombs, BOMB_ICON.repeat(Math.max(0, state.bombs ?? 0)));
       setText(offer, state.offeredType ? `NEXT ${String(state.offeredType).toUpperCase()}` : '');

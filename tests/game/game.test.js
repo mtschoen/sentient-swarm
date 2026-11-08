@@ -202,14 +202,17 @@ test('a current hit drops a life, drops the weapon to base, resets the multiplie
   simulation.scriptedStats.push(stats({ frameSequence: 1, killsSinceLastRead: 60 }));
   game.update(STEP);
   assert.equal(game.state.multiplier, 2);
+  game.weapons.collect('pulse');
   game.weapons.collect('rail');
-  assert.equal(game.state.armed, 'rail');
+  assert.equal(game.state.armed, 'pulse');
+  assert.equal(game.state.railTurrets, 1);
   const killAllBefore = simulation.killAllRequests;
   hitNow(game, simulation);
   const hitSequence = simulation.frameSequence;
   assert.equal(game.state.lives, 2);
   assert.equal(game.state.armed, 'base');
   assert.equal(game.state.tier, 1);
+  assert.deepEqual([game.state.railTurrets, game.state.railTier], [0, 1]);
   assert.equal(game.state.multiplier, 1);
   assert.equal(game.state.phase, RunPhase.Dying);
   assert.equal(simulation.killAllRequests, killAllBefore + 1);
@@ -445,13 +448,13 @@ test('the expiry frame sends no beam even when the weapon still returned one', a
 test('a pickup collected on the frame the charge would reach zero keeps the weapon armed and refills it', async () => {
   const { game, input } = await createGame();
   game.start();
-  game.weapons.collect('rail');
-  const drainPerStep = STEP / game.weapons.types.rail.tiers[0].chargeSeconds;
+  game.weapons.collect('sidewinders');
+  const drainPerStep = STEP / game.weapons.types.sidewinders.tiers[0].chargeSeconds;
   input.state.aim = { x: 1, y: 0 };
   input.state.firing = true;
   // Drain while firing, stopping with a margin so float rounding cannot expire the weapon early.
   while (game.weapons.charge > 2 * drainPerStep) game.update(STEP);
-  assert.equal(game.state.armed, 'rail');
+  assert.equal(game.state.armed, 'sidewinders');
   // Within one step of zero: the next firing step alone would expire the weapon.
   game.weapons.charge = drainPerStep / 2;
   // Put a scatter pickup under the ship; it is collected in the same update as the expiry step.
@@ -494,6 +497,7 @@ test('restart after game over resets every module and clears the arena once', as
   assert.equal(state.bombs, 3);
   assert.equal(state.armed, 'base');
   assert.equal(state.tier, 1);
+  assert.equal(state.railTurrets, 0);
   assert.equal(state.phase, RunPhase.Playing);
   assert.equal(game.pickups.pickups.length, 0);
   assert.equal(game.spawnPressure.elapsed, 0);
@@ -594,10 +598,12 @@ test('awards add a life and a bomb at their thresholds', async () => {
   assert.equal(game.state.bombs, 4);
 });
 
-test('debugArm arms a weapon at a tier with a full charge, and base drops it', async () => {
+test('debugArm arms a weapon at a tier with a full charge, rail adds that many turrets, and base drops it', async () => {
   const { game } = await createGame();
-  game.debugArm('rail', 3);
-  assert.deepEqual([game.state.armed, game.state.tier, game.state.charge], ['rail', 3, 1]);
+  game.debugArm('pulse', 3);
+  assert.deepEqual([game.state.armed, game.state.tier, game.state.charge], ['pulse', 3, 1]);
+  game.debugArm('rail', 4);
+  assert.deepEqual([game.state.armed, game.state.railTurrets, game.state.railTier], ['base', 4, 1]);
   game.debugArm('scatter', 1);
   assert.deepEqual([game.state.armed, game.state.tier], ['scatter', 1]);
   game.debugArm('base', 1);
@@ -618,8 +624,11 @@ test('debugInvulnerable keeps contact off while playing until it is turned off a
 test('scene hides the ship from death until respawn and carries the armed weapon', async () => {
   const { game } = await createGame();
   game.debugArm('pulse', 2);
+  game.weapons.collect('rail');
+  game.weapons.collect('rail');
   const scene = game.scene();
   assert.equal(scene.ship.armed, 'pulse');
+  assert.equal(scene.ship.railTurrets, 2);
   assert.equal(scene.projectiles, game.projectiles);
   game.run.start();
   game.run.playerHit(game.simulation.frameSequence + 1, game.player.position);
@@ -991,4 +1000,60 @@ test('watch mode without a pointer moves the point with the move stick', async (
   runFor(game, 0.25);
   assert.ok(game.player.position.x > start.x);
   assert.equal(game.state.phase, RunPhase.Ready);
+});
+
+// Owner ruling R29: rail pickups add rear-firing turrets on top of the armed weapon.
+test('a collected rail pickup adds a turret and keeps the armed weapon, its tier and its charge', async () => {
+  const { game } = await createGame();
+  game.start();
+  game.weapons.collect('scatter');
+  const { x, y } = game.player.position;
+  game.pickups.pickups.push({ x, y, type: 'rail', age: 0, fade: 1 });
+  game.update(STEP);
+  const { armed, tier, charge, railTurrets, railTier } = game.state;
+  assert.deepEqual([armed, tier, charge, railTurrets, railTier], ['scatter', 1, 1, 1, 1]);
+});
+
+test('turret shots are queued with the weapon shots, and a turret-only frame plays the rail cue at the turret tier', async () => {
+  const gpu = createFakeGpu();
+  const simulation = createFakeSimulation();
+  const input = createFakeInput();
+  const projectiles = createFakeProjectiles();
+  const played = [];
+  const effects = { weaponFire: (kind, tier) => played.push(`fire ${kind} ${tier}`) };
+  const game = await Game.create({
+    gpu, simulation, projectiles, renderer: createFakeRenderer(), input, capacity: CAPACITY, random: () => 0.5, effects,
+  });
+  game.start();
+  game.debugArm('rail', 13);
+  input.state.aim = { x: 1, y: 0 };
+  input.state.firing = true;
+  const steps = Math.round(1.2 / STEP);
+  let framesThatFired = 0;
+  for (let frame = 0; frame < steps; frame += 1) {
+    const before = projectiles.spawns.length;
+    game.update(STEP);
+    if (projectiles.spawns.length > before) framesThatFired += 1;
+  }
+  const railShots = projectiles.spawns.filter((spawn) => spawn.kind === game.weapons.types.rail.kind);
+  const baseShots = projectiles.spawns.filter((spawn) => spawn.kind === game.weapons.types.base.kind);
+  // Four volleys from 12 turrets at tier 2 (two parallel rails each).
+  assert.equal(railShots.length, 4 * 12 * 2);
+  assert.ok(baseShots.length > 0);
+  assert.equal(played.length, framesThatFired, 'one cue per frame that fires');
+  assert.ok(played.includes('fire rail 2'), 'a turret-only frame plays the rail cue');
+  assert.ok(played.every((entry) => entry === 'fire rail 2' || entry === 'fire base 1'));
+  // A frame where both fire keeps the armed weapon's cue: the beam fires every frame.
+  played.length = 0;
+  game.weapons.collect('beam');
+  runFor(game, 1);
+  assert.ok(played.length > 0 && played.every((entry) => entry === 'fire beam 1'));
+});
+
+test('quit to title clears the turrets', async () => {
+  const { game } = await createGame();
+  game.start();
+  game.debugArm('rail', 5);
+  game.quitToTitle();
+  assert.deepEqual([game.state.railTurrets, game.state.railTier], [0, 1]);
 });

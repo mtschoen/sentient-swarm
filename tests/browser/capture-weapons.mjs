@@ -1,6 +1,8 @@
 // Visual capture for the weapon taste pass (task C0c): writes 1x PNGs of the ship, the rail shot,
-// the sidewinders and the pulse ring under artifacts/. Not part of the checks.
-// Usage: SMOKE_PORT=5189 node tests/browser/capture-weapons.mjs <before|after> [ship rail sidewinders pulse]
+// the sidewinders and the pulse ring under artifacts/. Not part of the checks. The turrets subject
+// (task R29, not in the default set) writes artifacts/r29-turrets.png: TURRET_COUNT rail turrets
+// (debugArm('rail', count)) firing beside the base gun, the turret ticks on the ship's ring.
+// Usage: SMOKE_PORT=5189 node tests/browser/capture-weapons.mjs <before|after> [ship rail sidewinders pulse turrets]
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
@@ -11,6 +13,7 @@ const MOVE_FRAMES = 20;
 const FIRE_FRAMES = Number(process.env.FIRE_FRAMES ?? 22);
 const SIDEWINDER_FRAMES = 22;
 const RING_FRAMES = 6;
+const TURRET_COUNT = Number(process.env.TURRET_COUNT ?? 4);
 const TIMEOUT_MILLISECONDS = 30_000;
 
 async function save(name, captured) {
@@ -44,7 +47,9 @@ const captureAfterFrames = (page, count) => page.evaluate((frames) => new Promis
   requestAnimationFrame(watch);
 }), count);
 
+// The title menu owns the start (a stick only moves its cursor), so start the run as the smoke does.
 async function startRun(page) {
+  await page.evaluate(() => { const { game } = window.__murmuration; if (game.run.phase === 'ready') game.start(); });
   await setSticks(page, [-1, 0, 0, 0]);
   await waitFrames(page, MOVE_FRAMES);
   await setSticks(page, [0, 0, 0, 0]);
@@ -61,6 +66,13 @@ async function captureSubject(page, subject, suffix) {
     await setSticks(page, [0, 0, 0, 0]);
     await waitFrames(page, MOVE_FRAMES * 2);
     await save(`c0c-ship-${suffix}.png`, await capture(page));
+    return;
+  }
+  if (subject === 'turrets') {
+    await arm(page, 'rail', TURRET_COUNT);
+    await setSticks(page, [0, 0, 1, 0]);
+    await save('r29-turrets.png', await captureAfterFrames(page, FIRE_FRAMES));
+    await setSticks(page, [0, 0, 0, 0]);
     return;
   }
   await arm(page, subject, 3);

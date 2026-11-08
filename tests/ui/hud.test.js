@@ -179,3 +179,23 @@ test('the pause button is blurred after a click so Space cannot re-click it', ()
   pauseButton.fire('click');
   assert.equal(blurs, 1);
 });
+
+// Owner ruling R29: the rail turrets read under the weapon; the row is reserved, never popped in.
+test('the turret readout shows the count and the tier above 1, and hides at 0 while keeping its row', () => {
+  const { hud, root } = setup();
+  const turrets = find(root, 'hud-turrets');
+  assert.ok(turrets, 'a turret readout exists');
+  const panel = find(root, 'hud-right');
+  assert.ok(panel.children.indexOf(turrets) === panel.children.indexOf(find(root, 'hud-weapon')) + 1, 'under the weapon text');
+  hud.update({ ...STATE, railTurrets: 0, railTier: 1 });
+  assert.equal(turrets.style.visibility, 'hidden');
+  assert.equal(turrets.hidden, false, 'the row stays in the layout');
+  hud.update({ ...STATE, railTurrets: 3, railTier: 1 });
+  assert.equal(turrets.style.visibility, 'visible');
+  assert.equal(turrets.textContent, 'RAIL x3');
+  hud.update({ ...STATE, railTurrets: 12, railTier: 2 });
+  assert.equal(turrets.textContent, 'RAIL x12 II');
+  assert.equal(find(root, 'hud-weapon').textContent, 'RAIL III', 'the weapon text stays the armed weapon');
+  hud.update({ ...STATE });
+  assert.equal(turrets.style.visibility, 'hidden');
+});

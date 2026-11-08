@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BLINK_HERTZ, SHIP_TURN_RATE, SHIP_VIEW_BYTES, ShipRenderer, easeAngle, packShipView } from '../../src/render/ship.js';
-import { WEAPON_HUES } from '../../src/game/weaponTypes.js';
+import { readFileSync } from 'node:fs';
+import { BLINK_HERTZ, SHIP_SHADER_CONSTANTS, SHIP_TURN_RATE, SHIP_VIEW_BYTES, ShipRenderer, easeAngle, packShipView } from '../../src/render/ship.js';
+import { MAXIMUM_RAIL_TURRETS, RAIL_TURRET_SPACING_RADIANS, WEAPON_HUES } from '../../src/game/weaponTypes.js';
+import { substituteConstants } from '../../src/gpu/shaders.js';
 import { Viewport } from '../../src/render/viewport.js';
 
 // Only the buffer-usage constants and createBuffer are touched by the constructor.
@@ -31,8 +33,9 @@ test('the rendered facing snaps once, then turns at the finite rate and ignores 
   assert.ok(Math.abs(ship.easedFacing(-Math.PI / 2, 20) - eased) < SHIP_TURN_RATE * 0.1 + 1e-9);
 });
 
-test('packShipView fills the 64-byte ShipView layout with the armed hue and ring flag', () => {
+test('packShipView fills the 80-byte ShipView layout with the armed hue and ring flag', () => {
   const view = packShipView(base);
+  assert.equal(SHIP_VIEW_BYTES, 80);
   assert.equal(view.byteLength, SHIP_VIEW_BYTES);
   assert.deepEqual(Array.from(view.slice(8, 15)), Array.from(new Float32Array([8, 4.5, 1, 0.5, WEAPON_HUES.rail, 1, 1])));
 });
@@ -62,4 +65,24 @@ test('the drawn thrust depends on velocity, not on how often it is sampled', () 
   assert.ok(sample(1 / 144) > 0.99);
   const idle = new ShipRenderer(fakeGpu, { viewport, common: '' });
   assert.equal(idle.easedThrust(0, 0, 1 / 144), 0);
+});
+
+// Owner ruling R29: the rail turrets draw as ticks on the charge ring around the drawn facing.
+test('packShipView packs the turret count after the facing it rotates with, clamped to the cap', () => {
+  const view = packShipView({ ...base, railTurrets: 4 });
+  assert.equal(view[10], 1, 'the facing the ticks rotate with');
+  assert.deepEqual(Array.from(view.slice(16, 20)), [4, 0, 0, 0]);
+  assert.equal(packShipView(base)[16], 0);
+  assert.equal(packShipView({ ...base, railTurrets: 40 })[16], MAXIMUM_RAIL_TURRETS);
+});
+
+test('ship.wgsl takes the turret spacing, cap and rail hue from the game tables', () => {
+  const source = readFileSync(new URL('../../src/render/shaders/ship.wgsl', import.meta.url), 'utf8');
+  assert.match(source, /__RAIL_TURRET_SPACING_RADIANS__/);
+  assert.deepEqual(SHIP_SHADER_CONSTANTS, {
+    RAIL_TURRET_SPACING_RADIANS: RAIL_TURRET_SPACING_RADIANS,
+    MAXIMUM_RAIL_TURRETS: MAXIMUM_RAIL_TURRETS,
+    RAIL_HUE: WEAPON_HUES.rail,
+  });
+  assert.doesNotThrow(() => substituteConstants(source, SHIP_SHADER_CONSTANTS));
 });

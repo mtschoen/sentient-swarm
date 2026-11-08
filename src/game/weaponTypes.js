@@ -23,6 +23,12 @@ export const WEAPON_HUES = Object.freeze({
 
 export const WEAPON_TYPE_NAMES = Object.freeze(['beam', 'scatter', 'rail', 'pulse', 'sidewinders']);
 
+// Rail pickups are add-on turrets, not an armed weapon (owner ruling R29): each adds one turret,
+// the turrets sit this far apart around the rear of the aim (and rotate with it), and past the cap
+// (all 360 degrees covered) each further pickup raises the turrets' rail tier instead.
+export const RAIL_TURRET_SPACING_RADIANS = Math.PI / 6;
+export const MAXIMUM_RAIL_TURRETS = 12;
+
 function tier(values) {
   return Object.freeze({
     fireInterval: 0,

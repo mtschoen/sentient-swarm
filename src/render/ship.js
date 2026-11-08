@@ -1,12 +1,20 @@
 // Ship pass (ship.wgsl): the player's spaceship and its charge ring, one instanced quad drawn
 // after the particles so nothing hides it. The rendered heading eases toward the aim angle at a
 // finite turn rate so turns read as turns; fire direction stays the exact aim (the game's job).
+// The rail turrets (owner ruling R29) draw as rail-hue ticks on the ring, around the drawn facing.
 import { createUniformBuffer } from '../gpu/buffers.js';
-import { WEAPON_HUES } from '../game/weaponTypes.js';
+import { substituteConstants } from '../gpu/shaders.js';
+import { MAXIMUM_RAIL_TURRETS, RAIL_TURRET_SPACING_RADIANS, WEAPON_HUES } from '../game/weaponTypes.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
 import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
 
-export const SHIP_VIEW_BYTES = 64;
+export const SHIP_VIEW_BYTES = 80;
+// Substituted into ship.wgsl, so the tick angles follow the same spacing rule as the turrets.
+export const SHIP_SHADER_CONSTANTS = Object.freeze({
+  RAIL_TURRET_SPACING_RADIANS,
+  MAXIMUM_RAIL_TURRETS,
+  RAIL_HUE: WEAPON_HUES.rail,
+});
 // Radians per second: a half turn takes about a quarter second.
 export const SHIP_TURN_RATE = 12;
 export const BLINK_HERTZ = 8;
@@ -29,7 +37,7 @@ export function easeAngle(current, target, maximumStep) {
 }
 
 // Matches the ShipView table in ship.wgsl.
-export function packShipView({ viewport, time, x, y, facing, charge, armed, invulnerable, thrust = 0 }) {
+export function packShipView({ viewport, time, x, y, facing, charge, armed, invulnerable, thrust = 0, railTurrets = 0 }) {
   const floats = new Float32Array(SHIP_VIEW_BYTES / Float32Array.BYTES_PER_ELEMENT);
   packWorldView(viewport, time, floats);
   const blinkOn = (time * BLINK_HERTZ) % 1 < 0.5;
@@ -38,6 +46,7 @@ export function packShipView({ viewport, time, x, y, facing, charge, armed, invu
     facing, Math.min(1, Math.max(0, charge)),
     WEAPON_HUES[armed] ?? WEAPON_HUES.base, armed === 'base' ? 0 : 1,
     invulnerable && !blinkOn ? BLINK_DIM_BRIGHTNESS : 1, Math.min(1, Math.max(0, thrust)),
+    Math.min(MAXIMUM_RAIL_TURRETS, Math.max(0, railTurrets)), 0, 0, 0,
   ], WORLD_VIEW_FLOATS);
   return floats;
 }
@@ -56,7 +65,8 @@ export class ShipRenderer {
   }
 
   async initialize() {
-    const module = this.device.createShaderModule({ label: 'ship', code: await loadRenderShader('ship', this.common) });
+    const code = substituteConstants(await loadRenderShader('ship', this.common), SHIP_SHADER_CONSTANTS);
+    const module = this.device.createShaderModule({ label: 'ship', code });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'ship',
       layout: 'auto',
@@ -94,12 +104,12 @@ export class ShipRenderer {
   }
 
   // Draws into an open render pass whose color target is a scene texture. facing is the aim angle.
-  encode(pass, { x, y, velocityX = 0, velocityY = 0, facing, charge, armed, invulnerable, time }) {
+  encode(pass, { x, y, velocityX = 0, velocityY = 0, facing, charge, armed, invulnerable, railTurrets = 0, time }) {
     const previousTime = this.lastTime;
     const renderedFacing = this.easedFacing(facing, time);
     const thrust = this.easedThrust(velocityX, velocityY, previousTime === null ? 0 : Math.min(MAXIMUM_EASE_SECONDS, Math.max(0, time - previousTime)));
     this.device.queue.writeBuffer(this.viewBuffer, 0, packShipView({
-      viewport: this.viewport, time, x, y, facing: renderedFacing, charge, armed, invulnerable, thrust,
+      viewport: this.viewport, time, x, y, facing: renderedFacing, charge, armed, invulnerable, thrust, railTurrets,
     }));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroup);

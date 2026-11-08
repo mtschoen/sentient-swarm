@@ -15,14 +15,17 @@
 //      edge that run.useBomb accepts calls simulation.requestKillAll before this step, so the
 //      bomb kills before projectiles and contact.
 //   2. player.update (Playing only), with mouse aim derived as pointerWorld minus the player.
-//   3. pickups.update, then collect at the player into weapons.collect (before charge expiry); a
+//   3. pickups.update, then collect at the player into weapons.collect (before charge expiry; a
+//      rail pickup adds a turret and leaves the armed weapon alone, owner ruling R29); a
 //      collection plays the pickup effect and, with pickupBlastRadius above 0, fires the pickup
 //      blast (owner ruling R22): simulation.requestRadialKill at the ship for this step (unscored,
 //      like a bomb) and a PICKUP_BLAST_IMPULSE_STRENGTH shockwave; with the blast off it queues
 //      the smaller PICKUP_IMPULSE_STRENGTH impulse instead.
-//   4. weapons.update; spawns go to projectiles.queueSpawn and the beam to setBeam (null on the
-//      expiry frame even when the weapon still returned one). A frame that fires (spawns or a
-//      beam) plays one weaponFire cue with the kind and tier it fired at; then the expiry cue.
+//   4. weapons.update; the armed weapon's spawns and then the rail turrets' spawns go to
+//      projectiles.queueSpawn and the beam to setBeam (null on the expiry frame even when the
+//      weapon still returned one). A frame that fires plays one weaponFire cue: the armed weapon's
+//      kind and tier when it fired (spawns or a beam), else 'rail' at the turret tier when only the
+//      turrets fired; then the expiry cue (expiry keeps the turrets).
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
 //   6. the spawn director (gates and waves, task C0b2; no waves in Ready) and spawn pressure (both
 //      paused while Dying and Respawning, when the step gets no gates), its seek scale and its spawn distance
@@ -34,7 +37,7 @@
 //      per stats frame and only while Playing; awards add lives and bombs; a frame with pulse ring
 //      detonations queues one RING_IMPULSE_STRENGTH impulse at its reported ring position; every
 //      new playerHitSequence is acknowledged (accepted or not) and offered to run.playerHit, which
-//      on success drops the weapon and resets the multiplier.
+//      on success drops the weapon and the turrets and resets the multiplier.
 //   8. run.update drains this step's actions: clearArena requests the kill-all for the next step
 //      (with the death flood) and clears projectiles, shockwave (bomb and death) queues an impulse that also boosts
 //      bloom, respawn recenters the player, sets the respawn sequence to the next step and
@@ -166,6 +169,8 @@ export class Game {
       armed: this.weapons.armed,
       tier: this.weapons.tier,
       charge: this.weapons.charge,
+      railTurrets: this.weapons.railTurrets,
+      railTier: this.weapons.railTier,
       offeredType: this.pickups.offeredType,
       phase: this.paused ? 'paused' : this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
@@ -338,9 +343,12 @@ export class Game {
     const firedKind = this.weapons.armed;
     const firedTier = this.weapons.tier;
     const fire = this.weapons.update(deltaSeconds, { firing: playing && controls.firing, aimX: aim.x, aimY: aim.y, x, y });
+    const railTier = this.weapons.railTier;
     fire.spawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
+    fire.turretSpawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
     this.projectiles.setBeam(fire.expired ? null : fire.beam);
     if (fire.spawns.length > 0 || (fire.beam !== null && !fire.expired)) this.effects?.weaponFire?.(firedKind, firedTier);
+    else if (fire.turretSpawns.length > 0) this.effects?.weaponFire?.('rail', railTier);
     if (fire.expired) this.effects?.expiry?.();
 
     if (this.run.phase === RunPhase.Ready) {
@@ -514,13 +522,15 @@ export class Game {
         facing: this.player.facing,
         charge: this.weapons.charge,
         armed: this.weapons.armed,
+        railTurrets: this.weapons.railTurrets,
         invulnerable: this.run.invulnerable,
       },
     };
   }
 
   // Debug hook: arms the weapon type at the tier with a full charge, reaching the tier the way
-  // pickups do (the same type again adds a tier).
+  // pickups do (the same type again adds a tier). 'rail' is the turrets: base gun plus tier
+  // turrets (past 12 each further one raises the turret tier).
   debugArm(type, tier = 1) {
     this.weapons.dropAll();
     if (type === 'base') return;

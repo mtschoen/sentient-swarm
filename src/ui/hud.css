@@ -8,6 +8,10 @@
 .hud-multiplier { font-size: 54px; line-height: 1; color: #ff2fd0; font-style: italic;
   text-shadow: 0 0 8px #ff2fd0, 0 0 22px #ff2fd0, 0 0 40px #ff7ae8; }
 .hud-weapon { font-size: 20px; color: #ffe84a; text-shadow: 0 0 8px #ffe84a; }
+/* Rail turret readout (owner ruling R29) in the rail hue: the 13 px floor in both modes (owner ruling R8;
+   RAIL x12 III is narrower than the band content the weapon text needs), and a fixed line box so the row
+   stays reserved while it is hidden at 0 turrets. */
+.hud-turrets { font-size: 13px; line-height: 16px; min-height: 16px; white-space: nowrap; color: #3385ff; text-shadow: 0 0 6px #3385ff; }
 .hud-offer { font-size: 12px; opacity: 0.8; color: #7dff6b; text-shadow: 0 0 6px #7dff6b; }
 .hud-charge { width: 100%; max-width: 120px; height: 6px; border: 1px solid #ffe84a; border-radius: 3px; }
 .hud-charge-fill { height: 100%; background: #ffe84a; box-shadow: 0 0 8px #ffe84a; }
