@@ -139,14 +139,17 @@ export class QualityController {
   }
 
   // Applies the named preset between frames; resolves false for the current preset with full
-  // budgets (nothing to do) or while another apply runs.
+  // budgets (nothing to do), while another apply runs, or when Game.setCapacity resolves false.
+  // A failed or timed-out swap (CapacitySwapTimeout) rejects, leaving the old preset in effect.
   async apply(name) {
     const preset = this.presetNamed(name);
     if (this.applying || (name === this.currentName && !this.reducedValue)) return false;
     this.applying = true;
     try {
       const { capacity, neighborRadius, particleCapacity } = preset;
-      await this.game.setCapacity(capacity, { neighborRadius, particleCapacity });
+      // false: the swap was ignored (another is in flight), so nothing of this preset is applied
+      // or persisted.
+      if (!(await this.game.setCapacity(capacity, { neighborRadius, particleCapacity }))) return false;
       // The swap is skipped when capacity, radius and budget already match (restoring a sub-step).
       const pool = this.game.simulation.particlePool;
       if (pool.capacity !== particleCapacity) pool.resize(particleCapacity);

@@ -114,6 +114,44 @@ test('apply persists the preset with the adapter key', async () => {
   assert.equal(saved.adapterKey, 'vendor|arch|device|desc');
 });
 
+test('apply does not persist when setCapacity resolves false', async () => {
+  const { controller, game, store } = createController();
+  game.setCapacity = async (capacity, options) => {
+    game.calls.push(['setCapacity', capacity, options]);
+    return false;
+  };
+  assert.equal(await controller.apply('phoneHigh'), false);
+  assert.equal(store.load().preset, null);
+  assert.equal(controller.current, 'desktop');
+  assert.deepEqual(game.calls.map(([name]) => name), ['setCapacity'], 'nothing else of the preset is applied');
+  assert.equal(controller.applying, false);
+});
+
+test('a timed-out swap rejects apply, which the probe path reports as a warning', async () => {
+  const { controller, game, store, probe } = createController();
+  game.setCapacity = async () => {
+    const error = new Error('Capacity swap did not settle within 10000 ms');
+    error.name = 'CapacitySwapTimeout';
+    throw error;
+  };
+  await assert.rejects(controller.apply('phoneHigh'), (error) => error.name === 'CapacitySwapTimeout');
+  assert.equal(controller.applying, false);
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  try {
+    probe.decisions.push('down', 'down');
+    controller.onFrame(30, 10);
+    controller.onFrame(30, 14);
+    assert.equal(await controller.settled, false);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /phoneHigh could not be applied: Capacity swap did not settle/);
+  assert.equal(store.load().preset, null);
+});
+
 test('apply of the current preset is a no-op', async () => {
   const { controller, game, store } = createController();
   assert.equal(await controller.apply('desktop'), false);

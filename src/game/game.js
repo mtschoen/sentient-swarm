@@ -95,13 +95,13 @@ export class Game {
   // expiry() when the upgrade's charge runs out; a missing method is skipped.
   // frameTimer (optional, src/gpu/frame-timer.js) brackets every simulation step and render.
   // spawnDirector (injectable too) owns the spawn gates and waves.
-  static async create({ gpu, simulation, projectiles, renderer, input, capacity, clock, spawnPressure, spawnDirector, random = Math.random, effects = null, frameTimer = null }) {
+  static async create({ gpu, simulation, projectiles, renderer, input, capacity, clock, spawnPressure, spawnDirector, random = Math.random, effects = null, frameTimer = null, now }) {
     const projectileSet = projectiles ?? await Projectiles.create(gpu);
-    return new Game({ gpu, simulation, projectiles: projectileSet, renderer, input, capacity, clock, spawnPressure, spawnDirector, random, effects, frameTimer });
+    return new Game({ gpu, simulation, projectiles: projectileSet, renderer, input, capacity, clock, spawnPressure, spawnDirector, random, effects, frameTimer, now });
   }
 
   // Use Game.create.
-  constructor({ gpu, simulation, projectiles, renderer, input, capacity = simulation.capacity, clock, spawnPressure, spawnDirector, random, effects = null, frameTimer = null }) {
+  constructor({ gpu, simulation, projectiles, renderer, input, capacity = simulation.capacity, clock, spawnPressure, spawnDirector, random, effects = null, frameTimer = null, now }) {
     this.gpu = gpu;
     this.simulation = simulation;
     this.projectiles = projectiles;
@@ -157,7 +157,9 @@ export class Game {
     // The old simulation keeps stepping while a capacity change is prepared (CapacitySwap); commit
     // and install run synchronously together between two updates, so no frame sees a destroyed
     // simulation; spawn pressure keeps its ramp and the score carries its streak (ScoreKeeper).
+    // now (optional, performance.now by default) times out a swap that never settles.
     this.capacitySwap = new CapacitySwap({
+      now,
       getConfiguration: () => ({
         capacity: this.simulation.capacity,
         neighborRadius: this.simulation.neighborRadius,
@@ -589,6 +591,8 @@ export class Game {
   // step interval, so at half rate glyphs interpolate across both updates of a step. deltaSeconds
   // is the frame's elapsed time (FrameLoop), for the time-based trail decay.
   render(alpha, deltaSeconds) {
+    // Polled here, not in update, which returns early while paused (where Settings swaps happen).
+    this.capacitySwap.expire();
     const { device } = this.gpu;
     const encoder = device.createCommandEncoder();
     const interval = this.simulationStepInterval;

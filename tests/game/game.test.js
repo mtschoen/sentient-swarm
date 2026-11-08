@@ -5,6 +5,9 @@ import { Game } from '../../src/game/game.js';
 import { RunPhase } from '../../src/game/run.js';
 import { InputState } from '../../src/input/input.js';
 import { SPECIES_COUNT } from '../../src/sim/layout.js';
+import { SHIP_TURN_RATE, ShipRenderer } from '../../src/render/ship.js';
+
+globalThis.GPUBufferUsage ??= { UNIFORM: 64, COPY_DST: 8 };
 
 const STEP = 1 / 60;
 const CAPACITY = 262144;
@@ -110,11 +113,15 @@ async function createGame() {
   const renderer = createFakeRenderer();
   const input = createFakeInput();
   let seconds = 0;
+  // The capacity swap's monotonic millisecond source (its timeout), apart from the game clock.
+  let milliseconds = 0;
   const game = await Game.create({
     gpu, simulation, projectiles, renderer, input, capacity: CAPACITY, clock: () => seconds, random: () => 0.5,
+    now: () => milliseconds,
   });
   const advanceClock = (deltaSeconds) => { seconds += deltaSeconds; };
-  return { game, gpu, simulation, projectiles, renderer, input, advanceClock };
+  const advanceMilliseconds = (delta) => { milliseconds += delta; };
+  return { game, gpu, simulation, projectiles, renderer, input, advanceClock, advanceMilliseconds };
 }
 
 // A stats frame as Simulation.readAllStats returns it.
@@ -757,6 +764,54 @@ test('a failed capacity change keeps the old simulation and keeps stepping', asy
   const before = simulation.frameSequence;
   game.update(STEP);
   assert.equal(simulation.frameSequence, before + 1);
+});
+
+test('Game.render polls the swap every frame', async () => {
+  const { game } = await createGame();
+  let expireCalls = 0;
+  game.capacitySwap = { pending: false, expire() { expireCalls += 1; return false; } };
+  game.render(0, STEP);
+  game.render(0, STEP);
+  assert.equal(expireCalls, 2);
+});
+
+test('a swap requested while paused still times out', async () => {
+  const { game, simulation, advanceMilliseconds } = await createGame();
+  simulation.prepareCapacity = () => new Promise(() => {});
+  game.start();
+  game.update(STEP);
+  assert.equal(game.pause(), true);
+  const request = game.setCapacity(CAPACITY * 4);
+  assert.equal(game.capacitySwap.pending, true);
+  advanceMilliseconds(10100);
+  game.render(0, STEP);
+  game.render(0, STEP);
+  await assert.rejects(request, (error) => error.name === 'CapacitySwapTimeout');
+  assert.equal(game.capacitySwap.pending, false);
+  assert.equal(game.simulation, simulation);
+  game.resume();
+  assert.equal(game.acceptsProbeFrames, true, 'the probe runs again once the stuck swap has timed out');
+});
+
+test('ship heading eases across a simulation time reset', async () => {
+  const { game, simulation, renderer } = await createGame();
+  const next = createFakeSimulation();
+  next.capacity = CAPACITY / 4;
+  simulation.prepareCapacity = async () => ({ next });
+  // A swap starts the new simulation's clock over (Simulation.time is per simulation).
+  simulation.commitCapacity = () => { next.frameSequence = simulation.frameSequence; next.time = 0; return next; };
+  game.start();
+  runFor(game, 1);
+  game.render(0, STEP);
+  const ship = new ShipRenderer({ device: { createBuffer: () => ({}) } }, { viewport: null, common: '' });
+  const facingBefore = ship.easedFacing(0, renderer.frames.at(-1).sceneTime);
+  assert.equal(await game.setCapacity(CAPACITY / 4), true);
+  game.update(STEP);
+  game.render(0, STEP);
+  const frame = renderer.frames.at(-1);
+  assert.ok(frame.time < renderer.frames.at(-2).time, 'the simulation time was reset by the swap');
+  const facingAfter = ship.easedFacing(Math.PI / 2, frame.sceneTime);
+  assert.ok(Math.abs(facingAfter - facingBefore - SHIP_TURN_RATE * STEP) < 1e-6, 'the heading turns by one step of the turn rate');
 });
 
 test('at half rate the simulation steps every other update with both deltas; CPU play runs every update', async () => {
