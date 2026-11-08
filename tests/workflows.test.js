@@ -49,3 +49,17 @@ test('pages.yml has a literal name and an expression run-name', () => {
   assert.equal(pagesLines[0], 'name: Publish Pages');
   assert.equal(pagesLines[1], 'run-name: Publish ${{ github.event.repository.name }}');
 });
+
+test('every apt-get install refreshes the package index first on the same line', () => {
+  let count = 0;
+  for (const name of workflowNames) {
+    for (const line of lines(name)) {
+      const installAt = line.indexOf('apt-get install');
+      if (installAt === -1) continue;
+      count += 1;
+      const updateAt = line.indexOf('apt-get update &&');
+      assert.ok(updateAt !== -1 && updateAt < installAt, `${name}: ${line.trim()}`);
+    }
+  }
+  assert.ok(count > 0);
+});
