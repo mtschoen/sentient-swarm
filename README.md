@@ -85,7 +85,7 @@ Presets change counts and visual budgets only; gameplay never depends on capacit
 
 - Start: `phoneLow` on a phone (detected from the browser's mobile hint, else a coarse pointer with touch points), `desktop` elsewhere, stepped down until the agent buffer fits half of the adapter's storage binding limit. A preset stored for the same GPU adapter is reused.
 - The probe measures frame time during play only (never on a menu, a pause or the lab's Watch). Its target is 10 ms: a 90th percentile over 180 frames (after 120 warm-up frames) above 13.5 ms steps down, below 6 ms steps up, and never more than one step every 3 seconds. A step down first halves the particle budget and lowers bloom one level, then drops a preset on the next. A stored preset only steps down; a fresh adapter (or Re-run probe) may also step up, to the highest preset the adapter's binding limit allows.
-- `?capacity=N` pins the capacity (one of 65536, 262144, 1048576, 4194304) and turns the probe off; `?probe=off` turns only the probe off.
+- `?capacity=N` pins the capacity (one of 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304) and turns the probe off; `?probe=off` turns only the probe off.
 
 ## Lab
 
