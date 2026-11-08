@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sentient Swarm</title>
+    <meta name="description" content="Sentient Swarm: a WebGPU swarm shooter. Hundreds of thousands of flocking enemies simulated on the GPU, one-hit ship, procedural techno." />
+    <meta name="theme-color" content="#05060a" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #05060a; overflow: hidden; }
+      #arena { display: block; width: 100vw; height: 100vh; touch-action: none; }
+      #message { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+        color: #cfe8ff; font: 16px/1.4 system-ui, sans-serif; text-align: center; padding: 2rem; }
+      #message[hidden] { display: none; }
+    </style>
+    <script type="module" crossorigin src="/sentient-swarm/assets/index-Cn9-Nkjp.js"></script>
+    <link rel="stylesheet" crossorigin href="/sentient-swarm/assets/index-BixtWcQN.css">
+  </head>
+  <body>
+    <canvas id="arena"></canvas>
+    <div id="message" hidden></div>
+    <div id="hud"></div>
+    <div id="touch-overlay"></div>
+    <div id="menu"></div>
+    <div id="rotate-overlay"></div>
+  </body>
+</html>
