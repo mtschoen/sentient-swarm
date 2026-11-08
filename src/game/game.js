@@ -29,12 +29,13 @@
 //      kind and tier when it fired (spawns or a beam), else 'rail' at the turret tier when only the
 //      turrets fired; then the expiry cue (expiry keeps the turrets).
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
-//   6. the spawn director (gates and waves, task C0b2; no waves in Ready) and spawn pressure (both
-//      paused while Dying and Respawning, when the step gets no gates), its seek scale and its spawn distance
-//      (setSeekScale, setSpawnDistanceFraction: both ramp with the count), then the simulation
-//      step is submitted with the director's gate table. At half simulation rate (setSimulationRate('half')) step 6 runs every
-//      other update with the two updates' summed delta, so speeds, spawn pressure per second,
-//      fire rate and charge drain (steps 1 to 5 still run every update) do not change. During a
+//   6. the spawn director (gates and waves; no waves in Ready) and spawn pressure (both paused
+//      while Dying and Respawning, when the step gets no gates), its seek scale and its spawn
+//      distance (setSeekScale, setSpawnDistanceFraction: both ramp with the count), then the
+//      simulation step is submitted with the director's gate table. At half simulation rate
+//      (setSimulationRate('half')) step 6 runs every other update with the two updates' summed
+//      delta, so speeds, spawn pressure per second, fire rate and charge drain (steps 1 to 5
+//      still run every update) do not change. During a
 //      time warp the director, spawn pressure and the simulation get deltaSeconds times
 //      timeWarp.scale while the projectile step gets the unscaled delta; the warp timer counts
 //      real time (every update not paused). Death, a new run and quit to title end the warp.
@@ -44,9 +45,10 @@
 //      new playerHitSequence is acknowledged (accepted or not) and offered to run.playerHit, which
 //      on success drops the weapon and the turrets and resets the multiplier.
 //   8. run.update drains this step's actions: clearArena requests the kill-all for the next step
-//      (with the death flood) and clears projectiles, shockwave (bomb and death) queues an impulse that also boosts
-//      bloom, respawn recenters the player, sets the respawn sequence to the next step and
-//      resets spawn pressure and the spawn director; gameOver leaves the run frozen until restart.
+//      (with the death flood) and clears projectiles, shockwave (bomb and death) queues an impulse
+//      that also boosts bloom, respawn recenters the player, sets the respawn sequence to the next
+//      step and resets spawn pressure and the spawn director; gameOver leaves the run frozen until
+//      restart.
 // Watch mode (the lab, task C6b): setWatch(fraction) puts the run in Ready and keeps it there (no
 // gesture starts it, so weapons and contact stay off); the player point follows the pointer (or
 // the move stick without one) so the swarm chases it, and a watch SpawnPressure with full seek
@@ -146,6 +148,8 @@ export class Game {
     // Game time spent in GameOver, for the restart guard.
     this.gameOverSeconds = 0;
     this.pendingImpulses = [];
+    // Reads this.simulation at call time, so it stays valid across a capacity swap.
+    this.densityAt = (positionX, positionY) => this.simulation.densityAt(positionX, positionY);
     // World units cleared around the ship on every pickup (0 disables); setPickupBlastRadius.
     this.pickupBlastRadiusValue = DEFAULT_PICKUP_BLAST_RADIUS;
     // Debug switch (debugInvulnerable): player contact stays off while it is on.
@@ -340,7 +344,7 @@ export class Game {
       onBaseGun: this.weapons.isBase,
       milestone: playing && this.score.consumeMilestone(),
       phasePlaying: playing,
-      densityAt: (positionX, positionY) => this.simulation.densityAt(positionX, positionY),
+      densityAt: this.densityAt,
     });
     if (playing) {
       const collected = this.pickups.collect(x, y);

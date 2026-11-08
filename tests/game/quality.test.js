@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { QualityController, adapterKeyFrom, detectMobile, resolveInitialPreset } from '../../src/game/quality.js';
+import { QualityController, adapterKeyFrom, detectMobile, resolveInitialPreset, settleApply } from '../../src/game/quality.js';
 import { PRESETS } from '../../src/settings/presets.js';
 import { SettingsStore } from '../../src/settings/storage.js';
 import { agentBufferBytes } from '../../src/sim/layout.js';
@@ -223,4 +223,29 @@ test('adapterKeyFrom joins vendor, architecture, device and description', () => 
   assert.equal(adapterKeyFrom({ vendor: 'nvidia', architecture: 'ampere', device: '2204', description: 'RTX 3090' }), 'nvidia|ampere|2204|RTX 3090');
   assert.equal(adapterKeyFrom({ vendor: 'apple' }), 'apple|||');
   assert.equal(adapterKeyFrom(undefined), 'unknown');
+});
+
+test('a preset swap settling applies the live settings, not the snapshot', async () => {
+  const { controller } = createController();
+  let live = { preset: 'desktopUltra', music: 10 };
+  const applied = [];
+  const settlePreset = settleApply({ quality: controller, liveSettings: () => live, applySettings: (value) => applied.push(value) });
+  const snapshot = live;
+  const settled = settlePreset(snapshot);
+  live = { preset: 'desktopUltra', music: 90 };
+  await settled;
+  assert.deepEqual(applied, [live]);
+  assert.notEqual(applied[0], snapshot);
+  assert.equal(controller.current, 'desktopUltra');
+  // The preset now in effect is not re-applied by a later slider move.
+  assert.equal(settlePreset(live), null);
+  assert.equal(settlePreset({ preset: null }), null);
+});
+
+test('a preset swap that fails is swallowed and applies nothing', async () => {
+  const { controller } = createController();
+  const applied = [];
+  const settlePreset = settleApply({ quality: controller, liveSettings: () => ({}), applySettings: (value) => applied.push(value) });
+  await settlePreset({ preset: 'phoneMedium' });
+  assert.deepEqual(applied, []);
 });

@@ -82,7 +82,7 @@ export class WeaponState {
       this.accumulator += deltaSeconds;
       while (this.accumulator >= values.fireInterval) {
         this.accumulator -= values.fireInterval;
-        this.appendShot(result.spawns, definition.kind, values, { x, y, directionX, directionY });
+        this.#appendShot(result.spawns, definition.kind, values, { x, y, directionX, directionY });
       }
     }
     this.fireTurrets(deltaSeconds, result.turretSpawns, { x, y, directionX, directionY });
@@ -107,12 +107,12 @@ export class WeaponState {
       this.railAccumulator -= values.fireInterval;
       for (const offset of railTurretOffsets(this.railTurrets)) {
         const angle = aimAngle + offset;
-        this.appendShot(spawns, definition.kind, values, { x, y, directionX: Math.cos(angle), directionY: Math.sin(angle) });
+        this.#appendShot(spawns, definition.kind, values, { x, y, directionX: Math.cos(angle), directionY: Math.sin(angle) });
       }
     }
   }
 
-  appendShot(spawns, kind, values, { x, y, directionX, directionY }) {
+  #appendShot(spawns, kind, values, { x, y, directionX, directionY }) {
     const count = values.projectilesPerShot;
     const baseAngle = Math.atan2(directionY, directionX);
     const perpendicularX = -directionY;

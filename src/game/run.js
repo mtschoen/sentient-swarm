@@ -1,7 +1,6 @@
 // Run state machine: lives, bombs, death and respawn timing, invulnerability.
-// Actions are queued by playerHit, useBomb and the phase timers, and are returned
-// (in queue order) by the next update call; update is the only way to drain them.
-// Actions queued by playerHit and useBomb therefore drain on the next update call, not immediately.
+// playerHit, useBomb and the phase timers queue actions; update is the only way to drain them, in
+// queue order, so an action queued by playerHit or useBomb is returned by the next update call.
 
 export const RunPhase = {
   Ready: 'ready',

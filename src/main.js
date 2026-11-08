@@ -13,7 +13,7 @@ import { capacityOptionsUpTo, pinnedCapacityFromSearch, probeDisabledFromSearch 
 import { PRESETS } from './settings/presets.js';
 import { FrameTimeProbe } from './settings/probe.js';
 import { SettingsStore } from './settings/storage.js';
-import { QualityController, adapterKeyFrom, detectMobile, resolveInitialPreset } from './game/quality.js';
+import { QualityController, adapterKeyFrom, detectMobile, resolveInitialPreset, settleApply } from './game/quality.js';
 import { createFrameTimer, frameTimerKindFromSearch } from './gpu/frame-timer.js';
 import { installAudio } from './audio/audio-hook.js';
 import { createHud } from './ui/hud.js';
@@ -104,7 +104,11 @@ async function boot() {
   // Frame times reach the quality controller once each frame's GPU work is done (frame-timer.js).
   let quality = null;
   const frameTimer = probeEnabled
-    ? createFrameTimer(gpu, { kind: frameTimerKindFromSearch(location.search), now: () => performance.now(), onFrame: (milliseconds) => quality?.onFrame(milliseconds, performance.now() / 1000) })
+    ? createFrameTimer(gpu, {
+      kind: frameTimerKindFromSearch(location.search),
+      now: () => performance.now(),
+      onFrame: (milliseconds) => quality?.onFrame(milliseconds, performance.now() / 1000),
+    })
     : null;
   // The game waits in Ready, the swarm running without player contact, until the first gesture.
   // Gamepad rumble follows the stored setting (read live); extra lives have no cue, so a watcher
@@ -112,7 +116,15 @@ async function boot() {
   let liveSettings = settings;
   const rumble = createRumble({ isEnabled: () => liveSettings.rumble });
   const lifeWatcher = createLifeWatcher(rumble);
-  const game = await Game.create({ gpu, simulation, renderer, input, capacity: simulation.capacity, effects: withHaptics(audio.cues, undefined, rumble), frameTimer });
+  const game = await Game.create({
+    gpu,
+    simulation,
+    renderer,
+    input,
+    capacity: simulation.capacity,
+    effects: withHaptics(audio.cues, undefined, rumble),
+    frameTimer,
+  });
   quality = new QualityController({ game, store, probe: new FrameTimeProbe(), adapterKey, ceiling: initialPreset.ceiling });
   if (pinnedCapacity === null) quality.start(initialPreset.name, { allowUp: initialPreset.allowUp });
   window.__murmuration.quality = quality;
@@ -133,7 +145,11 @@ async function boot() {
   };
   applySettings(settings);
   // The select shows the preset in effect (the stored one is null until the probe settles).
-  const panelStore = { load: () => ({ ...store.load(), preset: quality.current ?? store.load().preset }), save: (value) => store.save(value) };
+  const panelStore = {
+    load: () => ({ ...store.load(), preset: quality.current ?? store.load().preset }),
+    save: (value) => store.save(value),
+  };
+  const settlePreset = settleApply({ quality, liveSettings: () => liveSettings, applySettings });
   const settingsPanel = createSettingsPanel({
     store: panelStore,
     presets: Object.entries(PRESETS).map(([name, value]) => ({ name, ...value })),
@@ -141,12 +157,7 @@ async function boot() {
     onRerunProbe: () => quality.rerunProbe(),
     onChange: (current) => {
       applySettings(current);
-      // quality.current follows the probe's steps too, so a slider move never re-applies the preset.
-      if (current.preset && current.preset !== quality.current && pinnedCapacity === null) {
-        // A capacity swap carries the burst size over, but re-apply the live settings (sliders may
-        // have moved during the swap's prepare) once it has settled.
-        quality.apply(current.preset).then(() => applySettings(liveSettings), () => {});
-      }
+      if (pinnedCapacity === null) settlePreset(current);
     },
   });
   document.body.append(settingsPanel.element);
@@ -168,10 +179,23 @@ async function boot() {
 
   // The game steps the simulation; stats carry the latest read-back frame plus the game state. The
   // audio follows the run: phase, multiplier and the kills read this update drive the intensity.
+  // window.__murmuration.stats is merged on read, so the per-update object is not built every step.
+  Object.defineProperty(window.__murmuration, 'stats', {
+    configurable: true,
+    enumerable: true,
+    get: () => (game.latestStats ? { ...game.latestStats, ...game.state } : null),
+  });
   const update = (fixedStep) => {
     game.update(fixedStep);
-    if (game.latestStats) window.__murmuration.stats = { ...game.latestStats, ...game.state };
-    if (!game.paused) audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity, phase: game.run.phase, multiplier: game.score.multiplier, timeScale: game.timeWarp.scale });
+    if (game.paused) return;
+    audio.update({
+      fixedStep,
+      freshStats: game.freshStats,
+      capacity: game.simulation.capacity,
+      phase: game.run.phase,
+      multiplier: game.score.multiplier,
+      timeScale: game.timeWarp.scale,
+    });
   };
 
   const touchOverlay = createTouchOverlay(document.getElementById('touch-overlay'), { touch: input.touch, canvas });
@@ -257,7 +281,8 @@ async function boot() {
     if (action === 'pause') requestPause();
     else if (pauseMenu.visible) pauseMenu.handleAction(action);
     else if (menu.visible) menu.handleAction(action);
-    else if (phase === 'gameOver' && (action === 'confirm' || action === 'altConfirm') && game.gameOverSeconds > RESTART_GUARD_SECONDS) restartFromGameOver();
+    else if (phase === 'gameOver' && (action === 'confirm' || action === 'altConfirm')
+      && game.gameOverSeconds > RESTART_GUARD_SECONDS) restartFromGameOver();
   };
 
   let gameOverShown = false;
@@ -305,7 +330,8 @@ async function boot() {
   // Leaving restores the state captured on entry; the live settings then go back on top of it.
   const lab = new LabMode({ game, renderer, viewport, menu, audio, onLeave: () => applySettings(liveSettings) });
   const ceilingCapacity = PRESETS[initialPreset.ceiling]?.capacity ?? null;
-  const capacityOptions = [...new Set([...capacityOptionsUpTo(ceilingCapacity), simulation.capacity])].sort((first, second) => first - second);
+  const capacityOptions = [...new Set([...capacityOptionsUpTo(ceilingCapacity), simulation.capacity])]
+    .sort((first, second) => first - second);
   createLabPanel({
     lab,
     getSimulation: () => game.simulation,

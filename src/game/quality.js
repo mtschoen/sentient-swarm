@@ -44,6 +44,19 @@ export function resolveInitialPreset({ settings, adapterKey, isMobile, maxStorag
   return { name: initialPresetFor({ isMobile, maxStorageBufferBindingSize }), allowUp: true, ceiling };
 }
 
+// The settings panel's change handler for the preset select. quality.current follows the probe's
+// steps too, so a slider move never re-applies the preset. A capacity swap carries the burst size
+// over, but the live settings (sliders may have moved during the swap's prepare) are applied again
+// once it has settled; liveSettings is read at that moment, not captured when the swap starts.
+// Returns the settle promise, or null when no swap was asked for. A failed swap leaves the old
+// simulation installed and is ignored here, as before.
+export function settleApply({ quality, liveSettings, applySettings }) {
+  return (current) => {
+    if (!current.preset || current.preset === quality.current) return null;
+    return quality.apply(current.preset).then(() => applySettings(liveSettings()), () => {});
+  };
+}
+
 export class QualityController {
   // game: Game (setCapacity, setSimulationRate, simulation.particlePool, renderer,
   // acceptsProbeFrames); store: SettingsStore; probe: FrameTimeProbe (or anything with
