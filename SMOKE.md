@@ -23,7 +23,7 @@ Pass: every step behaves as written, with no crash, no black screen and no stuck
 
 Run from the repository root. The browser scripts start their own Vite dev server on `SMOKE_PORT` (default 5174; set it, for example `SMOKE_PORT=5184`, to run from parallel checkouts) and need a WebGPU adapter (exit code 2 means none).
 
-- `npm test`: CPU logic tests (node:test).
+- `npm test`: CPU logic tests (node:test). `npm run coverage` runs them with the coverage gate.
 - `npm run smoke` (`tests/browser/smoke.mjs`): boots the page with `?probe=off&capacity=262144`, checks Ready, the click start, the start clear, luminance and the audio unlock.
 - `npm run smoke -- --play N`: a synthetic gamepad plays N frames and needs a positive score.
 - `node tests/browser/smoke-menu.mjs`: title and pause menus, Escape and Options pause, Quit to title.
@@ -31,4 +31,11 @@ Run from the repository root. The browser scripts start their own Vite dev serve
 - `node tests/browser/mobile-smoke.mjs`: touch emulation at 844x390 and 915x412, sticks, bomb button, score.
 - `node tests/browser/quality.mjs`: live preset steps through the quality probe, with the alive agents carried over.
 - `node tests/browser/audio-render.mjs`: offline renders of the music and effects (levels and sections); never plays through the speakers.
-- GPU checks: `grid.mjs`, `steer.mjs`, `simulation.mjs`, `projectiles.mjs` and `player.mjs` in `tests/browser/`.
+- `node tests/browser/render-capture.mjs --out <directory> [--compare <directory>]`: a deterministic render capture per bloom quality; compare against an earlier capture to catch rendering drift. Local only.
+- GPU checks in `tests/browser/`: `npm run check:gpu` runs `webgpu-probe.mjs`, `grid.mjs`, `player.mjs`, `simulation.mjs`, `projectiles.mjs` and `bloom.mjs` in sequence (`WEBGPU_ADAPTER=fallback` forces the software adapter); `steer.mjs` runs on its own.
+
+### Where each runs
+
+- Every push and pull request (`check.yml`): `npm test`, `npm run coverage`, `npm run build`, and an advisory `npm run check:gpu` on the software adapter.
+- Main pushes and manual dispatch on a self-hosted GPU runner (`browser.yml`): the smokes, `quality.mjs`, `check:gpu`, `steer.mjs` and `bloom.mjs`.
+- Local only: `audio-render.mjs`, `render-capture.mjs`, the capture scripts and the phone checklist above.

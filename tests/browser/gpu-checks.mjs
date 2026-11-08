@@ -1,10 +1,10 @@
-// Runs the GPU checks in sequence: probe, grid, player, simulation, projectiles.
+// Runs the GPU checks in sequence: probe, grid, player, simulation, projectiles, bloom.
 // Usage: node tests/browser/gpu-checks.mjs   (npm run check:gpu)
 // Exit codes: 0 all pass, 1 any check failed, 2 the probe found no adapter.
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const CHECKS = ['webgpu-probe', 'grid', 'player', 'simulation', 'projectiles'];
+const CHECKS = ['webgpu-probe', 'grid', 'player', 'simulation', 'projectiles', 'bloom'];
 const EXIT_NO_ADAPTER = 2;
 
 let failed = false;

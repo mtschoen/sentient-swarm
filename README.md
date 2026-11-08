@@ -8,6 +8,14 @@ A browser WebGPU shooter (the code, packages and repository are named murmuratio
 - `npm run build`: static build into `dist/`; set `PAGES_BASE` for a sub-path deploy.
 - `npm test`: CPU logic tests via node:test.
 - `npm run smoke`: Playwright browser smoke test (see below).
+- `npm run coverage`: the tests with Node's built-in coverage over `src/`, failing under the line and function floors in `package.json`.
+- `npm run check:gpu`: the small GPU page checks in sequence (probe, grid, player, simulation, projectiles, bloom); needs a WebGPU adapter (`WEBGPU_ADAPTER=fallback` forces the software one).
+
+## CI
+
+- `check.yml` runs on every push and pull request: `npm test`, `npm run coverage` and `npm run build`, plus an advisory job that runs `npm run check:gpu` on the software adapter (a missing adapter shows as a failed step, never a pass).
+- `browser.yml` runs on main pushes and manual dispatch on a self-hosted runner with a real GPU: the smokes, `quality.mjs`, `check:gpu`, `steer.mjs` and `bloom.mjs`. It never runs for pull requests.
+- Local only: `audio-render.mjs`, `render-capture.mjs --compare`, `capture-*.mjs`, the measurements below and the phone checklist in `SMOKE.md`.
 
 ## How to play
 
