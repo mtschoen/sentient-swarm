@@ -21,7 +21,7 @@
 // --sweep (task C0d) arms the beam the same way, fires it, turns the aim 120 degrees in 4 frames
 // and writes artifacts/beam-sweep.png of the frame after the turn: a swept fan, not comb lines.
 // --corridor and --bursts (task C0b, smoke-clearing.mjs): the beam corridor density metric, and the
-// kill burst and bomb captures (artifacts/kill-burst.png, artifacts/bomb-burst.png); --blast (task
+// kill burst and bomb captures (artifacts/kill-burst.png, artifacts/bomb.png); --blast (task
 // C0e, also there): the pickup blast capture (artifacts/pickup-blast.png).
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 // Liveness: every page.evaluate is bounded by EVALUATE_TIMEOUT_MILLISECONDS (a capture resolves only

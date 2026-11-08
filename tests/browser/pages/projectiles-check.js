@@ -36,7 +36,7 @@ import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
-import { DEFAULT_KILL_BURST_PARTICLES } from '/src/sim/params.js';
+import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES } from '/src/sim/params.js';
 import { defaultSpecies } from '/src/sim/species.js';
 import { WEAPON_TYPES } from '/src/game/weaponTypes.js';
 
@@ -50,7 +50,7 @@ const PROJECTILE_STRIDE_BYTES = 48;
 const PROJECTILE_OFFSETS = { position: 0, velocity: 16, radius: 24, lifetime: 28, kind: 32, flags: 36 };
 const ARENA_INSET = 0.001;
 // Every kill's burst: params.killBurstParticles at its default (the pool has room for all of them here).
-const PROJECTILE_KILL_PARTICLES = DEFAULT_KILL_BURST_PARTICLES;
+const PROJECTILE_KILL_PARTICLES = DEFAULT_KILL_BURST_PARTICLES + DEFAULT_KILL_FRAGMENT_PARTICLES;
 const CENTER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
 
 function seededRandom(seed) {
