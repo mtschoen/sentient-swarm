@@ -2,6 +2,8 @@
 
 A browser WebGPU shooter (the code, packages and repository are named murmuration) that simulates hundreds of thousands of flocking enemies of five species entirely on the GPU, rendered as neon spaceship silhouettes (one shape per species, nose along the heading) over a reactive warp grid with trails and bloom. Run it with `npm install` then `npm run dev` (serves on http://127.0.0.1:5174).
 
+Play it at https://mtschoen.com/games/sentient-swarm/ or https://mtschoen.github.io/sentient-swarm/ (GitHub Pages, published from main by `pages.yml`). Source: https://github.com/mtschoen/sentient-swarm.
+
 ## Commands
 
 - `npm run dev`: dev server on 127.0.0.1:5174 (strict port).
