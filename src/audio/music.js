@@ -17,6 +17,8 @@ import { Arrangement, fillDropsKick, fillForBar, fillHits, melodyForBar, STEPS_P
 import { playBass, playClap, playCrash, playHat, playKick, playLead, playRiser } from './voices.js';
 
 const LEAD_THRESHOLD = 0.4;
+// Chord tone indices of the saw arpeggio, one eighth each (3 is the root an octave up).
+const ARPEGGIO_PATTERN = Object.freeze([0, 2, 1, 2, 3, 2, 1, 2]);
 const DEATH_DROPOUT_STEPS = 8;
 const EXPIRY_DROP_STEPS = 32;
 const HIT_SPACING_STEPS = 2;
@@ -32,9 +34,10 @@ const DUCK_CLOSED_HERTZ = 500;
 const DUCK_CLOSED_GAIN = 0.4;
 const DUCK_TIME_CONSTANT_SECONDS = 0.05;
 // Time warp (owner ruling R31): the tempo falls by the warp's scale, floored at
-// TIME_WARP_MUSIC_TEMPO_FLOOR (the change lands on the next beat) and the duck lowpass closes partway, log-interpolated from open toward WARP_FLOOR_HERTZ by
-// 1 - scale (about 2.2 kHz at scale 0.3). The game ramps the scale itself; the filter glides with a
-// third of the warp ramp as its time constant. Scale changes below WARP_SCALE_EPSILON are skipped.
+// TIME_WARP_MUSIC_TEMPO_FLOOR (the change lands on the next beat) and the duck lowpass closes
+// partway, log-interpolated from open toward WARP_FLOOR_HERTZ by 1 - scale (about 2.2 kHz at scale
+// 0.3). The game ramps the scale itself; the filter glides with a third of the warp ramp as its
+// time constant. Scale changes below WARP_SCALE_EPSILON are skipped.
 const WARP_FLOOR_HERTZ = 800;
 // Orchestrator ruling O1: the tempo follows the warp scale only down to half time (about 62 bpm),
 // while the swarm still runs at the full warp scale; the lowpass follows the full scale.
@@ -383,8 +386,7 @@ export class ProceduralMusic {
     const levels = this.levels;
     const eighth = position % 2 === 0;
     if (!section.lead || levels.lead === 0 || dropped || this.barFill === 'kick-out' || !(eighth || levels.leadSixteenths)) return;
-    const pattern = [0, 2, 1, 2, 3, 2, 1, 2];
-    const tone = pattern[(Math.floor(position / 2) + (eighth ? 0 : 3)) % pattern.length];
+    const tone = ARPEGGIO_PATTERN[(Math.floor(position / 2) + (eighth ? 0 : 3)) % ARPEGGIO_PATTERN.length];
     const note = (tone === 3 ? harmony.chord[0] + 12 : harmony.chord[tone]) - 12;
     playLead(this.engine.context, this.nodes.leadFilter, time, { note, level: levels.lead * (eighth ? 1 : 0.55), lengthSeconds: stepDuration * (eighth ? 1.8 : 0.9) });
     this.note('lead', step, time, { rootNote: harmony.root });

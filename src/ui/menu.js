@@ -2,9 +2,9 @@
 // Mouse and touch click the buttons; the keyboard and gamepad drive the same list through
 // handleAction(action) with the actions from src/input/menuInput.js ('up', 'down', 'confirm',
 // 'altConfirm', 'back'). Focus wraps, hovering a button moves it, and show() resets it to the first
-// item; Enter or Space after only hovering still means the primary item. A hidden menu ignores everything. The title menu (createMenu) also starts play on any tap
-// on the arena behind the buttons and on a non-primary face button; Lab and Settings never start
-// play. Callers hide the menu themselves once the run has started.
+// item; Enter or Space after only hovering still means the primary item. A hidden menu ignores
+// everything. The title menu (createMenu) also starts play on any tap on the arena behind the
+// buttons and on a non-primary face button; Lab and Settings never start play. Callers hide the menu themselves once the run has started.
 function buildMenu({ documentObject, className, title, items, onBackdrop = null, onAltConfirm = null, onBack = null }) {
   const make = (tagName, classNames, textContent = '') => {
     const created = documentObject.createElement(tagName);
@@ -18,7 +18,8 @@ function buildMenu({ documentObject, className, title, items, onBackdrop = null,
   const list = make('div', 'menu-list');
   element.append(list);
   let focusIndex = 0;
-  // Focus follows the pointer, but the keyboard and gamepad confirm means the primary item until they move.
+  // Focus follows the pointer, but the keyboard and gamepad confirm means the primary item until
+  // they move.
   let focusFromPointer = false;
   let visible = true;
 

@@ -1,9 +1,9 @@
 // Settings panel: preset select, calibrated sliders, reduced motion, rumble, stick tuning and a
 // probe re-run, as plain DOM. Every change is applied live through onChange(settings) and saved
 // to the store once. Each control gives up focus once changed (as in labPanel.js) and close() blurs
-// whatever has it, so Escape, O and the gameplay keys reach the window again. The pure mappings below turn the stored percentages into the values the
-// renderer, simulation and input use (100 percent is the tuned default; reduced motion disables
-// trails and halves particles and shake).
+// whatever has it, so Escape, O and the gameplay keys reach the window again. The pure mappings
+// below turn the stored percentages into the values the renderer, simulation and input use (100
+// percent is the tuned default; reduced motion disables trails and halves particles and shake).
 import { DEFAULT_KILL_BURST_PARTICLES, MAXIMUM_KILL_BURST_PARTICLES } from '../sim/params.js';
 
 // Renderer defaults at 100 percent (DEFAULT_RENDER_SETTINGS.trailDecay and .bloomStrength).
@@ -25,7 +25,8 @@ export function trailDecayFor(settings) {
 
 export function killBurstParticlesFor(settings) {
   const factor = (settings.effects / 100) * (settings.reducedMotion ? REDUCED_MOTION_FACTOR : 1);
-  return Math.min(MAXIMUM_KILL_BURST_PARTICLES, Math.max(0, Math.round(DEFAULT_KILL_BURST_PARTICLES * factor)));
+  const scaled = Math.round(DEFAULT_KILL_BURST_PARTICLES * factor);
+  return Math.min(MAXIMUM_KILL_BURST_PARTICLES, Math.max(0, scaled));
 }
 
 export function shakeMultiplierFor(settings) {
