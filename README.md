@@ -101,7 +101,7 @@ Presets change counts and visual budgets only; gameplay never depends on capacit
 Choose Lab on the title menu (or press backquote). The lab panel holds:
 
 - Watch (the default) and Play. Watch keeps the swarm running with no weapons and no contact; the swarm chases your pointer (or the move stick) and the alive count is held at a chosen fraction of capacity. Play runs the full game with the current mix.
-- Mixes: five bundled mixes (`default`, `allChasers`, `mixedFive`, `predatorsVsPrey`, `latticeStorm`) and mixes you save by name in the browser. A mix names the species shares, the five species rule rows, the 5 by 5 interaction matrix, the neighbor radius, the simulation rate and optional knob values.
+- Mixes: six bundled mixes (`default`, the shipped chaser-dominant shares, `equalFive`, `allChasers`, `mixedFive`, `predatorsVsPrey`, `latticeStorm`) and mixes you save by name in the browser. A mix names the species shares, the five species rule rows, the 5 by 5 interaction matrix, the neighbor radius, the simulation rate and optional knob values.
 - Share writes the current mix into the address as `#mix=...` (no reload). Opening a link with `#mix=` applies it and opens the lab; a malformed link opens the lab with the shipped defaults and a status line.
 - Knob groups: Watch, Steering and walls, Spawn ramp, Spawn gates, Kills and particles, Weapons (the pickup blast radius, the base gun kill budget, the beam sweep budget and the time warp's seconds and speed), plus renderer sliders, a capacity select and a live readout of frames per second and alive counts.
 - The right mouse button holds the 4x inspect zoom here only.
