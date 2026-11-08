@@ -1,3 +1,4 @@
+// Over 500 lines: the capsule, ring and beam entry points share the kill and grid walk helpers here.
 // Projectile collision against the spatial grid, run after projectiles_step.wgsl on the freshly
 // integrated agents. The grid was built from the step's input agents, so cell membership is one
 // step stale while distances use current positions. Every kind pierces; a base bullet (kind

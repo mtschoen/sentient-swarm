@@ -7,8 +7,9 @@ import { Viewport } from './render/viewport.js';
 import { Renderer } from './render/renderer.js';
 import { observeCanvasSize } from './render/canvas-size.js';
 import { installCaptureHook } from './render/capture-hook.js';
-import { createDebugPanel } from './ui/debugPanel.js';
-import { pinnedCapacityFromSearch, probeDisabledFromSearch } from './ui/panelModel.js';
+import { createLabPanel } from './ui/labPanel.js';
+import { LabMode } from './ui/lab.js';
+import { capacityOptionsUpTo, pinnedCapacityFromSearch, probeDisabledFromSearch } from './ui/panelModel.js';
 import { PRESETS } from './settings/presets.js';
 import { FrameTimeProbe } from './settings/probe.js';
 import { SettingsStore } from './settings/storage.js';
@@ -29,9 +30,6 @@ const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
 import { createMenu, createPauseMenu } from './ui/menu.js';
 import { createRotateOverlay } from './ui/rotateOverlay.js';
 import { createMenuInput } from './input/menuInput.js';
-
-// The debug panel is the Lab until the lab mode lands (Plan C task C6b): its toggle key.
-const LAB_PLACEHOLDER_KEY = '`';
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
 
@@ -183,7 +181,8 @@ async function boot() {
   // pauses the run too, without a menu, and resumes it when the phone turns back.
   const settingsOpen = () => window.__murmuration.settings?.isOpen === true;
   const openSettings = () => window.__murmuration.settings?.open?.();
-  const openLab = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: LAB_PLACEHOLDER_KEY }));
+  // The lab mode (task C6b) is created with the menus below; the title menu's Lab button enters it.
+  const openLab = () => lab.enter();
   const startRun = () => {
     if (game.run.phase !== 'ready') return;
     audio.unlock();
@@ -217,6 +216,11 @@ async function boot() {
     },
     onQuit: () => {
       resumeGame();
+      // Quitting a lab Play run leaves the lab too (it resets the run and shows the title itself).
+      if (lab.active) {
+        lab.leave();
+        return;
+      }
       game.quitToTitle();
       menu.show();
     },
@@ -276,10 +280,24 @@ async function boot() {
 
   installCaptureHook({ viewport, renderer });
 
-  // The capacity swap goes through the game, one at a time (the panel also disables its controls
-  // meanwhile); play continues on the old simulation until the new one is in place.
-  const onCapacityChange = (capacity) => game.setCapacity(capacity);
-  createDebugPanel({ getSimulation: () => game.simulation, renderer, onCapacityChange, onArmWeapon: (type, tier) => game.debugArm(type, tier) });
+  // The lab (task C6b): Watch, Play, mixes and the tuning panel. Capacity and neighbor radius swaps
+  // go through the game, one at a time (the panel also disables its controls meanwhile); play
+  // continues on the old simulation until the new one is in place. The capacity choices stop at
+  // the quality probe's ceiling (plus the current one, which a ?capacity= pin may put above it).
+  const lab = new LabMode({ game, renderer, viewport, menu, audio });
+  const ceilingCapacity = PRESETS[initialPreset.ceiling]?.capacity ?? null;
+  const capacityOptions = [...new Set([...capacityOptionsUpTo(ceilingCapacity), simulation.capacity])].sort((first, second) => first - second);
+  createLabPanel({
+    lab,
+    getSimulation: () => game.simulation,
+    onCapacityChange: (capacity, options) => game.setCapacity(capacity, options),
+    capacityOptions,
+    onArmWeapon: (type, tier) => game.debugArm(type, tier),
+    store: window.localStorage,
+  });
+  window.__murmuration.lab = lab;
+  // A shared link (#mix=) opens the lab with its mix; a malformed one opens it on the defaults.
+  lab.loadFromHash(location.hash);
 
   const loop = new FrameLoop({ update, render });
   loop.start();

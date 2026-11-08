@@ -10,9 +10,11 @@
 //   neighborRadius: number in [0.05, 0.5]
 //   simulationRate: 'full' | 'half'
 //   knobs (optional): map of lab slider values; only the names in KNOB_RANGES, each a finite number
-//          inside its range; a lab applies them through SpawnPressure.setRamp, the Simulation
-//          setters (spawn band, density bias, burst particles, same-species cohesion 0 or 1) and the
-//          renderer settings (effects, shake and trails in percent).
+//          inside its range; the lab (lab.js LAB_KNOB_BINDINGS) applies them, clamped to its slider
+//          ranges (panelModel.js LAB_KNOBS), through SpawnPressure.setRamp, SpawnDirector.setSchedule,
+//          the Simulation setters, the projectile budgets, the pickup blast, the watch alive target,
+//          same-species cohesion (0 or 1) and the renderer settings. effects, shake and trails
+//          (settings panel percents) are accepted but the lab sets the raw renderer values instead.
 // The encoded text is the compact JSON as URL-safe base64 without padding.
 import { SPECIES_COUNT } from '../sim/layout.js';
 import { defaultMatrix, defaultSpecies } from '../sim/species.js';
@@ -21,7 +23,7 @@ export const MIX_VERSION = 1;
 export const SAVED_MIXES_KEY = 'murmuration.mixes.v1';
 export const RULE_FIELDS = ['seek', 'cohesion', 'alignment', 'separation', 'maximumSpeed', 'maximumTurn', 'orbitRadius', 'flee', 'pressure', 'targetDensity'];
 
-const RULE_RANGES = {
+export const RULE_RANGES = {
   seek: [0, 5], cohesion: [0, 5], alignment: [0, 5], separation: [0, 5], maximumSpeed: [0, 20],
   maximumTurn: [0, 5], orbitRadius: [0, 8], flee: [0, 10], pressure: [0, 5], targetDensity: [0, 200],
 };
@@ -33,6 +35,13 @@ export const KNOB_RANGES = {
   seekFloorFraction: [0, 1], spawnDistanceStartFraction: [0.25, 0.5], refillFractionPerSecond: [0, 1],
   spawnBandWidth: [0.05, 4.5], spawnDensityBias: [0, 1], killBurstParticles: [0, 64], sameSpeciesCohesion: [0, 1],
   effects: [0, 300], shake: [0, 300], trails: [0, 300],
+  watchAliveFraction: [0, 1],
+  gateCount: [1, 4], gateLifetimeSeconds: [2, 120], wavePeriodSeconds: [0.2, 20], waveSeconds: [0.05, 5],
+  burstFraction: [0.01, 1], driftSpeed: [0, 3], gateRadius: [0.2, 2], speciesBias: [0, 1],
+  killFragmentParticles: [0, 16], deathFloodParticles: [0, 4096], particleDevicePixels: [1, 16],
+  pickupBlastRadius: [0, 4], baseKillBudget: [0, 64], beamSweepThresholdDegrees: [0, 90],
+  trailDecay: [0, 0.99], bloomStrength: [0, 3], warpDensityWeight: [0, 1], warpThreatWeight: [0, 2],
+  shipArenaFraction: [0.012, 0.04],
 };
 const TOP_LEVEL_KEYS = ['version', 'shares', 'rules', 'matrix', 'neighborRadius', 'simulationRate', 'knobs'];
 
