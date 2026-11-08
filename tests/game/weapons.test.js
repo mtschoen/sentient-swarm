@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WeaponState, railTurretOffsets, MAXIMUM_SHOTS_PER_UPDATE } from '../../src/game/weapons.js';
-import { WEAPON_TYPES, WEAPON_TYPE_NAMES, PROJECTILE_KINDS, RAIL_TURRET_SPACING_RADIANS, MAXIMUM_RAIL_TURRETS } from '../../src/game/weaponTypes.js';
+import { WEAPON_TYPES, WEAPON_TYPE_NAMES, PROJECTILE_KINDS, RAIL_TURRET_SPACING_RADIANS, MAXIMUM_RAIL_TURRETS, WEAPON_HUES, PICKUP_TYPE_NAMES, PICKUP_HUES, PICKUP_SHAPE_CLOCK, DEFAULT_BASE_KILL_BUDGET, MAXIMUM_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES, BEAM_SWEEP_MINIMUM_REACH_SCALE } from '../../src/game/weaponTypes.js';
 
 const STEP = 1 / 60;
 const aim = { firing: true, aimX: 1, aimY: 0, x: 2, y: 3 };
@@ -144,21 +144,126 @@ test('type tables satisfy the brief', () => {
 });
 
 // Owner ruling R19 (Plan C task C0e): the base gun and scatter fire energy balls that carve a
-// readable tunnel and keep piercing; rail stays the thin fast contrast; pulse and sidewinders keep
-// their Plan B values.
-test('energy ball tables: base and scatter orbs, rail thin and fast, pulse and sidewinders unchanged', () => {
-  for (const tier of WEAPON_TYPES.base.tiers) {
-    // Tuned by play (owner ruling R23 relaxes exact pins): large, slow enough to read, wall to wall.
-    assert.ok(tier.radius >= 0.15 && tier.radius <= 0.2, `base ball radius ${tier.radius}`);
-    assert.ok(tier.speed >= 8 && tier.speed <= 10, `base ball speed ${tier.speed}`);
-    assert.ok(tier.speed * tier.lifetime >= 16, `base ball reaches the far wall (${tier.speed * tier.lifetime} units)`);
+// readable tunnel and keep piercing; rail stays the thin fast contrast. Every table entry is pinned
+// by exact value, so a tuning change is a deliberate edit here too.
+const TIER_DEFAULTS = { fireInterval: 0, projectilesPerShot: 1, spreadRadians: 0, speed: 0, radius: 0.04, lifetime: 1, chargeSeconds: 0, extra: 0, parallelOffset: 0 };
+const EXPECTED_TABLES = {
+  base: {
+    kind: PROJECTILE_KINDS.bullet,
+    tiers: [1, 2, 3].map(() => ({ ...TIER_DEFAULTS, fireInterval: 0.12, projectilesPerShot: 3, spreadRadians: 0.35, speed: 10, radius: 0.2, lifetime: 3 })),
+  },
+  beam: {
+    kind: PROJECTILE_KINDS.beam,
+    tiers: [0.12, 0.2, 0.3].map((radius) => ({ ...TIER_DEFAULTS, chargeSeconds: 8, radius })),
+  },
+  scatter: {
+    kind: PROJECTILE_KINDS.scatter,
+    tiers: [9, 13, 17].map((projectilesPerShot) => ({ ...TIER_DEFAULTS, fireInterval: 0.2, spreadRadians: 1.2, speed: 10, radius: 0.08, lifetime: 0.5, chargeSeconds: 8, projectilesPerShot })),
+  },
+  rail: {
+    kind: PROJECTILE_KINDS.rail,
+    tiers: [1, 2, 3].map((projectilesPerShot) => ({ ...TIER_DEFAULTS, fireInterval: 0.3, speed: 40, radius: 0.05, lifetime: 0.6, chargeSeconds: 8, parallelOffset: 0.15, projectilesPerShot })),
+  },
+  pulse: {
+    kind: PROJECTILE_KINDS.pulseOrb,
+    tiers: [
+      { projectilesPerShot: 1, spreadRadians: 0 },
+      { projectilesPerShot: 2, spreadRadians: 0.3 },
+      { projectilesPerShot: 3, spreadRadians: 0.5 },
+    ].map((own) => ({ ...TIER_DEFAULTS, fireInterval: 0.5, speed: 6, radius: 0.12, lifetime: 1, chargeSeconds: 8, extra: 40, ...own })),
+  },
+  sidewinders: {
+    kind: PROJECTILE_KINDS.sidewinder,
+    tiers: [
+      { projectilesPerShot: 2, spreadRadians: 0.4 },
+      { projectilesPerShot: 4, spreadRadians: 0.8 },
+      { projectilesPerShot: 6, spreadRadians: 1.2 },
+    ].map((own) => ({ ...TIER_DEFAULTS, fireInterval: 0.25, speed: 9, radius: 0.05, lifetime: 2.5, chargeSeconds: 8, extra: 5, ...own })),
+  },
+};
+
+test('every weapon table entry is pinned by exact value', () => {
+  assert.deepEqual(Object.keys(WEAPON_TYPES), Object.keys(EXPECTED_TABLES));
+  for (const [name, expected] of Object.entries(EXPECTED_TABLES)) {
+    assert.equal(WEAPON_TYPES[name].kind, expected.kind, `${name} kind`);
+    assert.equal(WEAPON_TYPES[name].tiers.length, 3, `${name} tier count`);
+    expected.tiers.forEach((tier, index) => assert.deepEqual({ ...WEAPON_TYPES[name].tiers[index] }, tier, `${name} tier ${index + 1}`));
   }
-  for (const tier of WEAPON_TYPES.scatter.tiers) {
-    assert.ok(tier.radius >= 0.06 && tier.radius < WEAPON_TYPES.base.tiers[0].radius, `scatter ball radius ${tier.radius}`);
+});
+
+test('the projectile kind numbers and the weapon hues are pinned by exact value', () => {
+  assert.deepEqual({ ...PROJECTILE_KINDS }, { bullet: 0, scatter: 1, rail: 2, pulseOrb: 3, pulseRing: 4, sidewinder: 5, beam: 6 });
+  assert.deepEqual({ ...WEAPON_HUES }, { base: 0.5, beam: 0.92, scatter: 0.07, rail: 0.6, pulse: 0.35, sidewinders: 0.78 });
+  assert.deepEqual([...PICKUP_TYPE_NAMES], ['beam', 'scatter', 'rail', 'pulse', 'sidewinders', 'timewarp']);
+  assert.deepEqual({ ...PICKUP_HUES }, { timewarp: 0.72 });
+  assert.equal(PICKUP_SHAPE_CLOCK, 1);
+});
+
+test('the lab knob defaults and limits are pinned by exact value', () => {
+  assert.deepEqual(
+    [DEFAULT_BASE_KILL_BUDGET, MAXIMUM_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES, BEAM_SWEEP_MINIMUM_REACH_SCALE],
+    [0, 64, 0, 90, 0.25],
+  );
+});
+
+test('collect throws on an unknown type and on base, and leaves the state untouched', () => {
+  const weapons = makeWeapons();
+  weapons.collect('scatter');
+  assert.throws(() => weapons.collect('laser'), /Unknown weapon type: laser/);
+  assert.throws(() => weapons.collect('base'), /Unknown weapon type: base/);
+  assert.throws(() => weapons.collect(undefined), /Unknown weapon type/);
+  assert.deepEqual([weapons.armed, weapons.tier, weapons.charge], ['scatter', 1, 1]);
+});
+
+test('a beam drains over its eight charge seconds of firing, expires on the last frame and returns to base', () => {
+  const weapons = makeWeapons();
+  weapons.collect('beam');
+  const MAXIMUM_FRAMES = 1000;
+  let frames = 0;
+  let result = null;
+  while (frames < MAXIMUM_FRAMES) {
+    result = weapons.update(STEP, aim);
+    frames += 1;
+    if (result.expired) break;
   }
-  for (const tier of WEAPON_TYPES.rail.tiers) assert.deepEqual({ speed: tier.speed, radius: tier.radius }, { speed: 40, radius: 0.05 });
-  for (const tier of WEAPON_TYPES.pulse.tiers) assert.deepEqual({ speed: tier.speed, radius: tier.radius, lifetime: tier.lifetime }, { speed: 6, radius: 0.12, lifetime: 1 });
-  for (const tier of WEAPON_TYPES.sidewinders.tiers) assert.deepEqual({ speed: tier.speed, radius: tier.radius, lifetime: tier.lifetime }, { speed: 9, radius: 0.05, lifetime: 2.5 });
+  assert.equal(result.expired, true);
+  assert.equal(frames, 480);
+  assert.deepEqual([weapons.armed, weapons.tier, weapons.charge], ['base', 1, 0]);
+  const after = weapons.update(STEP, aim);
+  assert.equal(after.expired, false);
+  assert.equal(after.beam, null);
+});
+
+test('a diagonal aim is normalized: the base volley keeps its speed and the beam its unit direction', () => {
+  const weapons = makeWeapons();
+  const diagonal = { firing: true, aimX: 3, aimY: 3, x: 2, y: 3 };
+  const { spawns } = weapons.update(0.12, diagonal);
+  assert.equal(spawns.length, 3);
+  for (const spawn of spawns) assert.ok(Math.abs(Math.hypot(spawn.velocityX, spawn.velocityY) - 10) < 1e-9);
+  const middle = spawns[1];
+  assert.ok(Math.abs(middle.velocityX - 10 * Math.SQRT1_2) < 1e-9);
+  assert.ok(Math.abs(middle.velocityY - 10 * Math.SQRT1_2) < 1e-9);
+  weapons.collect('beam');
+  const { beam } = weapons.update(STEP, { ...diagonal, aimX: -5, aimY: 5 });
+  assert.ok(Math.abs(beam.directionX + Math.SQRT1_2) < 1e-9);
+  assert.ok(Math.abs(beam.directionY - Math.SQRT1_2) < 1e-9);
+});
+
+test('swapping weapons mid-fire discards the half-built volley of the old weapon', () => {
+  const weapons = makeWeapons();
+  assert.equal(weapons.update(0.1, aim).spawns.length, 0);
+  weapons.collect('scatter');
+  // Kept, 0.1 + 0.19 would reach scatter's 0.2 s interval; discarded, it cannot.
+  assert.equal(weapons.update(0.19, aim).spawns.length, 0);
+  assert.equal(weapons.update(0.01, aim).spawns.length, 9);
+});
+
+test('swapping weapons mid-fire leaves the turrets accumulator alone', () => {
+  const weapons = makeWeapons();
+  weapons.collect('rail');
+  assert.equal(weapons.update(0.2, aim).turretSpawns.length, 0);
+  weapons.collect('scatter');
+  assert.equal(weapons.update(0.1, aim).turretSpawns.length, 1);
 });
 
 // Owner ruling R29: rail pickups stack into rear-firing turrets that fan out from the back, 30

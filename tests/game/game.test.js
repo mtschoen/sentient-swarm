@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../../src/game/game.js';
 import { RunPhase } from '../../src/game/run.js';
+import { PICKUP_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { InputState } from '../../src/input/input.js';
 import { SPECIES_COUNT } from '../../src/sim/layout.js';
 import { SHIP_TURN_RATE, ShipRenderer } from '../../src/render/ship.js';
@@ -464,13 +465,24 @@ test('a pickup collected on the frame the charge would reach zero keeps the weap
   input.state.aim = { x: 1, y: 0 };
   input.state.firing = true;
   // Drain while firing, stopping with a margin so float rounding cannot expire the weapon early.
-  while (game.weapons.charge > 2 * drainPerStep) game.update(STEP);
+  // The frame cap turns a drain that never finishes into a failure instead of a hung run.
+  const MAXIMUM_FRAMES = 2000;
+  let frames = 0;
+  while (game.weapons.charge > 2 * drainPerStep && frames < MAXIMUM_FRAMES) {
+    game.update(STEP);
+    frames += 1;
+  }
+  assert.ok(frames < MAXIMUM_FRAMES, 'the charge should drain to zero within the frame cap');
   assert.equal(game.state.armed, 'sidewinders');
   // Within one step of zero: the next firing step alone would expire the weapon.
   game.weapons.charge = drainPerStep / 2;
-  // Put a scatter pickup under the ship; it is collected in the same update as the expiry step.
+  // Put a scatter pickup under the ship through the director: with the fake random of 0.5 a spawn
+  // lands due left of the player at the minimum-to-maximum midpoint (4), so spawning from 4 units to
+  // the right drops it on the ship. The rotation is moved to the scatter slot first.
   const { x, y } = game.player.position;
-  game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 });
+  game.pickups.rotationIndex = PICKUP_TYPE_NAMES.indexOf('scatter');
+  game.pickups.spawn(x + 4, y);
+  assert.ok(Math.hypot(game.pickups.pickups[0].x - x, game.pickups.pickups[0].y - y) < 1e-9);
   game.update(STEP);
   assert.equal(game.state.armed, 'scatter');
   assert.equal(game.state.tier, 1);
@@ -1240,4 +1252,86 @@ test('the render hands the warp strength to the renderer, 0 without a warp', asy
   runFor(game, 1);
   game.render(0);
   assert.equal(renderer.frames.at(-1).timeWarp, 1);
+});
+
+test('a turret-only player still counts as on the base gun for the pickup director', async () => {
+  const { game } = await createGame();
+  game.start();
+  game.debugArm('rail', 2);
+  assert.deepEqual([game.state.armed, game.state.railTurrets], ['base', 2]);
+  assert.equal(game.weapons.isBase, true);
+  const pityFrames = Math.ceil(game.pickups.pitySeconds / STEP) + 2;
+  for (let frame = 0; frame < pityFrames; frame += 1) game.update(STEP);
+  assert.equal(game.pickups.pickups.length, 1, 'the recovery guard offered a pickup to the turret-only player');
+
+  const armed = (await createGame()).game;
+  armed.start();
+  armed.debugArm('rail', 2);
+  armed.weapons.collect('scatter');
+  assert.equal(armed.weapons.isBase, false);
+  for (let frame = 0; frame < pityFrames; frame += 1) armed.update(STEP);
+  assert.equal(armed.pickups.pickups.length, 0, 'an armed weapon with turrets gets no recovery pickup');
+});
+
+// Phases are driven through the RunState the way the game does; the ship is hidden from death
+// until respawn and at game over.
+test('scene carries the ship in Ready and Playing, hides it while dying, respawning and at game over', async () => {
+  const { game } = await createGame();
+  const expectedKeys = ['armed', 'charge', 'facing', 'invulnerable', 'railTurrets', 'velocityX', 'velocityY', 'x', 'y'];
+  const ready = game.scene();
+  assert.equal(game.run.phase, RunPhase.Ready);
+  assert.deepEqual(Object.keys(ready.ship).sort(), expectedKeys);
+  assert.deepEqual([ready.ship.armed, ready.ship.charge, ready.ship.railTurrets, ready.ship.invulnerable], ['base', 0, 0, false]);
+  assert.equal(ready.pickups, game.pickups.pickups);
+  assert.equal(ready.projectiles, game.projectiles);
+
+  game.start();
+  game.debugArm('scatter', 2);
+  const playing = game.scene();
+  assert.deepEqual([playing.ship.x, playing.ship.y], [game.player.position.x, game.player.position.y]);
+  assert.deepEqual([playing.ship.velocityX, playing.ship.velocityY, playing.ship.facing], [game.player.velocity.x, game.player.velocity.y, game.player.facing]);
+  assert.deepEqual([playing.ship.armed, playing.ship.charge], ['scatter', 1]);
+
+  game.run.playerHit(1, game.player.position);
+  assert.equal(game.run.phase, RunPhase.Dying);
+  assert.equal(game.scene().ship, null);
+  game.run.update(0.8);
+  assert.equal(game.run.phase, RunPhase.Respawning);
+  assert.equal(game.scene().ship, null);
+  game.run.update(0.6);
+  assert.equal(game.run.phase, RunPhase.Playing);
+  assert.equal(game.scene().ship.invulnerable, true);
+
+  for (let death = 0; death < 3; death += 1) {
+    game.run.update(2.1);
+    game.run.playerHit(1, game.player.position);
+    game.run.update(0.8);
+    if (death < 2) game.run.update(0.6);
+  }
+  assert.equal(game.run.phase, RunPhase.GameOver);
+  const over = game.scene();
+  assert.equal(over.ship, null);
+  assert.equal(over.pickups, game.pickups.pickups);
+  assert.equal(over.projectiles, game.projectiles);
+});
+
+// main.js hands the lab panel `(type, tier) => game.debugArm(type, tier)` as onArmWeapon (the
+// panel's selects call it with the weapon name and the tier number); this is that call, end to end
+// through the scene the renderer reads.
+test('the lab arm-weapon wiring arms each weapon at each tier and the scene shows it', async () => {
+  const { game } = await createGame();
+  const onArmWeapon = (type, tier) => game.debugArm(type, tier);
+  game.start();
+  for (const type of ['beam', 'scatter', 'pulse', 'sidewinders']) {
+    for (const tier of [1, 2, 3]) {
+      onArmWeapon(type, tier);
+      const { ship } = game.scene();
+      assert.deepEqual([ship.armed, ship.charge, ship.railTurrets, game.state.tier], [type, 1, 0, tier], `${type} tier ${tier}`);
+    }
+  }
+  onArmWeapon('rail', 3);
+  assert.deepEqual([game.scene().ship.armed, game.scene().ship.railTurrets], ['base', 3]);
+  onArmWeapon('base', 1);
+  assert.deepEqual([game.scene().ship.armed, game.scene().ship.charge, game.scene().ship.railTurrets], ['base', 0, 0]);
+  assert.throws(() => onArmWeapon('laser', 1), /Unknown weapon type/);
 });

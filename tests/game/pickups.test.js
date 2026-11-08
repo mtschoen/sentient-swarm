@@ -214,3 +214,54 @@ test('fallback placement keeps the minimum distance from a corner player', () =>
   const distance = Math.hypot(pickup.x - (WIDTH - 0.5), pickup.y - 0.5);
   assert.equal(distance >= director.minimumDistance - 1e-9, true);
 });
+
+const FAR_FROM_EVERYTHING = { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: false };
+
+test('pickups, the rotation and the pity timer are frozen outside play', () => {
+  const director = makeDirector();
+  director.update(STEP, { ...FAR_FROM_EVERYTHING, milestone: true, phasePlaying: true });
+  run(director, 3, { onBaseGun: true });
+  const before = JSON.parse(JSON.stringify({ pickups: director.pickups, index: director.rotationIndex, rotation: director.rotationTimer, pity: director.pityTimer }));
+  assert.ok(before.pickups[0].age > 2.9 && before.pickups[0].age < 3.1);
+  for (let step = 0; step < 60 * 40; step += 1) director.update(STEP, { ...FAR_FROM_EVERYTHING, onBaseGun: true, milestone: true, phasePlaying: false });
+  const after = JSON.parse(JSON.stringify({ pickups: director.pickups, index: director.rotationIndex, rotation: director.rotationTimer, pity: director.pityTimer }));
+  assert.deepEqual(after, before);
+});
+
+test('a milestone spawn restarts the pity timer', () => {
+  const director = new PickupDirector({ arenaWidth: WIDTH, arenaHeight: HEIGHT, random: sequenceRandom(), fadeSeconds: 100 });
+  run(director, 9);
+  director.update(STEP, { ...FAR_FROM_EVERYTHING, onBaseGun: true, milestone: true, phasePlaying: true });
+  assert.equal(director.pickups.length, 1);
+  assert.equal(director.pityTimer, 0);
+  // Without the restart the pity guard would fire about a second later.
+  run(director, 5, { onBaseGun: true });
+  assert.equal(director.pickups.length, 1);
+  run(director, 5.2, { onBaseGun: true });
+  assert.equal(director.pickups.length, 2);
+});
+
+test('collect takes the nearer of two pickups in reach, whichever order they were spawned in', () => {
+  for (const nearerFirst of [true, false]) {
+    const director = makeDirector();
+    const near = { x: 5.1, y: 5, type: 'rail', age: 0, fade: 1 };
+    const far = { x: 5.3, y: 5, type: 'pulse', age: 0, fade: 1 };
+    director.pickups.push(...(nearerFirst ? [near, far] : [far, near]));
+    assert.equal(director.collect(5, 5), 'rail');
+    assert.deepEqual(director.pickups.map((pickup) => pickup.type), ['pulse']);
+    assert.equal(director.collect(5, 5), 'pulse');
+    assert.equal(director.collect(5, 5), null);
+  }
+});
+
+test('the rotation moving on does not retype a pickup already on the field', () => {
+  const director = new PickupDirector({ arenaWidth: WIDTH, arenaHeight: HEIGHT, random: sequenceRandom(), fadeSeconds: 100 });
+  director.update(STEP, { ...FAR_FROM_EVERYTHING, milestone: true, phasePlaying: true });
+  assert.equal(director.pickups[0].type, 'beam');
+  run(director, 20, FAR_FROM_EVERYTHING);
+  assert.equal(director.offeredType, 'scatter');
+  director.update(STEP, { ...FAR_FROM_EVERYTHING, milestone: true, phasePlaying: true });
+  assert.deepEqual(director.pickups.map((pickup) => pickup.type), ['beam', 'scatter']);
+  run(director, 20, FAR_FROM_EVERYTHING);
+  assert.deepEqual(director.pickups.map((pickup) => pickup.type), ['beam', 'scatter']);
+});

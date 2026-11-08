@@ -113,3 +113,30 @@ test('start resets respawnSequence', () => {
   assert.equal(run.respawnSequence, 0);
   assert.equal(run.playerHit(1), true);
 });
+
+test('useBomb is rejected outside Playing and spends nothing or queues nothing', () => {
+  const ready = new RunState({ bombs: 3 });
+  assert.equal(ready.useBomb(), false);
+  assert.deepEqual(ready.update(0.01), []);
+  assert.equal(ready.bombs, 3);
+
+  const run = playing();
+  run.playerHit(1);
+  run.update(0.01);
+  assert.equal(run.phase, RunPhase.Dying);
+  assert.equal(run.useBomb(), false);
+  run.update(0.8);
+  assert.equal(run.phase, RunPhase.Respawning);
+  assert.equal(run.useBomb(), false);
+  assert.equal(run.bombs, 3);
+
+  const over = new RunState({ lives: 1 });
+  over.start();
+  over.playerHit(1);
+  over.update(0.8);
+  assert.equal(over.phase, RunPhase.GameOver);
+  assert.deepEqual(over.update(0.01), []);
+  assert.equal(over.useBomb(), false);
+  assert.deepEqual(over.update(0.01), []);
+  assert.equal(over.bombs, 3);
+});
