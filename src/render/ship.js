@@ -52,7 +52,6 @@ export class ShipRenderer {
     this.viewBuffer = createUniformBuffer(this.device, SHIP_VIEW_BYTES, 'ship-view');
     this.renderedFacing = null;
     this.lastTime = null;
-    this.lastPosition = null;
     this.thrust = 0;
   }
 
@@ -85,24 +84,20 @@ export class ShipRenderer {
     return this.renderedFacing;
   }
 
-  // The drawn thrust 0..1: the ship's apparent speed since the last call (movement input moves the
-  // ship at its full speed), followed with a short lag so the flame swells and settles smoothly.
-  // Call after easedFacing, which stores the previous time.
-  easedThrust(x, y, elapsed) {
-    if (this.lastPosition !== null && elapsed > 0) {
-      const speed = Math.hypot(x - this.lastPosition.x, y - this.lastPosition.y) / elapsed;
-      const target = Math.min(1, speed / FULL_THRUST_SPEED);
-      this.thrust += (target - this.thrust) * Math.min(1, THRUST_FOLLOW_RATE * elapsed);
-    }
-    this.lastPosition = { x, y };
+  // The drawn thrust 0..1: the ship's speed (from the player's fixed-step velocity, so render rate
+  // does not matter) over the full-thrust speed, followed with a short lag so the flame swells and
+  // settles smoothly. elapsed is the render time since the last call.
+  easedThrust(velocityX, velocityY, elapsed) {
+    const target = Math.min(1, Math.hypot(velocityX, velocityY) / FULL_THRUST_SPEED);
+    if (elapsed > 0) this.thrust += (target - this.thrust) * Math.min(1, THRUST_FOLLOW_RATE * elapsed);
     return this.thrust;
   }
 
   // Draws into an open render pass whose color target is a scene texture. facing is the aim angle.
-  encode(pass, { x, y, facing, charge, armed, invulnerable, time }) {
+  encode(pass, { x, y, velocityX = 0, velocityY = 0, facing, charge, armed, invulnerable, time }) {
     const previousTime = this.lastTime;
     const renderedFacing = this.easedFacing(facing, time);
-    const thrust = this.easedThrust(x, y, previousTime === null ? 0 : Math.min(MAXIMUM_EASE_SECONDS, Math.max(0, time - previousTime)));
+    const thrust = this.easedThrust(velocityX, velocityY, previousTime === null ? 0 : Math.min(MAXIMUM_EASE_SECONDS, Math.max(0, time - previousTime)));
     this.device.queue.writeBuffer(this.viewBuffer, 0, packShipView({
       viewport: this.viewport, time, x, y, facing: renderedFacing, charge, armed, invulnerable, thrust,
     }));

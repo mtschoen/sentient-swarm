@@ -63,8 +63,7 @@ async function captureSubject(page, subject, suffix) {
     await save(`c0c-ship-${suffix}.png`, await capture(page));
     return;
   }
-  const weapon = subject === 'sidewinders' ? 'sidewinders' : subject;
-  await arm(page, weapon, 3);
+  await arm(page, subject, 3);
   await setSticks(page, [0, 0, 1, 0]);
   if (subject === 'pulse') {
     const captured = await page.evaluate((frames) => new Promise((resolve) => {

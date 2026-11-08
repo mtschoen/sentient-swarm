@@ -404,6 +404,8 @@ export class Game {
       ship: hidden ? null : {
         x: this.player.position.x,
         y: this.player.position.y,
+        velocityX: this.player.velocity.x,
+        velocityY: this.player.velocity.y,
         facing: this.player.facing,
         charge: this.weapons.charge,
         armed: this.weapons.armed,

@@ -50,3 +50,16 @@ test('an invulnerable ship blinks at 8 hertz', () => {
   assert.ok(off[14] < 0.5);
   assert.equal(packShipView({ ...base, time: 0.75 / BLINK_HERTZ })[14], 1);
 });
+
+test('the drawn thrust depends on velocity, not on how often it is sampled', () => {
+  const sample = (frameSeconds) => {
+    const ship = new ShipRenderer(fakeGpu, { viewport, common: '' });
+    let thrust = 0;
+    for (let frame = 0; frame < Math.round(1 / frameSeconds); frame += 1) thrust = ship.easedThrust(6, 0, frameSeconds);
+    return thrust;
+  };
+  assert.ok(Math.abs(sample(1 / 60) - sample(1 / 144)) < 0.01);
+  assert.ok(sample(1 / 144) > 0.99);
+  const idle = new ShipRenderer(fakeGpu, { viewport, common: '' });
+  assert.equal(idle.easedThrust(0, 0, 1 / 144), 0);
+});

@@ -58,3 +58,12 @@ test('PlayerShip exposes copies, so callers cannot move it', () => {
   assert.equal(ship.position.x, 8);
   assert.notEqual(ship.aim.x, 5);
 });
+
+test('velocity is the clamped displacement over the step, and zero against a wall', () => {
+  const player = new PlayerShip({ arenaWidth: 16, arenaHeight: 9 });
+  player.update(1 / 60, { move: { x: 1, y: 0 }, aim: { x: 0, y: 0 } });
+  assert.ok(Math.abs(player.velocity.x - 6) < 1e-9);
+  assert.equal(player.velocity.y, 0);
+  for (let step = 0; step < 600; step += 1) player.update(1 / 60, { move: { x: 1, y: 0 }, aim: { x: 0, y: 0 } });
+  assert.equal(player.velocity.x, 0);
+});
