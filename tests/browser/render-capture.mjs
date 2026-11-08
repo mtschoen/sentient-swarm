@@ -69,7 +69,7 @@ async function capture() {
     return result;
   } finally {
     if (browser) await browser.close().catch(() => {});
-    if (server) server.child.kill();
+    if (server) await server.stop();
   }
 }
 

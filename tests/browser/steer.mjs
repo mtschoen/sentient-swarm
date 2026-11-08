@@ -45,7 +45,7 @@ async function run() {
     return EXIT_FAILURE;
   } finally {
     if (browser) await browser.close().catch(() => {});
-    if (server) server.child.kill();
+    if (server) await server.stop();
   }
 }
 

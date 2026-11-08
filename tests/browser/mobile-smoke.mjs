@@ -194,7 +194,7 @@ async function closeResources(resources) {
   resources.browser = null;
   resources.server = null;
   if (browser) await browser.close().catch(() => {});
-  if (server) server.child.kill();
+  if (server) await server.stop();
 }
 
 const resources = { server: null, browser: null };

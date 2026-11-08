@@ -300,5 +300,5 @@ const exitCode = await Promise.race([
   deadline,
 ]);
 clearTimeout(deadlineTimer);
-if (resources.server) resources.server.child.kill();
+if (resources.server) await resources.server.stop();
 process.exit(exitCode);

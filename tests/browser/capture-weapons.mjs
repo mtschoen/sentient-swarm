@@ -121,7 +121,7 @@ async function run() {
     }
   } finally {
     if (browser) await browser.close().catch(() => {});
-    server.child.kill();
+    await server.stop();
   }
 }
 

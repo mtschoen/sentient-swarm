@@ -66,7 +66,7 @@ async function run() {
     if (page.consoleErrors.length > 0) console.error(page.consoleErrors.join('\n'));
   } finally {
     if (browser) await browser.close().catch(() => {});
-    server.child.kill();
+    await server.stop();
   }
 }
 
