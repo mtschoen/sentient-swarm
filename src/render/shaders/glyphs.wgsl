@@ -55,14 +55,16 @@ struct GlyphView {
 const HUE_JITTER_RANGE: f32 = 0.03;
 const GLYPH_SATURATION: f32 = 0.8;
 const COVERAGE_ATTENUATION: f32 = 4.0;
-// Lowest brightness factor the density attenuation may apply, so crowds stay bright and colored.
-const ATTENUATION_FLOOR: f32 = 0.3;
+// Lowest brightness factor the density attenuation may apply, so crowds stay bright and colored
+// (0.45 by owner ruling R34, up from 0.3: ships in a crowd read as semitransparent).
+const ATTENUATION_FLOOR: f32 = 0.45;
 // Ceiling on the floor's summed radiance (floor times coverage): past it the floor falls off as
 // 1 / coverage, so a full ramp under trails does not saturate into a white smear.
 const MAXIMUM_CROWD_RADIANCE: f32 = 0.75;
 const GLOW_INTENSITY: f32 = 0.05;
 const GLOW_FALLOFF: f32 = 3.0;
 const SPAWN_PULSE_RATE: f32 = 18.0;
+const SPAWN_PULSE_FLOOR: f32 = 0.5;
 // Fill brightness relative to the rim.
 const FILL_BRIGHTNESS: f32 = 0.25;
 // Below this speed (world units per second) the heading turns toward the player.
@@ -134,17 +136,16 @@ fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
   let spawnFrames = spawnFramesRemaining(agent.flags);
   let spawning = spawnFrames > 0u;
   let calmPulse = 0.85 + 0.15 * sin(agent.phase);
-  let spawnPulse = 0.5 + 0.5 * sin(agent.phase + view.time * SPAWN_PULSE_RATE);
+  // Spawn-in pulses between SPAWN_PULSE_FLOOR and full (owner ruling R34: the old 0.25 to 0.5 read
+  // as semitransparent ships); the rim-only fill (fillProgress) still marks the harmless state.
+  let spawnPulse = SPAWN_PULSE_FLOOR + (1.0 - SPAWN_PULSE_FLOOR) * (0.5 + 0.5 * sin(agent.phase + view.time * SPAWN_PULSE_RATE));
   let cell = coarseCellIndexFor(position);
   let densities = field[cell * 2u];
   let localDensity = densities.x + densities.y + densities.z + densities.w + field[cell * 2u + 1u].x;
   let coverage = localDensity * view.coverageScale;
   let attenuationFloor = min(ATTENUATION_FLOOR, MAXIMUM_CROWD_RADIANCE / max(coverage, 1e-6));
   let attenuation = max(1.0 / (1.0 + COVERAGE_ATTENUATION * coverage), attenuationFloor);
-  var alpha = select(calmPulse, spawnPulse, spawning) * attenuation;
-  if (spawning) {
-    alpha *= 0.5;
-  }
+  let alpha = select(calmPulse, spawnPulse, spawning) * attenuation;
   output.color = rgb * alpha * view.emissionScale;
   output.shape = agent.species;
 
