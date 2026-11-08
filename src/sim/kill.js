@@ -4,17 +4,19 @@
 // - DebugKillPass (kill_debug.wgsl): agents inside params.debugKillRadius of
 //   params.debugKillPosition, counted in kills. Storage buffers: agents, stats, particles, threat
 //   accumulator, species table (5), plus the params uniform.
-// - KillAllPass (kill_all.wgsl): every alive agent, spawning ones included, counted in
-//   killsUnscored. A countAlive dispatch first counts them into the particle pool header, so the
-//   bursts can be thinned evenly when the clear would outrun the free particle slots. Storage
-//   buffers: agents, stats, particles, threat accumulator, species table (5), plus the params
-//   uniform (countAlive binds only agents and particles).
+// - KillAllPass (kill_all.wgsl): every alive agent, spawning ones included, or with an area
+//   (the pickup blast) only those within its radius of its center, counted in killsUnscored. A
+//   countAlive dispatch first counts them into the particle pool header, so the bursts can be
+//   thinned evenly when the clear would outrun the free particle slots. Storage buffers: agents,
+//   stats, particles, threat accumulator, species table (5), plus the params and area uniforms
+//   (countAlive binds only params, agents, particles and area).
 // Every kill asks for params.killBurstParticles particles from one budget per step: the slots
 // free after the last particle step (ParticlePool.encodeBeginStep zeroes the step's claims).
 // - PlayerContactPass (player_collide.wgsl, one workgroup): the hit latch and the one agent that
 //   touches the player, counted in killsUnscored. Storage buffers: agents, cellCounts,
 //   cellOffsets, sortedIndices, stats, particles, species table (7), plus the params uniform.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
+import { createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
 import { AGENT_STRIDE_BYTES, SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
 
@@ -49,6 +51,22 @@ class ComputePass {
   }
 }
 
+// KillArea in kill_all.wgsl: center vec2f, radius f32, radial u32.
+const KILL_AREA_BYTES = 16;
+
+// The KillArea uniform for a kill-all (area null) or a radial kill ({ x, y, radius }).
+export function packKillArea(area) {
+  const bytes = new ArrayBuffer(KILL_AREA_BYTES);
+  const view = new DataView(bytes);
+  if (area !== null) {
+    view.setFloat32(0, area.x, true);
+    view.setFloat32(4, area.y, true);
+    view.setFloat32(8, area.radius, true);
+    view.setUint32(12, 1, true);
+  }
+  return bytes;
+}
+
 function agentWorkgroups(agentsBuffer) {
   return Math.ceil(agentsBuffer.size / AGENT_STRIDE_BYTES / WORKGROUP_SIZE);
 }
@@ -69,10 +87,11 @@ export class KillAllPass extends ComputePass {
   constructor(gpu, { common }) {
     super(gpu, { common, shaderName: 'kill_all', label: 'kill-all' });
     this.countPipeline = null;
+    this.areaBuffer = createUniformBuffer(this.device, KILL_AREA_BYTES, 'kill-all-area');
     this.countBindGroupCache = new BindGroupCache(([paramsBuffer, agentsBuffer, particlesBuffer]) => this.device.createBindGroup({
       label: 'kill-all-count-bindings',
       layout: this.countPipeline.getBindGroupLayout(0),
-      entries: [[0, paramsBuffer], [1, agentsBuffer], [3, particlesBuffer]].map(([binding, buffer]) => ({ binding, resource: { buffer } })),
+      entries: [[0, paramsBuffer], [1, agentsBuffer], [3, particlesBuffer], [6, this.areaBuffer]].map(([binding, buffer]) => ({ binding, resource: { buffer } })),
     }));
   }
 
@@ -83,8 +102,11 @@ export class KillAllPass extends ComputePass {
     [this.countPipeline, this.pipeline] = await Promise.all([pipeline('countAlive'), pipeline('main')]);
   }
 
-  encode(encoder, { agentsBuffer, statsBuffer, particleBuffers, threatAccumulator, speciesTableBuffer, paramsBuffer }) {
+  // area: null kills every alive agent; { x, y, radius } only those within radius of (x, y). It
+  // is written with queue.writeBuffer, so one kill-all per submission.
+  encode(encoder, { agentsBuffer, statsBuffer, particleBuffers, threatAccumulator, speciesTableBuffer, paramsBuffer }, area = null) {
     if (this.countPipeline === null) throw new Error('KillAllPass.initialize() must finish before encode()');
+    this.device.queue.writeBuffer(this.areaBuffer, 0, packKillArea(area));
     const workgroups = agentWorkgroups(agentsBuffer);
     const pass = encoder.beginComputePass({ label: this.label + '-count' });
     pass.setPipeline(this.countPipeline);
@@ -92,8 +114,12 @@ export class KillAllPass extends ComputePass {
     pass.dispatchWorkgroups(workgroups);
     pass.end();
     this.dispatch(encoder, [
-      paramsBuffer, agentsBuffer, statsBuffer, particleBuffers.particles, threatAccumulator, speciesTableBuffer,
+      paramsBuffer, agentsBuffer, statsBuffer, particleBuffers.particles, threatAccumulator, speciesTableBuffer, this.areaBuffer,
     ], workgroups);
+  }
+
+  destroy() {
+    this.areaBuffer.destroy();
   }
 }
 

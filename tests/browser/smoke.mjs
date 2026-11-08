@@ -2,7 +2,7 @@
 // SMOKE_URL, when set, skips spawning and uses that URL instead. Either way the page gets
 // ?probe=off&capacity=262144 (unless the URL already sets them), so the quality probe cannot
 // change the capacity under the checks.
-// Usage: node tests/browser/smoke.mjs [--frames N] [--play N | --pulse | --sweep | --corridor | --bursts]
+// Usage: node tests/browser/smoke.mjs [--frames N] [--play N | --pulse | --sweep | --corridor | --bursts | --blast]
 // Reads the composited frame back through window.__murmuration.capture (headless Chromium may never
 // composite a WebGPU canvas, so page.screenshot() is not trusted) and writes artifacts/smoke.png and
 // artifacts/smoke-zoom.png (4x inspect zoom, trails off) and artifacts/smoke-ships.png (1x, trails
@@ -14,17 +14,15 @@
 // must be positive, the box around the ship (captured 60 frames into the fire, while the ship is
 // alive) brighter than the arena mean, the first death after fire frame 300 or never, a run of at
 // least 1800 frames must still kill and score after fire frame 900, and no console errors. It also
-// writes artifacts/energy-balls.png (1x, trails off, at the ship capture) and, 1 s after the fire
-// stops, measures the base gun's tunnel (owner ruling R19) with the C0b corridor metric: the
-// coarse-field density along the fire line must be under half the control rows' while the ship
-// still lives.
+// writes artifacts/energy-balls.png (1x, trails off) and checks the base gun's tunnel (measureTunnel).
 // --pulse instead arms the pulse weapon through the debug panel's arm select, fires toward the arena
 // center with the synthetic gamepad, and writes artifacts/pulse-ring.png, captured the moment the
 // stats report a ring detonation (ringsThisFrame), so a ring is expanding on screen.
 // --sweep (task C0d) arms the beam the same way, fires it, turns the aim 120 degrees in 4 frames
 // and writes artifacts/beam-sweep.png of the frame after the turn: a swept fan, not comb lines.
 // --corridor and --bursts (task C0b, smoke-clearing.mjs): the beam corridor density metric, and the
-// kill burst and bomb captures (artifacts/kill-burst.png, artifacts/bomb-burst.png).
+// kill burst and bomb captures (artifacts/kill-burst.png, artifacts/bomb-burst.png); --blast (task
+// C0e, also there): the pickup blast capture (artifacts/pickup-blast.png).
 // Exit codes: 0 ok, 1 failure (errors or timeout), 2 WebGPU adapter unavailable.
 // Liveness: every page.evaluate is bounded by EVALUATE_TIMEOUT_MILLISECONDS (a capture resolves only
 // on a later rendered frame, so a renderer that throws or stops would leave it pending forever),
@@ -33,7 +31,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
-import { captureBursts, checkCorridor, corridorDensities } from './smoke-clearing.mjs';
+import { captureBlast, captureBursts, checkCorridor, corridorDensities } from './smoke-clearing.mjs';
 
 const SMOKE_SEARCH = { probe: 'off', capacity: '262144' };
 const READY_TIMEOUT_MILLISECONDS = 10_000;
@@ -78,8 +76,6 @@ const PLAY_SHIP_CAPTURE_FRAMES = 60;
 const PLAY_MINIMUM_FIRST_DEATH_FRAMES = 300;
 const PLAY_LATE_RUN_FRAMES = 1800;
 const PLAY_LATE_CHECK_FRAMES = 900;
-// --play tunnel metric: frames after the fire stops, the band half height around the ship's row
-// (the 3 ball fan stays within it for the first few units) and where the band starts past the ship.
 const PLAY_TUNNEL_SETTLE_FRAMES = 60;
 const PLAY_TUNNEL_HALF_HEIGHT = 0.3;
 const PLAY_TUNNEL_START_OFFSET = 1;
@@ -345,15 +341,16 @@ async function checkPlay(page, frames) {
   return null;
 }
 
-// The base gun's tunnel 1 s after the fire stops: the corridor metric along the ship's row from
-// PLAY_TUNNEL_START_OFFSET past the ship to PLAY_TUNNEL_END_X. Returns { failure } (null when it
-// passes, or when the ship died during the run, which clears the arena and voids the metric).
+// The base gun's tunnel (owner ruling R19) 1 s after the fire stops: the C0b corridor metric along
+// the ship's row must be under half the control rows'; the idle ship is invulnerable meanwhile.
+// Returns { failure }, null when it passes or when the ship died in the run (the clear voids it).
 async function measureTunnel(page, statsAtStop) {
-  const settleStart = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
-  await page.waitForFunction((target) => window.__murmuration.frame >= target, settleStart + PLAY_TUNNEL_SETTLE_FRAMES, { timeout: PLAY_TIMEOUT_MILLISECONDS });
+  await evaluateWithin(page, 'making the idle ship invulnerable', () => window.__murmuration.game.debugInvulnerable(true));
+  await waitForFrame(page, (await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame)) + PLAY_TUNNEL_SETTLE_FRAMES);
   const field = Float32Array.from(await evaluateWithin(page, 'reading the coarse field', async () => Array.from(await window.__murmuration.game.simulation.readCoarseField())));
   const after = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
   const died = await evaluateWithin(page, 'reading the first death', () => window.__smokeFirstDeathFrame !== null);
+  await evaluateWithin(page, 'ending invulnerability', () => window.__murmuration.game.debugInvulnerable(false));
   const densities = corridorDensities(field, statsAtStop.playerY, {
     halfHeight: PLAY_TUNNEL_HALF_HEIGHT, startX: statsAtStop.playerX + PLAY_TUNNEL_START_OFFSET, endX: PLAY_TUNNEL_END_X,
   });
@@ -415,7 +412,7 @@ async function run(resources) {
     const { page } = launched;
     const pulseMode = process.argv.includes('--pulse');
     const sweepMode = process.argv.includes('--sweep');
-    const clearingMode = ['--corridor', '--bursts'].find((flag) => process.argv.includes(flag)) ?? null;
+    const clearingMode = ['--corridor', '--bursts', '--blast'].find((flag) => process.argv.includes(flag)) ?? null;
     if (playFrames !== null || pulseMode || sweepMode || clearingMode) await page.addInitScript(installSyntheticGamepad);
 
     await page.goto(url);
@@ -449,7 +446,8 @@ async function run(resources) {
     }
     if (clearingMode) {
       const helpers = { evaluateWithin, setSticks, writeDataUrl };
-      const failure = clearingMode === '--corridor' ? await checkCorridor(page, helpers) : await captureBursts(page, helpers);
+      const clearingChecks = { '--corridor': checkCorridor, '--bursts': captureBursts, '--blast': captureBlast };
+      const failure = await clearingChecks[clearingMode](page, helpers);
       if (failure) {
         console.error(failure);
         return EXIT_FAILURE;

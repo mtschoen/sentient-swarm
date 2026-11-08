@@ -9,7 +9,10 @@
 //      bomb kills before projectiles and contact.
 //   2. player.update (Playing only), with mouse aim derived as pointerWorld minus the player.
 //   3. pickups.update, then collect at the player into weapons.collect (before charge expiry); a
-//      collection queues a PICKUP_IMPULSE_STRENGTH impulse at the ship and plays the pickup cue.
+//      collection plays the pickup effect and, with pickupBlastRadius above 0, fires the pickup
+//      blast (owner ruling R22): simulation.requestRadialKill at the ship for this step (unscored,
+//      like a bomb) and a PICKUP_BLAST_IMPULSE_STRENGTH shockwave; with the blast off it queues
+//      the smaller PICKUP_IMPULSE_STRENGTH impulse instead.
 //   4. weapons.update; spawns go to projectiles.queueSpawn and the beam to setBeam (null on the
 //      expiry frame even when the weapon still returned one). A frame that fires (spawns or a
 //      beam) plays one weaponFire cue with the kind and tier it fired at; then the expiry cue.
@@ -43,6 +46,8 @@ const NO_AIM = Object.freeze({ x: 0, y: 0 });
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
 const RING_IMPULSE_STRENGTH = 0.3;
 const PICKUP_IMPULSE_STRENGTH = 0.15;
+const PICKUP_BLAST_IMPULSE_STRENGTH = 0.5;
+export const DEFAULT_PICKUP_BLAST_RADIUS = 1.5;
 // Matches the HUD's touch restart guard, so the press that ended the run cannot restart it.
 export const RESTART_GUARD_SECONDS = 0.7;
 
@@ -98,6 +103,8 @@ export class Game {
     // Game time spent in GameOver, for the restart guard.
     this.gameOverSeconds = 0;
     this.pendingImpulses = [];
+    // World units cleared around the ship on every pickup (0 disables); setPickupBlastRadius.
+    this.pickupBlastRadiusValue = DEFAULT_PICKUP_BLAST_RADIUS;
     // Debug switch (debugInvulnerable): player contact stays off while it is on.
     this.debugInvulnerableValue = false;
     // The old simulation keeps stepping while a capacity change is prepared (CapacitySwap); commit
@@ -217,8 +224,13 @@ export class Game {
       const collected = this.pickups.collect(x, y);
       if (collected !== null) {
         this.weapons.collect(collected);
-        this.queueImpulse(x, y, PICKUP_IMPULSE_STRENGTH, false);
         this.effects?.pickup?.();
+        if (this.pickupBlastRadiusValue > 0) {
+          this.simulation.requestRadialKill(x, y, this.pickupBlastRadiusValue);
+          this.queueImpulse(x, y, PICKUP_BLAST_IMPULSE_STRENGTH, false);
+        } else {
+          this.queueImpulse(x, y, PICKUP_IMPULSE_STRENGTH, false);
+        }
       }
     }
 
@@ -382,6 +394,16 @@ export class Game {
     if (type === 'base') return;
     this.weapons.collect(type);
     for (let upgrade = 1; upgrade < tier; upgrade += 1) this.weapons.collect(type);
+  }
+
+  // The pickup blast radius in world units (the lab sets it); 0 turns the blast off.
+  setPickupBlastRadius(radius) {
+    if (!(Number.isFinite(radius) && radius >= 0)) throw new RangeError(`pickupBlastRadius must be a finite number of at least 0, got ${radius}`);
+    this.pickupBlastRadiusValue = radius;
+  }
+
+  get pickupBlastRadius() {
+    return this.pickupBlastRadiusValue;
   }
 
   // Debug hook (browser checks, a lab sandbox): while enabled, the GPU contact test never hits, so

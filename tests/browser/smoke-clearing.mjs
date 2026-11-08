@@ -16,7 +16,11 @@
 //   floor raised to BOMB_FLOOR_FRACTION, a bomb through the dense arena, captured
 //   BOMB_CAPTURE_FRAMES after the press; the particle pool's live count (read from its header) is
 //   reported against the pool size before and after the bomb.
-// Both fail on console errors; the corridor check also fails when the ship died anyway.
+// --blast (task C0e, owner ruling R22): the pickup blast visual gate. The ship (invulnerable) is
+//   nudged to start the run, the floor raised to BLAST_FLOOR_FRACTION so the swarm crowds it,
+//   then a pickup placed under the ship is collected; artifacts/pickup-blast.png is captured
+//   BLAST_CAPTURE_FRAMES later. The blast must kill (the alive total drops) without scoring.
+// All fail on console errors; the corridor check also fails when the ship died anyway.
 import { ARENA_HEIGHT, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT } from '../../src/sim/layout.js';
 
 const MOVE_TO_WALL_FRAMES = 75;
@@ -38,6 +42,10 @@ const BURST_FIRE_FRAMES = 240;
 const BOMB_FLOOR_FRACTION = 0.9;
 const BOMB_SETTLE_FRAMES = 180;
 const BOMB_CAPTURE_FRAMES = 6;
+const BLAST_FLOOR_FRACTION = 0.5;
+const BLAST_NUDGE_FRAMES = 4;
+const BLAST_SETTLE_FRAMES = 300;
+const BLAST_CAPTURE_FRAMES = 6;
 const FRAME_TIMEOUT_MILLISECONDS = 60_000;
 const CELL_HEIGHT = ARENA_HEIGHT / COARSE_ROWS;
 const CELL_WIDTH = 16 / COARSE_COLUMNS;
@@ -164,6 +172,32 @@ async function readParticleLoad(page, helpers) {
     staging.destroy();
     return { live, size: pool.capacity };
   });
+}
+
+// Returns a failure message, or null.
+export async function captureBlast(page, helpers) {
+  await helpers.evaluateWithin(page, 'making the ship invulnerable', () => window.__murmuration.game.debugInvulnerable(true));
+  await helpers.setSticks(page, [-1, 0, 0, 0]);
+  await framesLater(page, helpers, BLAST_NUDGE_FRAMES);
+  await helpers.setSticks(page, [0, 0, 0, 0]);
+  await setRamp(page, helpers, { floorFraction: BLAST_FLOOR_FRACTION });
+  await framesLater(page, helpers, BLAST_SETTLE_FRAMES);
+  const before = await helpers.evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  const radius = await helpers.evaluateWithin(page, 'placing a pickup under the ship', () => {
+    const { game } = window.__murmuration;
+    const { x, y } = game.player.position;
+    game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 });
+    return game.pickupBlastRadius;
+  });
+  await framesLater(page, helpers, BLAST_CAPTURE_FRAMES);
+  const blast = await helpers.evaluateWithin(page, 'the pickup blast capture', () => window.__murmuration.capture());
+  await helpers.writeDataUrl('pickup-blast.png', blast.pngDataUrl);
+  const after = await helpers.evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  console.log(`smoke: pickup blast (radius ${radius}) at (${before.playerX.toFixed(2)}, ${before.playerY.toFixed(2)}): aliveTotal ${before.aliveTotal} -> ${after.aliveTotal}, score ${before.score} -> ${after.score}, armed ${after.armed}, arena mean ${blast.meanLuminance.toFixed(4)}`);
+  if (page.consoleErrors.length > 0) return `smoke: console errors during the blast capture: ${page.consoleErrors.join(' | ')}`;
+  if (after.armed !== 'scatter') return `smoke: expected the pickup under the ship to be collected, armed ${after.armed}`;
+  if (!(after.aliveTotal < before.aliveTotal)) return `smoke: expected the pickup blast to kill, aliveTotal ${before.aliveTotal} -> ${after.aliveTotal}`;
+  return null;
 }
 
 // Returns a failure message, or null.

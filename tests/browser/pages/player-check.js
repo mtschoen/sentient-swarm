@@ -11,10 +11,19 @@
 // (d) requestKillAll in a step that also spawns (so spawn-in agents exist when kill-all runs):
 //     aliveTotal 0, killsUnscored > 0, killsSinceLastRead 0; the next frame killsUnscored is back to 0
 //     while playerHitSequence persists across the per-step clear;
-// (e) recreateWithCapacity carries the persistent tail: playerHitSequence survives the rebuild.
+// (e) recreateWithCapacity carries the persistent tail: playerHitSequence survives the rebuild;
+// (f) the pickup blast (owner ruling R22) through a real Game (fake renderer and input) on a fresh
+//     simulation whose species never move: after the start clear, BLAST_AGENT_COUNT agents seeded
+//     on rings from 0.3 to 3 around the ship and a pickup under it, one update collects it. Every
+//     seeded agent inside pickupBlastRadius dies and every one outside lives, the blast step's
+//     stats count them all in killsUnscored and none in killsSinceLastRead, the score stays 0,
+//     and the next step kills nothing.
 import { createGpuContext } from '/src/gpu/device.js';
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
+import { Game } from '/src/game/game.js';
+import { InputState } from '/src/input/input.js';
+import { defaultSpecies } from '/src/sim/species.js';
 
 const CAPACITY = 16384;
 const GROWN_CAPACITY = 32768;
@@ -105,6 +114,81 @@ function verdictLine(verdicts) {
   return verdicts.map(([ok, text]) => `${ok ? 'PASS' : 'FAIL'} ${text}`).join('; ');
 }
 
+const BLAST_CAPACITY = 16384;
+const BLAST_AGENT_COUNT = 4000;
+const BLAST_RINGS = 40;
+const BLAST_INNER_RADIUS = 0.3;
+const BLAST_OUTER_RADIUS = 3;
+const BLAST_EDGE_TOLERANCE = 0.01;
+const BLAST_READ_UPDATES = 30;
+
+// Seeds BLAST_AGENT_COUNT motionless agents on BLAST_RINGS rings around center; returns their
+// distances from it by slot.
+function seedBlastRings(device, simulation, center) {
+  const bytes = new ArrayBuffer(simulation.capacity * AGENT_STRIDE_BYTES);
+  const view = new DataView(bytes);
+  const distances = [];
+  const perRing = BLAST_AGENT_COUNT / BLAST_RINGS;
+  for (let slot = 0; slot < BLAST_AGENT_COUNT; slot += 1) {
+    const ring = Math.floor(slot / perRing);
+    const radius = BLAST_INNER_RADIUS + (ring / (BLAST_RINGS - 1)) * (BLAST_OUTER_RADIUS - BLAST_INNER_RADIUS);
+    const angle = ((slot % perRing) / perRing) * Math.PI * 2 + ring;
+    const base = slot * AGENT_STRIDE_BYTES;
+    view.setFloat32(base + AGENT_OFFSETS.position, center[0] + Math.cos(angle) * radius, true);
+    view.setFloat32(base + AGENT_OFFSETS.position + 4, center[1] + Math.sin(angle) * radius, true);
+    view.setUint32(base + AGENT_OFFSETS.species, 0, true);
+    view.setUint32(base + AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
+    distances.push(radius);
+  }
+  device.queue.writeBuffer(simulation.agentsBuffer, 0, bytes);
+  return distances;
+}
+
+async function runBlastCase(gpu) {
+  const { device } = gpu;
+  const species = defaultSpecies().map((row) => ({ ...row, maximumSpeed: 0 }));
+  const simulation = await Simulation.create(gpu, { capacity: BLAST_CAPACITY, species });
+  const renderer = { setSimulation() {}, render() {}, afterSubmit() {} };
+  const input = { state: new InputState(), update() {} };
+  const game = await Game.create({ gpu, simulation, renderer, input, capacity: BLAST_CAPACITY, random: () => 0.5 });
+  const collected = new Map();
+  const update = async () => {
+    game.update(STEP_SECONDS);
+    await device.queue.onSubmittedWorkDone();
+    for (const stats of simulation.readAllStats()) collected.set(stats.frameSequence, stats);
+  };
+  game.start();
+  await update();
+  const { x, y } = game.player.position;
+  const distances = seedBlastRings(device, simulation, [x, y]);
+  game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 });
+  await update();
+  const blastSequence = simulation.frameSequence;
+  const view = new DataView(await readBuffer(device, simulation.agentsBuffer));
+  const alive = distances.map((distance, slot) => (view.getUint32(slot * AGENT_STRIDE_BYTES + AGENT_OFFSETS.flags, true) & AGENT_FLAG_ALIVE) !== 0);
+  const radius = game.pickupBlastRadius;
+  const inside = distances.filter((distance) => distance < radius - BLAST_EDGE_TOLERANCE).length;
+  const aliveInside = distances.filter((distance, slot) => alive[slot] && distance < radius - BLAST_EDGE_TOLERANCE).length;
+  const deadOutside = distances.filter((distance, slot) => !alive[slot] && distance > radius + BLAST_EDGE_TOLERANCE).length;
+  for (let index = 0; index < BLAST_READ_UPDATES && !collected.has(blastSequence + 1); index += 1) await update();
+  const blastStats = collected.get(blastSequence);
+  const nextStats = collected.get(blastSequence + 1);
+  const score = game.state.score;
+  game.removeProjectilePass();
+  game.projectiles.destroy();
+  simulation.destroy();
+  if (blastStats === undefined || nextStats === undefined) return [[false, `(f) no stats for the blast step ${blastSequence} or the one after it`]];
+  const killed = distances.filter((distance, slot) => !alive[slot]).length;
+  return [
+    [game.state.armed === 'scatter', `(f) the pickup was collected (armed ${game.state.armed})`],
+    [inside > 0 && aliveInside === 0, `(f) alive agents inside the blast radius ${radius}: ${aliveInside} of ${inside} (need 0)`],
+    [deadOutside === 0, `(f) dead agents outside the blast radius ${deadOutside} (need 0)`],
+    [blastStats.killsUnscored === killed && blastStats.killsSinceLastRead === 0, `(f) blast step killsUnscored ${blastStats.killsUnscored} (need ${killed}), killsSinceLastRead ${blastStats.killsSinceLastRead} (need 0)`],
+    [nextStats.killsUnscored === 0 && nextStats.killsSinceLastRead === 0, `(f) next step kills ${nextStats.killsUnscored} unscored, ${nextStats.killsSinceLastRead} scored (need 0 and 0)`],
+    [score === 0, `(f) score after the blast ${score} (need 0)`],
+  ];
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   const { device } = gpu;
@@ -189,6 +273,8 @@ async function runCheck() {
   verdicts.push([stats.playerHitSequence === secondHit, `(e) playerHitSequence after recreateWithCapacity ${stats.playerHitSequence} (need ${secondHit})`]);
   if (lostReason !== null) verdicts.push([false, `device lost: ${lostReason}`]);
   simulation.destroy();
+  verdicts.push(...await runBlastCase(gpu));
+  if (lostReason !== null) verdicts.push([false, `device lost: ${lostReason}`]);
   const detail = verdictLine(verdicts);
   return { pass: !detail.includes('FAIL'), detail };
 }

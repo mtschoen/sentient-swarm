@@ -50,6 +50,11 @@ function createFakeSimulation() {
       this.killAllRequests += 1;
       this.events.push('killAll');
     },
+    radialKills: [],
+    requestRadialKill(x, y, radius) {
+      this.radialKills.push({ x, y, radius });
+      this.events.push('radialKill');
+    },
     step(encoder, deltaSeconds, spawnPerSpecies) {
       this.frameSequence += 1;
       this.time += deltaSeconds;
@@ -243,18 +248,85 @@ test('a stats frame with rings queues one 0.3 impulse at the last ring position,
   assert.deepEqual(impulses[0], { x: 3.5, y: 6.25, strength: 0.3, time: 0, bloomBoost: false });
 });
 
-test('collecting a pickup queues a 0.15 impulse at the ship', async () => {
-  const { game } = await createGame();
+test('collecting a pickup requests one radial blast at the ship before the step and queues a 0.5 impulse', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  game.update(STEP);
+  simulation.events.length = 0;
+  game.renderer.frames.length = 0;
+  const { x, y } = game.player.position;
+  game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 });
+  game.update(STEP);
+  game.render(0);
+  assert.deepEqual(simulation.radialKills, [{ x, y, radius: 1.5 }]);
+  assert.deepEqual(simulation.events, ['radialKill', 'step']);
+  const impulses = game.renderer.frames.flatMap((frame) => frame.impulses);
+  assert.equal(impulses.length, 1);
+  assert.deepEqual(impulses[0], { x, y, strength: 0.5, time: 0, bloomBoost: false });
+  assert.equal(game.state.armed, 'scatter');
+  game.update(STEP);
+  assert.equal(simulation.radialKills.length, 1);
+});
+
+test('every pickup collected fires exactly one blast; the blast kills score nothing', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  const { x, y } = game.player.position;
+  game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 }, { x: x + 0.1, y, type: 'rail', age: 0, fade: 1 });
+  game.update(STEP);
+  game.update(STEP);
+  game.update(STEP);
+  assert.equal(simulation.radialKills.length, 2);
+  // The blast step's stats: 300 unscored kills, none in the scored counter.
+  simulation.scriptedStats.push(stats({ frameSequence: simulation.frameSequence + 1, killsUnscored: 300 }));
+  game.update(STEP);
+  assert.equal(game.state.score, 0);
+});
+
+test('a pickup blast radius of 0 disables the blast and keeps the 0.15 pickup impulse', async () => {
+  const { game, simulation } = await createGame();
+  game.setPickupBlastRadius(0);
+  assert.equal(game.pickupBlastRadius, 0);
   game.start();
   const { x, y } = game.player.position;
   game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 });
   game.update(STEP);
   game.render(0);
+  assert.deepEqual(simulation.radialKills, []);
   const impulses = game.renderer.frames.flatMap((frame) => frame.impulses);
   assert.equal(impulses.length, 1);
   assert.equal(impulses[0].strength, 0.15);
-  assert.equal(impulses[0].bloomBoost, false);
   assert.equal(game.state.armed, 'scatter');
+});
+
+test('setPickupBlastRadius takes a new radius for the next pickup and rejects a negative or non-finite one', async () => {
+  const { game, simulation } = await createGame();
+  assert.equal(game.pickupBlastRadius, 1.5);
+  game.setPickupBlastRadius(2.5);
+  assert.throws(() => game.setPickupBlastRadius(-1), RangeError);
+  assert.throws(() => game.setPickupBlastRadius(Number.NaN), RangeError);
+  assert.equal(game.pickupBlastRadius, 2.5);
+  game.start();
+  const { x, y } = game.player.position;
+  game.pickups.pickups.push({ x, y, type: 'pulse', age: 0, fade: 1 });
+  game.update(STEP);
+  assert.deepEqual(simulation.radialKills, [{ x, y, radius: 2.5 }]);
+});
+
+test('a pickup collection plays the pickup effect', async () => {
+  const gpu = createFakeGpu();
+  const simulation = createFakeSimulation();
+  const played = [];
+  const effects = { bomb: () => played.push('bomb'), death: () => played.push('death'), pickup: () => played.push('pickup') };
+  const game = await Game.create({
+    gpu, simulation, projectiles: createFakeProjectiles(), renderer: createFakeRenderer(), input: createFakeInput(), capacity: CAPACITY, random: () => 0.5, effects,
+  });
+  game.start();
+  const { x, y } = game.player.position;
+  game.pickups.pickups.push({ x, y, type: 'scatter', age: 0, fade: 1 });
+  game.update(STEP);
+  game.update(STEP);
+  assert.deepEqual(played, ['pickup']);
 });
 
 test('a hit whose sequence predates the respawn is ignored but still acknowledged', async () => {

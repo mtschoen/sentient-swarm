@@ -16,7 +16,8 @@
 // buffer's per-frame prefix is cleared (its persistent tail, holding the cumulative kills, the hit
 // latch and playerHitSequence, is not), and so are the particle pool's per-step claims; spawn on
 // agentsIn (wall band, reading the previous step's blurred coarse field); grid and coarse field on agentsIn; steer agentsIn
-// to agentsOut plus integrate; kill-all (only in the step after requestKillAll); registered passes
+// to agentsOut plus integrate; kill-all (only in the step after requestKillAll, or radial after
+// requestRadialKill; a kill-all requested in the same step wins); registered passes
 // in registration order (registerPass); player contact (once setPlayerState has been called);
 // debug kill on agentsOut (skipped when no kill is armed; the arm lasts one step, so callers
 // re-arm every frame while the button is held); particle step; stats on agentsOut; copy stats
@@ -118,6 +119,8 @@ export class Simulation {
     this.playerContact = null;
     this.acknowledgedHitSequence = 0;
     this.killAllRequested = false;
+    // { x, y, radius } for the next step's radial kill (the pickup blast), or null.
+    this.radialKill = null;
     this.debugKillPosition = [0, 0];
     this.debugKillRadius = 0;
     this.frameSequenceValue = 0;
@@ -174,6 +177,13 @@ export class Simulation {
   // killsUnscored.
   requestKillAll() {
     this.killAllRequested = true;
+  }
+
+  // Kills every agent within radius of (x, y), spawning ones included, in the next step only,
+  // through the kill-all pass; those kills land in killsUnscored. A later request in the same
+  // step replaces it, and a kill-all requested for that step wins over it.
+  requestRadialKill(x, y, radius) {
+    this.radialKill = { x, y, radius };
   }
 
   // Arms a kill for the next step only (step consumes it); radius 0 disarms.
@@ -245,7 +255,9 @@ export class Simulation {
     const killRadius = this.debugKillRadius;
     this.debugKillRadius = 0;
     const killAll = this.killAllRequested;
+    const radialKill = killAll ? null : this.radialKill;
     this.killAllRequested = false;
+    this.radialKill = null;
     this.spawner.writeBudget(spawnPerSpecies);
     encoder.clearBuffer(this.statsBufferValue, 0, STATS_PERSISTENT_OFFSET_BYTES);
     this.particlePoolValue.encodeBeginStep(encoder);
@@ -264,7 +276,7 @@ export class Simulation {
       speciesTableBuffer: this.speciesTableBufferValue,
       paramsBuffer: params,
     };
-    if (killAll) this.killAllPass.encode(encoder, killBuffers);
+    if (killAll || radialKill !== null) this.killAllPass.encode(encoder, killBuffers, radialKill);
     if (this.registeredPasses.length > 0) {
       const context = {
         agentsBuffer: agentsOut,
@@ -309,7 +321,7 @@ export class Simulation {
       playerRadius: this.playerContact?.radius ?? 0,
       playerInvulnerable: this.playerContact?.invulnerable ? 1 : 0,
       acknowledgedHitSequence: this.acknowledgedHitSequence,
-      killAllRequested: this.killAllRequested ? 1 : 0,
+      killAllRequested: this.killAllRequested || this.radialKill !== null ? 1 : 0,
     }));
   }
 
@@ -432,6 +444,7 @@ export class Simulation {
     // The kills counter came over with the tail, so differences continue from the last read.
     next.lastKillsTotal = this.lastKillsTotal;
     next.killAllRequested = this.killAllRequested;
+    next.radialKill = this.radialKill === null ? null : { ...this.radialKill };
     next.setDebugKill(...this.debugKillPosition, this.debugKillRadius);
   }
 
@@ -456,6 +469,7 @@ export class Simulation {
     [this.speciesTableBufferValue, this.paramsBufferValue, this.statsBufferValue].forEach((buffer) => buffer.destroy());
     this.stagingRing.destroy();
     this.spawner.destroy();
+    this.killAllPass.destroy();
     this.particlePoolValue.destroy();
     this.grid.destroy();
     this.field.destroy();

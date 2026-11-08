@@ -1,6 +1,9 @@
-// Kill-all (smart bomb and the death clear), run only in the step that requested it
-// (params.killAllRequested == 1), after integrate and before any other kill pass. Two entries,
-// one thread per agent slot each:
+// Kill-all (smart bomb and the death clear) and the pickup blast, run only in the step that
+// requested it (params.killAllRequested == 1), after integrate and before any other kill pass.
+// The area uniform picks the mode: radial 0 kills every alive agent, radial 1 only the alive
+// agents within radius of center (the pickup blast, owner ruling R22); both entries apply it, so
+// the count and the thinning see only the agents this step kills. Two entries, one thread per
+// agent slot each:
 // - countAlive: counts the alive agents (spawning ones included) into the particle pool header's
 //   killAllAlive word (zeroed at the start of the step), one atomicAdd per workgroup.
 // - main: the clear is total: spawning agents die too. atomicAnd clears every alive bit and only a
@@ -15,7 +18,13 @@
 // The barriers sit outside every branch; threads past capacity still reach them.
 //
 // Storage buffers: agents, stats, particles (cursor and budget words in its header), threat
-// accumulator, species table = 5; uniform: params.
+// accumulator, species table = 5; uniforms: params, area.
+
+struct KillArea {
+  center: vec2f,
+  radius: f32,
+  radial: u32,
+}
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read_write> agents: array<AtomicAgent>;
@@ -23,6 +32,11 @@
 @group(0) @binding(3) var<storage, read_write> pool: ParticlePool;
 @group(0) @binding(4) var<storage, read_write> threatAccumulator: array<atomic<u32>>;
 @group(0) @binding(5) var<storage, read> speciesTable: array<f32>;
+@group(0) @binding(6) var<uniform> area: KillArea;
+
+fn isInKillArea(position: vec2f) -> bool {
+  return area.radial == 0u || distance(position, area.center) <= area.radius;
+}
 
 const THREAT_KILLS_PER_UNIT: u32 = 64u;
 const THREAT_PER_KILL: u32 = u32(THREAT_FIXED_POINT_SCALE) / THREAT_KILLS_PER_UNIT;
@@ -57,7 +71,7 @@ fn countAlive(
   @builtin(local_invocation_index) localIndex: u32,
 ) {
   let slot = globalId.x;
-  if (slot < params.capacity && isAlive(atomicLoad(&agents[slot].flags))) {
+  if (slot < params.capacity && isAlive(atomicLoad(&agents[slot].flags)) && isInKillArea(agents[slot].position)) {
     atomicAdd(&workgroupAlive, 1u);
   }
   workgroupBarrier();
@@ -90,7 +104,7 @@ fn main(
   @builtin(local_invocation_index) localIndex: u32,
 ) {
   let slot = globalId.x;
-  if (slot < params.capacity && params.killAllRequested != 0u) {
+  if (slot < params.capacity && params.killAllRequested != 0u && isInKillArea(agents[slot].position)) {
     let previousFlags = atomicAnd(&agents[slot].flags, ~FLAG_ALIVE);
     if (isAlive(previousFlags)) {
       atomicAdd(&workgroupKills, 1u);
