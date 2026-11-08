@@ -51,7 +51,7 @@ import {
   validatedWallStiffness,
 } from './params.js';
 import { Spawner } from './spawn.js';
-import { defaultMatrix, defaultSpecies, normalizeShares, packSpeciesTable } from './species.js';
+import { defaultMatrix, defaultSpecies, normalizeShares, densityScaleFor, packSpeciesTable } from './species.js';
 import { STATS_BYTES, STATS_PERSISTENT_OFFSET_BYTES, StatsPass, decodeStats } from './stats.js';
 import { Steering } from './steer.js';
 
@@ -66,6 +66,7 @@ export class Simulation {
     matrix = defaultMatrix(),
     shares = normalizeShares(new Array(SPECIES_COUNT).fill(1)),
     particleCapacity = DEFAULT_PARTICLE_CAPACITY,
+    scaleDensityToCapacity = false,
   }) {
     const agentBytes = agentBufferBytes(capacity);
     if (agentBytes > gpu.limits.maxStorageBufferBindingSize) {
@@ -75,7 +76,7 @@ export class Simulation {
     // createBuffer does not throw when memory runs out; it returns an invalid buffer. The scope
     // turns that into a rejection here, before a caller (recreateWithCapacity) touches anything.
     gpu.device.pushErrorScope('out-of-memory');
-    const simulation = new Simulation(gpu, { capacity, neighborRadius, species, matrix, shares, particleCapacity }, common);
+    const simulation = new Simulation(gpu, { capacity, neighborRadius, species, matrix, shares, particleCapacity, scaleDensityToCapacity }, common);
     const memoryError = await gpu.device.popErrorScope();
     if (memoryError) {
       simulation.destroy();
@@ -97,11 +98,12 @@ export class Simulation {
   }
 
   // Use Simulation.create; the constructor only allocates.
-  constructor(gpu, { capacity, neighborRadius, species, matrix, shares, particleCapacity }, common) {
+  constructor(gpu, { capacity, neighborRadius, species, matrix, shares, particleCapacity, scaleDensityToCapacity = false }, common) {
     this.gpu = gpu;
     this.device = gpu.device;
     this.common = common;
     this.capacityValue = capacity;
+    this.scalesDensityValue = scaleDensityToCapacity;
     this.neighborRadius = neighborRadius;
     this.dimensions = gridDimensions(neighborRadius);
     this.grid = new SpatialGrid(gpu, { columns: this.dimensions.columns, rows: this.dimensions.rows, capacity, common });
@@ -218,10 +220,15 @@ export class Simulation {
     this.debugKillRadius = radius;
   }
 
+  // Multiplier on every packed targetDensity: capacity over the density reference when this
+  // simulation scales (the shipped game), else 1 (GPU page checks keep absolute densities).
+  get targetDensityScale() { return this.scalesDensityValue ? densityScaleFor(this.capacityValue) : 1; }
+
+  // Rows stay in reference units (the lab and saved mixes read them); only the packed copy scales.
   setSpecies(rows, matrix) {
     this.species = rows;
     this.matrix = matrix;
-    this.device.queue.writeBuffer(this.speciesTableBufferValue, 0, packSpeciesTable(rows, matrix));
+    this.device.queue.writeBuffer(this.speciesTableBufferValue, 0, packSpeciesTable(rows, matrix, this.targetDensityScale));
   }
 
   // Adds encodeFunction(encoder, context) to every step after integrate and before the debug
@@ -453,6 +460,7 @@ export class Simulation {
       matrix: this.matrix,
       shares: this.sharesValue,
       particleCapacity,
+      scaleDensityToCapacity: this.scalesDensityValue,
     });
     try {
       const compaction = await AgentCompaction.create(this.gpu, { common: this.common });

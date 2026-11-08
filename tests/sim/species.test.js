@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SPECIES_FIELDS, SPECIES_NAMES, defaultSpecies, defaultMatrix, packSpeciesTable, normalizeShares } from '../../src/sim/species.js';
+import { Simulation } from '../../src/sim/simulation.js';
+import { PRESETS } from '../../src/settings/presets.js';
+import { SPECIES_FIELDS, SPECIES_NAMES, defaultSpecies, defaultMatrix, packSpeciesTable, normalizeShares, DENSITY_REFERENCE_CAPACITY, densityScaleFor } from '../../src/sim/species.js';
 
 test('packSpeciesTable is 92 floats with the matrix after the rows', () => {
   const table = packSpeciesTable(defaultSpecies(), defaultMatrix());
@@ -76,4 +78,56 @@ test('the default matrix has the predator rows only', () => {
   const nonzero = Array.from(matrix).map((value, index) => [index, value]).filter(([, value]) => value !== 0);
   assert.deepEqual(nonzero.map(([index]) => index), [20, 22, 23]);
   assert.deepEqual(nonzero.map(([, value]) => value), [0.8, 0.8, -0.6].map(Math.fround));
+});
+
+const DENSITY_INDEX = SPECIES_FIELDS.indexOf('targetDensity');
+
+test('packSpeciesTable scales only targetDensity by the given scale', () => {
+  const rows = defaultSpecies();
+  const plain = packSpeciesTable(rows, defaultMatrix());
+  const scaled = packSpeciesTable(rows, defaultMatrix(), 0.25);
+  rows.forEach((row, index) => {
+    const base = index * SPECIES_FIELDS.length;
+    assert.equal(scaled[base + DENSITY_INDEX], Math.fround(row.targetDensity * 0.25));
+    assert.equal(scaled[base + SPECIES_FIELDS.indexOf('seek')], plain[base + SPECIES_FIELDS.indexOf('seek')]);
+  });
+  assert.equal(rows[0].targetDensity, 120, 'the rows stay in reference units');
+});
+
+test('densityScaleFor is capacity over the desktop reference', () => {
+  assert.equal(DENSITY_REFERENCE_CAPACITY, PRESETS.desktop.capacity);
+  assert.equal(densityScaleFor(DENSITY_REFERENCE_CAPACITY), 1);
+  assert.equal(densityScaleFor(PRESETS.phoneHigh.capacity), 0.25);
+  assert.equal(densityScaleFor(PRESETS.phoneLow.capacity), 0.125);
+});
+
+function fakeSimulation({ capacity, scalesDensity }) {
+  const writes = [];
+  const simulation = Object.create(Simulation.prototype);
+  Object.assign(simulation, { capacityValue: capacity, scalesDensityValue: scalesDensity, speciesTableBufferValue: 'buffer' });
+  simulation.device = { queue: { writeBuffer: (buffer, offset, data) => writes.push(data) } };
+  return { simulation, writes };
+}
+
+test('Simulation.setSpecies packs comfort density scaled by capacity when it scales', () => {
+  const { simulation, writes } = fakeSimulation({ capacity: PRESETS.phoneHigh.capacity, scalesDensity: true });
+  simulation.setSpecies(defaultSpecies(), defaultMatrix());
+  assert.equal(simulation.targetDensityScale, 0.25);
+  assert.equal(writes[0][DENSITY_INDEX], 30);
+  assert.equal(simulation.species[0].targetDensity, 120);
+});
+
+test('Simulation.setSpecies keeps absolute densities unless asked to scale', () => {
+  const { simulation, writes } = fakeSimulation({ capacity: 4096, scalesDensity: false });
+  simulation.setSpecies(defaultSpecies(), defaultMatrix());
+  assert.equal(simulation.targetDensityScale, 1);
+  assert.equal(writes[0][DENSITY_INDEX], 120);
+});
+
+test('the shipped boot and the capacity swap both ask for density scaling', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const main = await readFile(new URL('../../src/main.js', import.meta.url), 'utf8');
+  assert.match(main, /scaleDensityToCapacity: true/);
+  const simulation = await readFile(new URL('../../src/sim/simulation.js', import.meta.url), 'utf8');
+  assert.match(simulation, /scaleDensityToCapacity: this\.scalesDensityValue/);
 });

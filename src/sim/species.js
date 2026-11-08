@@ -37,11 +37,21 @@ export function defaultMatrix() {
   return matrix;
 }
 
-export function packSpeciesTable(rows, matrix) {
+// Comfort densities are tuned at the desktop capacity; a game that scales them (the shipped one)
+// multiplies each packed targetDensity by capacity / DENSITY_REFERENCE_CAPACITY, so the swarm's
+// shape does not depend on the preset. The rows themselves stay in reference units.
+export const DENSITY_REFERENCE_CAPACITY = 524288;
+
+export function densityScaleFor(capacity) {
+  return capacity / DENSITY_REFERENCE_CAPACITY;
+}
+
+export function packSpeciesTable(rows, matrix, densityScale = 1) {
   const table = new Float32Array(SPECIES_COUNT * FIELD_COUNT + MATRIX_PADDED_FLOATS);
   rows.slice(0, SPECIES_COUNT).forEach((row, index) => {
     SPECIES_FIELDS.forEach((field, fieldIndex) => {
-      table[index * FIELD_COUNT + fieldIndex] = row[field] ?? 0;
+      const value = row[field] ?? 0;
+      table[index * FIELD_COUNT + fieldIndex] = field === 'targetDensity' ? value * densityScale : value;
     });
   });
   table.set(matrix, SPECIES_COUNT * FIELD_COUNT);

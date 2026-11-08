@@ -11,7 +11,7 @@ import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SHADER_CONSTANTS, gridDimensions } from '/src/sim/layout.js';
 import { SIM_PARAMS_BYTES, packSimParams } from '/src/sim/params.js';
-import { SPECIES_NAMES, defaultMatrix, defaultSpecies, packSpeciesTable } from '/src/sim/species.js';
+import { SPECIES_NAMES, defaultMatrix, defaultSpecies, densityScaleFor, packSpeciesTable } from '/src/sim/species.js';
 import { SpatialGrid } from '/src/sim/grid.js';
 import { CoarseField } from '/src/sim/field.js';
 import { Steering } from '/src/sim/steer.js';
@@ -154,9 +154,11 @@ class Harness {
     }));
   }
 
-  seed(agentBytes, speciesRows, matrix = defaultMatrix()) {
+  // densityScale multiplies every packed targetDensity (the game passes capacity / reference);
+  // the default 1 keeps the rows' absolute densities.
+  seed(agentBytes, speciesRows, matrix = defaultMatrix(), densityScale = 1) {
     this.device.queue.writeBuffer(this.agentsIn, 0, agentBytes);
-    this.device.queue.writeBuffer(this.speciesBuffer, 0, packSpeciesTable(speciesRows, matrix));
+    this.device.queue.writeBuffer(this.speciesBuffer, 0, packSpeciesTable(speciesRows, matrix, densityScale));
   }
 
   encodeStep(encoder) {
@@ -355,6 +357,11 @@ async function checkLatticeSpacing(gpu, common) {
   };
 }
 
+// An explicit collapsing fixture (the Chaser tuning before owner ruling R37), so the pressure check
+// tests the pressure mechanism and not the shipped Chaser row: with pressure 0 this strong seek
+// collapses the swarm onto the player.
+const COLLAPSING_CHASER = { seek: 1.0, cohesion: 0.9, alignment: 0.5, separation: 0.3, maximumSpeed: 4.0, maximumTurn: 0.6, flee: 0 };
+
 // (d) 65536 Chasers for 600 steps: with pressure the swarm's bounding radius around the player
 // stays above 1.5; with pressure 0 it collapses below 0.8.
 async function checkPressure(gpu, common) {
@@ -364,7 +371,7 @@ async function checkPressure(gpu, common) {
   const radii = {};
   for (const [label, pressure] of [['pressure', 0.5], ['none', 0]]) {
     const random = randomSource(4);
-    harness.seed(packAgents(uniformPositions(count, random), CHASER, random), speciesWith(CHASER, { pressure, targetDensity: 40 }));
+    harness.seed(packAgents(uniformPositions(count, random), CHASER, random), speciesWith(CHASER, { ...COLLAPSING_CHASER, pressure, targetDensity: 40 }));
     await harness.run(600);
     const agents = await harness.readAgents();
     const failure = validityFailure(agents);
@@ -463,7 +470,25 @@ const CLUMP_RADIUS = 1.0;
 const CLUMP_MAXIMUM_FRACTION = 0.15;
 const CLUMP_MAXIMUM_DENSITY_FACTOR = 4;
 
-async function checkNoClump(gpu, common, count, label, peakReference = count / (COARSE_COLUMNS * COARSE_ROWS)) {
+// Mechanism fixture for the clump assertions: the rows before owner ruling R37 (the old Chaser row
+// and the old comfort densities, one fifth of the shipped ones), at which the pressure term
+// engages near the player at sparse counts.
+const MECHANISM_DENSITIES = [24, 18, 30, 24, 16];
+function mechanismSpecies() {
+  return defaultSpecies().map((row, index) => ({
+    ...row,
+    ...(index === CHASER ? { seek: 1.0, cohesion: 0.9, alignment: 0.5, separation: 0.3, maximumSpeed: 4.0, maximumTurn: 0.6, flee: 0, pressure: 0.5 } : {}),
+    targetDensity: MECHANISM_DENSITIES[index],
+  }));
+}
+
+// The shipped rows with the density scale the game applies. The game's alive ceiling is
+// SHIPPED_CEILING_FRACTION of capacity, so a population of count agents is what a game of capacity
+// count / SHIPPED_CEILING_FRACTION holds at its ceiling, and its comfort densities are scaled by
+// densityScaleFor of that capacity. Informational only: reports the standoff ball for the owner.
+const SHIPPED_CEILING_FRACTION = 0.1;
+
+async function checkNoClump(gpu, common, count, label, peakReference = count / (COARSE_COLUMNS * COARSE_ROWS), { rows = mechanismSpecies(), densityScale = 1, informational = false } = {}) {
   const harness = new Harness(gpu, common, count);
   await harness.initialize();
   const random = randomSource(5);
@@ -471,7 +496,7 @@ async function checkNoClump(gpu, common, count, label, peakReference = count / (
   const bytes = packAgents(positions, 0, random);
   const view = new DataView(bytes);
   for (let index = 0; index < count; index += 1) view.setUint32(index * AGENT_STRIDE_BYTES + AGENT_OFFSETS.species, index % SPECIES_NAMES.length, true);
-  harness.seed(bytes, defaultSpecies());
+  harness.seed(bytes, rows, defaultMatrix(), densityScale);
   await harness.run(CLUMP_STEPS);
   const agents = await harness.readAgents();
   const failure = validityFailure(agents);
@@ -492,17 +517,30 @@ async function checkNoClump(gpu, common, count, label, peakReference = count / (
   const cellOf = (agent) => Math.min(COARSE_COLUMNS - 1, Math.floor(agent.x / (ARENA_WIDTH / COARSE_COLUMNS))) + Math.min(COARSE_ROWS - 1, Math.floor(agent.y / (ARENA_HEIGHT / COARSE_ROWS))) * COARSE_COLUMNS;
   // Informational, never asserted: share of agents in a cell denser than GROUP_DENSITY_FACTOR times the average.
   const grouped = agents.filter((agent) => cells[cellOf(agent)] > GROUP_DENSITY_FACTOR * average).length / count;
+  if (informational) {
+    return {
+      pass: true,
+      detail: `informational shipped-rows clump ${label} (${count} agents, density scale ${densityScale.toFixed(4)} = capacity ${Math.round(count / SHIPPED_CEILING_FRACTION)} over the reference): ${(near * 100).toFixed(1)}% within ${CLUMP_RADIUS} of the player (by species ${nearBySpecies}), peak cell ${peak} = ${(peak / average).toFixed(2)}x the average ${average.toFixed(0)}`,
+    };
+  }
   return {
     pass: near < CLUMP_MAXIMUM_FRACTION && peak < CLUMP_MAXIMUM_DENSITY_FACTOR * peakReference,
     detail: `clump ${label} (${count} agents): ${(near * 100).toFixed(1)}% within ${CLUMP_RADIUS} of the player (need < ${CLUMP_MAXIMUM_FRACTION * 100}%; by species ${nearBySpecies}), grouped ${(grouped * 100).toFixed(0)}% (info), peak cell ${peak} = ${(peak / average).toFixed(2)}x the average ${average.toFixed(0)} (need < ${CLUMP_MAXIMUM_DENSITY_FACTOR} x ${peakReference.toFixed(0)} = ${(CLUMP_MAXIMUM_DENSITY_FACTOR * peakReference).toFixed(0)})`,
   };
 }
 
-const checkNoClumpFull = (gpu, common) => checkNoClump(gpu, common, CLUMP_CAPACITY, 'full');
+const checkNoClumpFull = (gpu, common) => checkNoClump(gpu, common, CLUMP_CAPACITY, 'full', undefined, { rows: defaultSpecies() });
 const checkNoClumpSparse = (gpu, common) => checkNoClump(gpu, common, SPARSE_CLUMP_COUNT, 'sparse');
 // At 5 percent population the average (about 5.7 per cell) is below every targetDensity, so a spread
 // swarm settles near the targets, not the average; the peak reference is the highest target.
-const checkNoClumpInitialRamp = (gpu, common) => checkNoClump(gpu, common, INITIAL_RAMP_CLUMP_COUNT, 'initial-ramp', Math.max(...defaultSpecies().map((row) => row.targetDensity)));
+const checkNoClumpInitialRamp = (gpu, common) => checkNoClump(gpu, common, INITIAL_RAMP_CLUMP_COUNT, 'initial-ramp', Math.max(...MECHANISM_DENSITIES));
+const shippedClump = (gpu, common, count, label) => checkNoClump(gpu, common, count, label, undefined, {
+  rows: defaultSpecies(),
+  densityScale: densityScaleFor(count / SHIPPED_CEILING_FRACTION),
+  informational: true,
+});
+const infoNoClumpSparse = (gpu, common) => shippedClump(gpu, common, SPARSE_CLUMP_COUNT, 'sparse');
+const infoNoClumpInitialRamp = (gpu, common) => shippedClump(gpu, common, INITIAL_RAMP_CLUMP_COUNT, 'initial-ramp');
 
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
@@ -511,7 +549,7 @@ async function runCheck() {
   gpu.device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
   const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
   const results = [];
-  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp]) {
+  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp, infoNoClumpSparse, infoNoClumpInitialRamp]) {
     results.push(await check(gpu, common));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${results.map((result) => result.detail).join('; ')}` };
   }

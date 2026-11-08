@@ -88,8 +88,8 @@ async function boot() {
   });
   const preset = PRESETS[initialPreset.name];
   const simulation = await Simulation.create(gpu, pinnedCapacity !== null
-    ? { capacity: pinnedCapacity }
-    : { capacity: preset.capacity, neighborRadius: preset.neighborRadius, particleCapacity: preset.particleCapacity });
+    ? { capacity: pinnedCapacity, scaleDensityToCapacity: true }
+    : { capacity: preset.capacity, neighborRadius: preset.neighborRadius, particleCapacity: preset.particleCapacity, scaleDensityToCapacity: true });
   renderer = await Renderer.create(gpu, { simulation, viewport });
   const input = createInput(canvas, viewport);
   // Read by the browser checks (the mobile smoke asserts on the aim vector).
