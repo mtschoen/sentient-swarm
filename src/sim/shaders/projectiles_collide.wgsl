@@ -8,7 +8,9 @@
 //   for every grid column (or row) the capsule touches, the minor-axis cell span is the
 //   segment's minor range over that column widened by the reach on both sides, then by the reach
 //   along the major axis for the end caps. At most CAPSULE_CELL_BUDGET cells. An agent dies when
-//   its distance to the segment is at most the reach.
+//   its distance to the segment is at most the reach. The budget covers a radius 0.18 energy ball
+//   at speed 10 on every preset grid (cell size 0.08 to 0.12) at full and half simulation rate:
+//   at most 78 cells, worst at cell size 0.08 with a half-rate step (tests/sim/capsule-budget.test.js).
 // - pulseRing: skipped here, see rings.
 // Entry rings, a few workgroups (RING_WORKGROUP_COUNT in projectiles.js): every workgroup scans
 // the slots for alive pulse rings (at most MAXIMUM_LISTED_RINGS), then all the dispatch's threads
@@ -64,7 +66,7 @@ struct SpeciesHues {
 @group(0) @binding(9) var<storage, read_write> stats: array<atomic<u32>>;
 
 const CAPSULE_KILL_MARGIN: f32 = 0.02;
-const CAPSULE_CELL_BUDGET: u32 = 64u;
+const CAPSULE_CELL_BUDGET: u32 = 96u;
 const RING_MINIMUM_BAND: f32 = 0.08;
 const RING_CELL_BUDGET: u32 = 1024u;
 const BEAM_THREAT_UNITS: f32 = 4.0;

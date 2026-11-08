@@ -26,6 +26,11 @@
 //     1 degree sweep kills exactly the agents within the half width of its sector, which is no
 //     more than the straight beam plus the sliver and the padding past its far edge. Prints the
 //     histogram.
+// (g) one base-gun energy ball (WEAPON_TYPES.base tier 1) fired diagonally (the capsule walk's
+//     widest heading) through the block kills along a tunnel: no alive agent within its radius of
+//     the path (no cell skipped by CAPSULE_CELL_BUDGET), no dead agent beyond its kill reach, and
+//     kills farther than twice the Plan B bullet's reach (0.04 + 0.02) from the path, so the
+//     tunnel is at least twice the old one wide.
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
@@ -33,6 +38,7 @@ import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, AREN
 import { Simulation } from '/src/sim/simulation.js';
 import { DEFAULT_KILL_BURST_PARTICLES } from '/src/sim/params.js';
 import { defaultSpecies } from '/src/sim/species.js';
+import { WEAPON_TYPES } from '/src/game/weaponTypes.js';
 
 const CAPACITY = 65536;
 const AGENT_COUNT = 10000;
@@ -398,6 +404,45 @@ async function runSweptBeamCase(harness) {
   ]);
 }
 
+// The Plan B base bullet's kill reach: radius 0.04 plus CAPSULE_KILL_MARGIN 0.02.
+const OLD_BULLET_REACH = 0.06;
+const KILL_MARGIN = 0.02;
+const REACH_TOLERANCE = 1e-3;
+const BALL_ANGLE = Math.PI / 4;
+const BALL_FRAME_LIMIT = 240;
+
+async function runEnergyBallCase(harness) {
+  const positions = harness.seedBlock(CENTER);
+  const ball = WEAPON_TYPES.base.tiers[0];
+  const direction = [Math.cos(BALL_ANGLE), Math.sin(BALL_ANGLE)];
+  const start = [CENTER[0] - direction[0] * 2.5, CENTER[1] - direction[1] * 2.5];
+  const pathEnd = [start[0] + direction[0] * 20, start[1] + direction[1] * 20];
+  const slot = harness.projectiles.queueSpawn({
+    x: start[0], y: start[1], velocityX: direction[0] * ball.speed, velocityY: direction[1] * ball.speed,
+    radius: ball.radius, lifetime: ball.lifetime, kind: KIND.bullet,
+  });
+  let kills = 0;
+  let frames = 0;
+  for (; frames < BALL_FRAME_LIMIT; frames += 1) {
+    kills += await harness.step();
+    if (!(await harness.projectileSlot(slot)).alive) break;
+  }
+  const alive = await harness.aliveFlags();
+  const distances = positions.map((position) => distanceToSegment(position, start, pathEnd));
+  const reach = ball.radius + KILL_MARGIN;
+  const aliveInside = distances.filter((distance, index) => alive[index] && distance <= ball.radius).length;
+  const deadOutside = distances.filter((distance, index) => !alive[index] && distance > reach + REACH_TOLERANCE).length;
+  const widest = distances.reduce((maximum, distance, index) => (alive[index] ? maximum : Math.max(maximum, distance)), 0);
+  const dropped = alive.filter((flag) => !flag).length;
+  return verdictLine([
+    [frames < BALL_FRAME_LIMIT, `(g) energy ball (radius ${ball.radius}, speed ${ball.speed}) dead after ${frames} frames (need under ${BALL_FRAME_LIMIT})`],
+    [kills > 0 && dropped === kills, `(g) energy ball kills ${kills}, alive drop ${dropped} (need equal and > 0)`],
+    [aliveInside === 0, `(g) alive agents within the ball radius of its path ${aliveInside} (need 0)`],
+    [deadOutside === 0, `(g) dead agents beyond the kill reach ${reach.toFixed(3)} ${deadOutside} (need 0)`],
+    [widest > 2 * OLD_BULLET_REACH, `(g) tunnel half width ${widest.toFixed(3)}, ${(widest / OLD_BULLET_REACH).toFixed(2)} times the old bullet reach (need over 2)`],
+  ]);
+}
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   const { device } = gpu;
@@ -412,7 +457,7 @@ async function runCheck() {
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const harness = new Harness(device, simulation, projectiles);
   const lines = [];
-  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runSweptBeamCase]) {
+  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runSweptBeamCase, runEnergyBallCase]) {
     lines.push(await run(harness));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${lines.join('; ')}` };
   }

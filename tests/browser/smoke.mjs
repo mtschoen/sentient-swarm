@@ -13,7 +13,11 @@
 // starts the run, then the right stick fires toward the arena center for N frames; the score
 // must be positive, the box around the ship (captured 60 frames into the fire, while the ship is
 // alive) brighter than the arena mean, the first death after fire frame 300 or never, a run of at
-// least 1800 frames must still kill and score after fire frame 900, and no console errors.
+// least 1800 frames must still kill and score after fire frame 900, and no console errors. It also
+// writes artifacts/energy-balls.png (1x, trails off, at the ship capture) and, 1 s after the fire
+// stops, measures the base gun's tunnel (owner ruling R19) with the C0b corridor metric: the
+// coarse-field density along the fire line must be under half the control rows' while the ship
+// still lives.
 // --pulse instead arms the pulse weapon through the debug panel's arm select, fires toward the arena
 // center with the synthetic gamepad, and writes artifacts/pulse-ring.png, captured the moment the
 // stats report a ring detonation (ringsThisFrame), so a ring is expanding on screen.
@@ -29,7 +33,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
-import { captureBursts, checkCorridor } from './smoke-clearing.mjs';
+import { captureBursts, checkCorridor, corridorDensities } from './smoke-clearing.mjs';
 
 const SMOKE_SEARCH = { probe: 'off', capacity: '262144' };
 const READY_TIMEOUT_MILLISECONDS = 10_000;
@@ -74,6 +78,13 @@ const PLAY_SHIP_CAPTURE_FRAMES = 60;
 const PLAY_MINIMUM_FIRST_DEATH_FRAMES = 300;
 const PLAY_LATE_RUN_FRAMES = 1800;
 const PLAY_LATE_CHECK_FRAMES = 900;
+// --play tunnel metric: frames after the fire stops, the band half height around the ship's row
+// (the 3 ball fan stays within it for the first few units) and where the band starts past the ship.
+const PLAY_TUNNEL_SETTLE_FRAMES = 60;
+const PLAY_TUNNEL_HALF_HEIGHT = 0.3;
+const PLAY_TUNNEL_START_OFFSET = 1;
+const PLAY_TUNNEL_END_X = 15;
+const PLAY_TUNNEL_MAXIMUM_RATIO = 0.5;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
 async function writeDataUrl(name, dataUrl) {
@@ -299,6 +310,8 @@ async function checkPlay(page, frames) {
   }, { playerX: early.playerX, playerY: early.playerY, size: SHIP_BOX_DEVICE_PIXELS });
   const capture = await evaluateWithin(page, 'the play capture', (regions) => window.__murmuration.capture({ regions }), [shipBox]);
   await writeDataUrl('smoke-play.png', capture.pngDataUrl);
+  const balls = await evaluateWithin(page, 'the energy ball capture', () => window.__murmuration.capture({ settings: { trailDecay: 0 } }));
+  await writeDataUrl('energy-balls.png', balls.pngDataUrl);
   const shipLuminance = capture.regionLuminances[0];
   console.log(`smoke: play ship box luminance ${shipLuminance.toFixed(4)}, arena mean ${capture.meanLuminance.toFixed(4)}, phase ${early.phase}`);
   let late = null;
@@ -310,6 +323,7 @@ async function checkPlay(page, frames) {
   const stats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
   const firstDeathFrame = await evaluateWithin(page, 'reading the first death', () => window.__smokeFirstDeathFrame);
   await setSticks(page, [0, 0, 0, 0]);
+  const tunnel = await measureTunnel(page, stats);
   console.log(firstDeathFrame === null
     ? `smoke: play first death: none in ${frames} frames of fire`
     : `smoke: play first death at fire frame ${firstDeathFrame - firing} (${((firstDeathFrame - firing) / 60).toFixed(1)} s at 60 Hz)`);
@@ -324,10 +338,35 @@ async function checkPlay(page, frames) {
   if (late && !(stats.score > late.score && stats.killsTotal > late.killsTotal)) {
     return `smoke: expected kills and score growth after fire frame ${PLAY_LATE_CHECK_FRAMES}: score ${late.score} -> ${stats.score}, kills ${late.killsTotal} -> ${stats.killsTotal}`;
   }
+  if (tunnel.failure) return tunnel.failure;
   if (!(shipLuminance > capture.meanLuminance)) {
     return `smoke: expected the ${SHIP_BOX_DEVICE_PIXELS}px box around the ship (${shipLuminance.toFixed(4)}) to be brighter than the arena mean (${capture.meanLuminance.toFixed(4)})`;
   }
   return null;
+}
+
+// The base gun's tunnel 1 s after the fire stops: the corridor metric along the ship's row from
+// PLAY_TUNNEL_START_OFFSET past the ship to PLAY_TUNNEL_END_X. Returns { failure } (null when it
+// passes, or when the ship died during the run, which clears the arena and voids the metric).
+async function measureTunnel(page, statsAtStop) {
+  const settleStart = await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame);
+  await page.waitForFunction((target) => window.__murmuration.frame >= target, settleStart + PLAY_TUNNEL_SETTLE_FRAMES, { timeout: PLAY_TIMEOUT_MILLISECONDS });
+  const field = Float32Array.from(await evaluateWithin(page, 'reading the coarse field', async () => Array.from(await window.__murmuration.game.simulation.readCoarseField())));
+  const after = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+  const died = await evaluateWithin(page, 'reading the first death', () => window.__smokeFirstDeathFrame !== null);
+  const densities = corridorDensities(field, statsAtStop.playerY, {
+    halfHeight: PLAY_TUNNEL_HALF_HEIGHT, startX: statsAtStop.playerX + PLAY_TUNNEL_START_OFFSET, endX: PLAY_TUNNEL_END_X,
+  });
+  const text = `corridor ${densities.corridor.toFixed(3)}, control ${densities.control.toFixed(3)}, ratio ${densities.ratio.toFixed(3)}`;
+  if (died || after.phase !== 'playing') {
+    console.log(`smoke: play tunnel ${PLAY_TUNNEL_SETTLE_FRAMES} frames after the fire: not measured, the ship died during the run (${text})`);
+    return { failure: null };
+  }
+  console.log(`smoke: play tunnel ${PLAY_TUNNEL_SETTLE_FRAMES} frames after the fire: ${text}`);
+  if (!(densities.ratio < PLAY_TUNNEL_MAXIMUM_RATIO)) {
+    return { failure: `smoke: expected the base gun tunnel under ${PLAY_TUNNEL_MAXIMUM_RATIO} of the control density 1 s after the fire, got ${text}` };
+  }
+  return { failure: null };
 }
 
 // Audio check. The start clear check's click is the page's first gesture, so it must have created the

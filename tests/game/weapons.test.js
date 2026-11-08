@@ -155,3 +155,24 @@ test('type tables satisfy the brief', () => {
   assert.deepEqual(WEAPON_TYPES.scatter.tiers.map((tier) => tier.projectilesPerShot), [9, 13, 17]);
   assert.equal(WEAPON_TYPES.sidewinders.kind, PROJECTILE_KINDS.sidewinder);
 });
+
+// Owner ruling R19 (Plan C task C0e): the base gun and scatter fire energy balls that carve a
+// readable tunnel and keep piercing; rail stays the thin fast contrast; pulse and sidewinders keep
+// their Plan B values.
+test('energy ball tables: base and scatter orbs, rail thin and fast, pulse and sidewinders unchanged', () => {
+  for (const tier of WEAPON_TYPES.base.tiers) {
+    assert.deepEqual(
+      { fireInterval: tier.fireInterval, projectilesPerShot: tier.projectilesPerShot, spreadRadians: tier.spreadRadians, speed: tier.speed, radius: tier.radius, lifetime: tier.lifetime },
+      { fireInterval: 0.12, projectilesPerShot: 3, spreadRadians: 0.25, speed: 9, radius: 0.15, lifetime: 2 },
+    );
+    assert.ok(tier.radius >= 0.12 && tier.radius <= 0.18, `base ball radius ${tier.radius}`);
+    assert.ok(tier.speed >= 8 && tier.speed <= 10, `base ball speed ${tier.speed}`);
+  }
+  for (const tier of WEAPON_TYPES.scatter.tiers) {
+    assert.deepEqual({ speed: tier.speed, radius: tier.radius, lifetime: tier.lifetime }, { speed: 10, radius: 0.08, lifetime: 0.5 });
+    assert.ok(tier.radius < WEAPON_TYPES.base.tiers[0].radius);
+  }
+  for (const tier of WEAPON_TYPES.rail.tiers) assert.deepEqual({ speed: tier.speed, radius: tier.radius }, { speed: 40, radius: 0.05 });
+  for (const tier of WEAPON_TYPES.pulse.tiers) assert.deepEqual({ speed: tier.speed, radius: tier.radius, lifetime: tier.lifetime }, { speed: 6, radius: 0.12, lifetime: 1 });
+  for (const tier of WEAPON_TYPES.sidewinders.tiers) assert.deepEqual({ speed: tier.speed, radius: tier.radius, lifetime: tier.lifetime }, { speed: 9, radius: 0.05, lifetime: 2.5 });
+});

@@ -73,10 +73,12 @@ async function readField(page, evaluateWithin) {
   return Float32Array.from(await evaluateWithin(page, 'reading the coarse field', async () => Array.from(await window.__murmuration.game.simulation.readCoarseField())));
 }
 
-function corridorDensities(field, shipY) {
-  const corridor = bandDensity(field, shipY, BEAM_HALF_WIDTH, CORRIDOR_START_X, CORRIDOR_END_X);
-  const control = (bandDensity(field, shipY - CONTROL_ROW_OFFSET, BEAM_HALF_WIDTH, CORRIDOR_START_X, CORRIDOR_END_X)
-    + bandDensity(field, shipY + CONTROL_ROW_OFFSET, BEAM_HALF_WIDTH, CORRIDOR_START_X, CORRIDOR_END_X)) / 2;
+// The corridor metric: mean density of the band around shipY against the mean of the same band
+// CONTROL_ROW_OFFSET above and below. smoke.mjs --play measures the base gun's tunnel with it.
+export function corridorDensities(field, shipY, { halfHeight = BEAM_HALF_WIDTH, startX = CORRIDOR_START_X, endX = CORRIDOR_END_X } = {}) {
+  const corridor = bandDensity(field, shipY, halfHeight, startX, endX);
+  const control = (bandDensity(field, shipY - CONTROL_ROW_OFFSET, halfHeight, startX, endX)
+    + bandDensity(field, shipY + CONTROL_ROW_OFFSET, halfHeight, startX, endX)) / 2;
   return { corridor, control, ratio: control > 0 ? corridor / control : Number.POSITIVE_INFINITY };
 }
 

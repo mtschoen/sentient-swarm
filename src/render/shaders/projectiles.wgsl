@@ -3,7 +3,7 @@
 // header prepended (Projectile, PROJECTILE_KIND_*, ARENA_*, hsvToRgb).
 // All geometry is in world units in a frame whose +x is the projectile's heading (origin at its
 // position), so a quad is a centre, a heading and a half extent; each kind has its own silhouette in the fragment shader:
-//   bullet     short bright streak with a white head          scatter  tiny flickering orange spark
+//   bullet     energy ball: white core, hued body, halo        scatter  smaller flickering orange ball
 //   rail       very long thin streak, white head, fading tail  orb      pulsing glow disc
 //   ring       thin expanding circle                           sidewinder  weaving short trail
 //   beam       the fat laser from the ship to the arena edge, white core inside a coloured body,
@@ -27,8 +27,11 @@ struct ProjectileView {
 @group(0) @binding(0) var<uniform> view: ProjectileView;
 @group(0) @binding(1) var<storage, read> projectiles: array<Projectile>;
 
-const BULLET_TAIL: f32 = 0.24;
-const SCATTER_TAIL: f32 = 0.16;
+// Energy balls (bullet and scatter): the halo reaches BALL_HALO_FACTOR times the radius, about the
+// kill reach (radius plus the collide pass's 0.02 margin) and then some, so what shows is what
+// kills; the quad adds BALL_QUAD_MARGIN for the feather. The trail decay draws the streak.
+const BALL_HALO_FACTOR: f32 = 1.5;
+const BALL_QUAD_MARGIN: f32 = 0.02;
 const RAIL_SECONDS_OF_TRAVEL: f32 = 0.05;
 const RAIL_MINIMUM_LENGTH: f32 = 0.6;
 const SIDEWINDER_TAIL: f32 = 0.7;
@@ -111,14 +114,11 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
   var axisAligned = false;
   switch kind {
     case PROJECTILE_KIND_BULLET: {
-      // Centred on the streak (-BULLET_TAIL to 0.04) with a 0.14 margin all round, where the
-      // falloff-30 glow is down to about 4 percent, so the quad edge never shows.
-      halfExtent = vec2f(BULLET_TAIL * 0.5 + 0.16, 0.14);
-      center = projectile.position - direction * (BULLET_TAIL * 0.5 - 0.02);
+      // Centred on the ball; the halo is zero at BALL_HALO_FACTOR times the radius.
+      halfExtent = vec2f(projectile.radius * BALL_HALO_FACTOR + BALL_QUAD_MARGIN);
     }
     case PROJECTILE_KIND_SCATTER: {
-      halfExtent = vec2f(SCATTER_TAIL * 0.5 + 0.08, 0.1);
-      center = projectile.position - direction * (SCATTER_TAIL * 0.5 - 0.03);
+      halfExtent = vec2f(projectile.radius * BALL_HALO_FACTOR + BALL_QUAD_MARGIN);
       fade = clamp(projectile.lifetime / SCATTER_FADE_SECONDS, 0.0, 1.0);
     }
     case PROJECTILE_KIND_RAIL: {
@@ -227,6 +227,17 @@ fn bodyAndGlow(distance: f32, thickness: f32, feather: f32, glowFalloff: f32) ->
   return vec2f(1.0 - smoothstep(thickness - feather, thickness + feather, distance), exp(-max(distance - thickness, 0.0) * glowFalloff));
 }
 
+// An energy ball at distance from its center: (core, body, halo). The white core fills about half
+// the radius, the hued body the radius, and the halo falls from the radius to zero at
+// BALL_HALO_FACTOR times it.
+fn energyBall(distance: f32, radius: f32, feather: f32) -> vec3f {
+  let core = 1.0 - smoothstep(radius * 0.35 - feather, radius * 0.55 + feather, distance);
+  let body = 1.0 - smoothstep(radius * 0.85 - feather, radius + feather, distance);
+  let haloExtent = max(radius * (BALL_HALO_FACTOR - 1.0), 0.001);
+  let halo = pow(clamp(1.0 - max(distance - radius, 0.0) / haloExtent, 0.0, 1.0), 2.0) * (1.0 - body);
+  return vec3f(core, body, halo);
+}
+
 fn neon(hue: f32, saturation: f32) -> vec3f {
   return hsvToRgb(hue, saturation, 1.0);
 }
@@ -243,15 +254,14 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
   var color = vec3f(0.0);
   switch input.kind {
     case PROJECTILE_KIND_BULLET: {
-      let along = smoothstep(-BULLET_TAIL, 0.04, local.x);
-      let shape = bodyAndGlow(segmentDistance(local, vec2f(-BULLET_TAIL, 0.0), vec2f(0.04, 0.0)), 0.035, feather, 30.0);
-      color = (vec3f(1.4) * shape.x + neon(input.hue, GLOW_SATURATION) * shape.y * 0.7) * along;
+      let ball = energyBall(length(local), radius, feather);
+      let shimmer = 0.92 + 0.08 * sin(time * 30.0 + seed * 6.28);
+      color = (vec3f(1.5) * ball.x + neon(input.hue, GLOW_SATURATION) * (ball.y * 0.75 + ball.z * 0.55)) * shimmer;
     }
     case PROJECTILE_KIND_SCATTER: {
       let flicker = 0.7 + 0.3 * sin(time * 90.0 + seed * 40.0);
-      let along = smoothstep(-SCATTER_TAIL, 0.03, local.x);
-      let shape = bodyAndGlow(segmentDistance(local, vec2f(-SCATTER_TAIL, 0.0), vec2f(0.03, 0.0)), 0.03, feather, 22.0);
-      color = (vec3f(1.0, 0.95, 0.8) * shape.x + neon(input.hue, 1.0) * shape.y * 1.1) * along * flicker * fade;
+      let ball = energyBall(length(local), radius, feather);
+      color = (vec3f(1.0, 0.95, 0.8) * ball.x * 1.2 + neon(input.hue, 1.0) * (ball.y * 0.8 + ball.z * 0.6)) * flicker * fade;
     }
     case PROJECTILE_KIND_RAIL: {
       let tail = 0.05 - (halfLength - 0.12) * 2.0;
