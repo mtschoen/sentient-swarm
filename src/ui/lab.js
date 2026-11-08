@@ -17,6 +17,7 @@
 // only from the title (canEnter).
 import { DEFAULT_PICKUP_BLAST_RADIUS } from '../game/game.js';
 import { RunPhase } from '../game/run.js';
+import { TIME_WARP_SCALE, TIME_WARP_SECONDS } from '../game/time-warp.js';
 import { DEFAULT_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES } from '../game/weaponTypes.js';
 import { PARTICLE_DEVICE_PIXELS } from '../render/particles.js';
 import { DEFAULT_RENDER_SETTINGS } from '../render/renderer.js';
@@ -110,6 +111,14 @@ export const LAB_KNOB_BINDINGS = {
     read: ({ game }) => game.projectiles.beamSweepThresholdDegrees,
     write: ({ game }, value) => game.projectiles.setBeamSweepThreshold(value),
   },
+  timeWarpSeconds: {
+    read: ({ game }) => game.timeWarp.durationSeconds,
+    write: ({ game }, value) => game.timeWarp.setDuration(value),
+  },
+  timeWarpScale: {
+    read: ({ game }) => game.timeWarp.targetScale,
+    write: ({ game }, value) => game.timeWarp.setScale(value),
+  },
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, renderSetting(spec.key)])),
 };
 
@@ -134,6 +143,8 @@ export const LAB_KNOB_DEFAULTS = Object.freeze({
   pickupBlastRadius: DEFAULT_PICKUP_BLAST_RADIUS,
   baseKillBudget: DEFAULT_BASE_KILL_BUDGET,
   beamSweepThresholdDegrees: DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES,
+  timeWarpSeconds: TIME_WARP_SECONDS,
+  timeWarpScale: TIME_WARP_SCALE,
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, DEFAULT_RENDER_SETTINGS[spec.key]])),
   sameSpeciesCohesion: 1,
 });

@@ -10,6 +10,7 @@ import { SpawnDirector } from '../../src/sim/spawn-director.js';
 import { defaultMatrix, defaultSpecies, normalizeShares } from '../../src/sim/species.js';
 import { DEFAULT_RENDER_SETTINGS } from '../../src/render/renderer.js';
 import { SPECIES_COUNT } from '../../src/sim/layout.js';
+import { TIME_WARP_SCALE, TIME_WARP_SECONDS, TimeWarp } from '../../src/game/time-warp.js';
 
 const CAPACITY = 65536;
 
@@ -56,6 +57,7 @@ function createContext() {
     },
     pickupBlastRadius: 1.5,
     setPickupBlastRadius(value) { this.pickupBlastRadius = value; },
+    timeWarp: new TimeWarp(),
     simulationRate: 'full',
     setSimulationRate(rate) { this.simulationRate = rate; },
     watchFractions: [],
@@ -336,4 +338,17 @@ test('LabMode.canEnter: only from the title (Ready, not paused)', () => {
     game.run = { phase };
     assert.equal(lab.canEnter, false, phase);
   }
+});
+
+// Owner ruling R31: two lab sliders tune the time warp; the shipped values are the defaults.
+test('the time warp duration and scale are lab knobs with the shipped defaults, written to the game', () => {
+  const context = createContext();
+  assert.equal(LAB_KNOB_DEFAULTS.timeWarpSeconds, TIME_WARP_SECONDS);
+  assert.equal(LAB_KNOB_DEFAULTS.timeWarpScale, TIME_WARP_SCALE);
+  assert.equal(readKnob(context, specFor('timeWarpSeconds')), TIME_WARP_SECONDS);
+  assert.equal(readKnob(context, specFor('timeWarpScale')), TIME_WARP_SCALE);
+  writeKnob(context, specFor('timeWarpSeconds'), 10);
+  writeKnob(context, specFor('timeWarpScale'), 0.5);
+  assert.equal(context.game.timeWarp.durationSeconds, 10);
+  assert.equal(context.game.timeWarp.targetScale, 0.5);
 });

@@ -159,3 +159,9 @@ test('the spawn and burst setters accept their ranges and reject the rest', () =
   assert.equal(validatedSpawnDensityBias(1), 1);
   for (const bad of [-0.1, 1.1, Number.NaN]) assert.throws(() => validatedSpawnDensityBias(bad), RangeError);
 });
+
+// Owner ruling R31: the projectiles step on their own (unscaled) time during a time warp.
+test('packSimParams writes projectileDt as f32 at byte offset 236, defaulting to dt', () => {
+  assert.equal(new DataView(packSimParams({ dt: 0.25, projectileDt: 0.5 })).getFloat32(236, true), 0.5);
+  assert.equal(new DataView(packSimParams({ dt: 0.25 })).getFloat32(236, true), 0.25);
+});

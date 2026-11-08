@@ -348,7 +348,7 @@ fn rings(
   for (var ring = 0u; ring < ringTotal; ring = ring + 1u) {
     let slot = ringSlots[ring];
     let projectile = projectiles[slot];
-    let band = max(RING_MINIMUM_BAND, projectile.extra * params.dt);
+    let band = max(RING_MINIMUM_BAND, projectile.extra * params.projectileDt);
     let offset = (slot * RING_CELL_BUDGET) % threadTotal;
     collideRing(projectile.position, max(0.0, projectile.radius - band), projectile.radius, (thread + threadTotal - offset) % threadTotal, threadTotal);
   }

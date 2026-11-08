@@ -46,3 +46,25 @@ test('a tempo change waits for the next bar start', () => {
   times.forEach((time, index) => assert.ok(Math.abs(time - expected[index]) < 1e-9, `${time} vs ${expected[index]}`));
   assert.equal(sequencer.beatsPerMinute, 60);
 });
+
+// Owner ruling R31: a time warp tempo change lands on the next beat (quantumSteps 4).
+test('setTempo with a beat quantum applies at the next beat start; a later bar-quantum call keeps the beat', () => {
+  const { sequencer, scheduled, scheduleStep } = recordingSequencer({ lookaheadSeconds: 0.1 });
+  sequencer.setTempo(120);
+  sequencer.update(0, scheduleStep);
+  let time = 0;
+  while (sequencer.nextStepIndex < 5) {
+    time += 0.025;
+    sequencer.update(time, scheduleStep);
+  }
+  sequencer.setTempo(60, { quantumSteps: 4 });
+  sequencer.setTempo(60);
+  while (sequencer.nextStepIndex < 10) {
+    time += 0.025;
+    sequencer.update(time, scheduleStep);
+  }
+  assert.equal(sequencer.beatsPerMinute, 60);
+  const atBeat = scheduled.find((entry) => entry.stepIndex === 8);
+  const after = scheduled.find((entry) => entry.stepIndex === 9);
+  assert.ok(Math.abs(after.stepTime - atBeat.stepTime - 0.25) < 1e-9, 'steps after the beat use the new tempo');
+});

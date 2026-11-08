@@ -194,3 +194,21 @@ test('setPaused ducks the music and works before the first unlock', () => {
   audio.setPaused(false);
   assert.equal(audio.music.paused, false);
 });
+
+// Owner ruling R31: update carries the game's time scale to the music; a time warp pickup plays
+// its falling cue without the music's rising riser.
+test('update hands the time scale to the music, and the time warp pickup skips the music riser', () => {
+  const notes = [];
+  const { canvas, audio } = install(() => new FakeAudioContext());
+  canvas.dispatch('pointerdown');
+  const scales = [];
+  audio.music.setTimeScale = (scale) => scales.push(scale);
+  audio.update({ fixedStep: 1 / 60, freshStats: null, capacity: 262144, phase: 'playing', multiplier: 1, timeScale: 0.4 });
+  audio.update({ fixedStep: 1 / 60, freshStats: null, capacity: 262144, phase: 'playing', multiplier: 1 });
+  assert.deepEqual(scales, [0.4, 1]);
+  audio.music.onNote = (note) => notes.push(note.voice);
+  const before = audio.engine.context.started.length;
+  audio.cues.pickup('timewarp');
+  assert.ok(audio.engine.context.started.length > before, 'the effect plays');
+  assert.ok(!notes.includes('riser'), 'no rising music riser');
+});

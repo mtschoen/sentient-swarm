@@ -1,6 +1,8 @@
 // Pickups: one instanced quad per pickup (at most MAXIMUM_PICKUPS, drawn as the instance count),
 // read from a small uniform array. A slowly rotating hexagon outline in the weapon's hue with a
-// soft pulse and a glowing core, alpha times the pickup's fade. Common header prepended (hsvToRgb).
+// soft pulse and a glowing core, alpha times the pickup's fade. A hue of 1 or more is the time warp
+// (PICKUP_SHAPE_CLOCK added in pickups.js): a paler ring with a sweeping hand and a brighter core,
+// a clock. Common header prepended (hsvToRgb).
 
 // Uniform layout, total 544 bytes; PickupRenderer in pickups.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
@@ -23,6 +25,13 @@ const ROTATION_RATE: f32 = 1.2;
 const PULSE_RATE: f32 = 3.0;
 const SATURATION: f32 = 0.85;
 const PIXEL_FEATHER: f32 = 0.75;
+// The time warp clock: hand sweep in radians per second, hand length as a share of the ring,
+// a whiter tint and a brighter core than the weapons.
+const CLOCK_HAND_RATE: f32 = 2.5;
+const CLOCK_HAND_SHARE: f32 = 0.8;
+const CLOCK_SATURATION: f32 = 0.45;
+const CLOCK_CORE: f32 = 1.4;
+const WEAPON_CORE: f32 = 0.8;
 
 struct PickupVaryings {
   @builtin(position) position: vec4f,
@@ -55,6 +64,12 @@ fn hexagonDistance(point: vec2f, radius: f32) -> f32 {
   return length(folded) * sign(folded.y);
 }
 
+// Distance from point to the segment from the origin to end.
+fn segmentDistance(point: vec2f, end: vec2f) -> f32 {
+  let along = clamp(dot(point, end) / dot(end, end), 0.0, 1.0);
+  return length(point - end * along);
+}
+
 @fragment
 fn pickupFragment(input: PickupVaryings) -> @location(0) vec4f {
   let feather = max(abs(view.devicePixelToClip.x / view.worldToClipScale.x), 1e-5) * PIXEL_FEATHER;
@@ -63,12 +78,17 @@ fn pickupFragment(input: PickupVaryings) -> @location(0) vec4f {
   let sine = sin(angle);
   let rotated = vec2f(cosine * input.offset.x + sine * input.offset.y, -sine * input.offset.x + cosine * input.offset.y);
   let pulse = 1.0 + 0.1 * sin(view.time * PULSE_RATE + input.phase);
-  let distance = hexagonDistance(rotated, HEXAGON_RADIUS * pulse);
-  let outline = abs(distance);
+  let clock = input.hue >= 1.0;
+  var outline = abs(hexagonDistance(rotated, HEXAGON_RADIUS * pulse));
+  if (clock) {
+    let handAngle = view.time * CLOCK_HAND_RATE + input.phase;
+    let hand = vec2f(sin(handAngle), cos(handAngle)) * HEXAGON_RADIUS * CLOCK_HAND_SHARE;
+    outline = min(abs(length(input.offset) - HEXAGON_RADIUS * pulse), segmentDistance(input.offset, hand));
+  }
   let band = 1.0 - smoothstep(OUTLINE_HALF_WIDTH, OUTLINE_HALF_WIDTH + feather * 2.0, outline);
   let glow = exp(-max(outline - OUTLINE_HALF_WIDTH, 0.0) * 16.0) * 0.6;
-  let core = exp(-length(input.offset) * 14.0) * 0.8;
-  let tint = hsvToRgb(input.hue, SATURATION, 1.0);
+  let core = exp(-length(input.offset) * 14.0) * select(WEAPON_CORE, CLOCK_CORE, clock);
+  let tint = hsvToRgb(fract(input.hue), select(SATURATION, CLOCK_SATURATION, clock), 1.0);
   let color = tint * (band * 1.5 + glow + core) + vec3f(band * 0.4);
   return vec4f(color * input.fade, 0.0);
 }

@@ -1,5 +1,6 @@
-// Pickup director: rotates the offered weapon type and spawns pickups on milestones and the recovery guard.
-import { WEAPON_TYPE_NAMES } from './weaponTypes.js';
+// Pickup director: rotates the offered pickup type (the weapons, then the time warp) and spawns
+// pickups on milestones and the recovery guard.
+import { PICKUP_TYPE_NAMES } from './weaponTypes.js';
 import { ARENA_WIDTH, ARENA_HEIGHT } from '../sim/layout.js';
 
 const PLACEMENT_ATTEMPTS = 16;
@@ -36,7 +37,7 @@ export class PickupDirector {
   }
 
   get offeredType() {
-    return WEAPON_TYPE_NAMES[this.rotationIndex];
+    return PICKUP_TYPE_NAMES[this.rotationIndex];
   }
 
   update(deltaSeconds, { playerX, playerY, onBaseGun, milestone, phasePlaying, densityAt = null }) {
@@ -45,7 +46,7 @@ export class PickupDirector {
     this.rotationTimer += deltaSeconds;
     while (this.rotationTimer >= this.rotationSeconds - TIME_EPSILON) {
       this.rotationTimer -= this.rotationSeconds;
-      this.rotationIndex = (this.rotationIndex + 1) % WEAPON_TYPE_NAMES.length;
+      this.rotationIndex = (this.rotationIndex + 1) % PICKUP_TYPE_NAMES.length;
     }
 
     for (const pickup of this.pickups) {

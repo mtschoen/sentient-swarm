@@ -98,7 +98,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   if ((projectile.flags & PROJECTILE_FLAG_ALIVE) == 0u || projectile.kind == PROJECTILE_KIND_BEAM) {
     return;
   }
-  let dt = params.dt;
+  // Real time, not the swarm's: projectiles keep full speed through a time warp.
+  let dt = params.projectileDt;
   if (projectile.kind == PROJECTILE_KIND_PULSE_RING) {
     if (projectile.lifetime <= 0.0) {
       projectile.flags = projectile.flags & ~PROJECTILE_FLAG_ALIVE;

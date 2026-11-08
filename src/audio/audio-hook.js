@@ -108,9 +108,11 @@ export function installAudio({ windowObject = window, documentObject = document,
   const cues = {
     weaponFire: (kind, tier) => effects.weaponFire(kind, tier),
     kills: (count) => effects.kills(count),
-    pickup: () => {
-      effects.pickup();
-      music.cue('pickup');
+    // A time warp pickup (owner ruling R31) plays its falling cue; the warp itself slows the
+    // music through update's timeScale, so the rising music riser stays out.
+    pickup: (type = null) => {
+      effects.pickup(type);
+      if (type !== 'timewarp') music.cue('pickup');
     },
     expiry: () => {
       effects.expiry();
@@ -127,11 +129,12 @@ export function installAudio({ windowObject = window, documentObject = document,
     },
   };
 
-  // Called every fixed update with the game's phase and multiplier. freshStats is the stats read
-  // back this update, or null. A run starting (Ready or GameOver to Playing) restarts the build;
+  // Called every fixed update with the game's phase, multiplier and time scale (the time warp's
+  // simulation speed, 1 without one). freshStats is the stats read back this update, or null. A run starting (Ready or GameOver to Playing) restarts the build;
   // kills while Playing play the kill splash and a melodic hit.
   let previousPhase = null;
-  const update = ({ fixedStep, freshStats, capacity, phase = 'playing', multiplier = 1 }) => {
+  const update = ({ fixedStep, freshStats, capacity, phase = 'playing', multiplier = 1, timeScale = 1 }) => {
+    music.setTimeScale(timeScale);
     const playing = phase === 'playing';
     if (playing && (previousPhase === 'ready' || previousPhase === 'gameOver')) intensity.reset();
     previousPhase = phase;

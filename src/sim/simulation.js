@@ -302,12 +302,13 @@ export class Simulation {
 
   // spawnPerSpecies: SPECIES_COUNT counts for this frame, usually from SpawnPressure.update.
   // spawnGates (optional, SpawnDirector.spawnGates): this step's gate table; null spawns in the
-  // wall band.
-  step(encoder, deltaSeconds, spawnPerSpecies = new Uint32Array(SPECIES_COUNT), spawnGates = null) {
+  // wall band. projectileDeltaSeconds (optional, deltaSeconds by default) is the projectile step's
+  // time, real time while a time warp scales deltaSeconds (owner ruling R31).
+  step(encoder, deltaSeconds, spawnPerSpecies = new Uint32Array(SPECIES_COUNT), spawnGates = null, projectileDeltaSeconds = deltaSeconds) {
     this.frameSequenceValue += 1;
     this.timeValue += deltaSeconds;
     this.spawnGatesValue = spawnGates;
-    this.writeParams(deltaSeconds, spawnPerSpecies);
+    this.writeParams(deltaSeconds, spawnPerSpecies, projectileDeltaSeconds);
     const killRadius = this.debugKillRadius;
     this.debugKillRadius = 0;
     const killAll = this.killAllRequested;
@@ -356,9 +357,10 @@ export class Simulation {
   }
 
   // Queues the SimParams uniform for the current state (step, and commitCapacity with dt 0).
-  writeParams(deltaSeconds, spawnPerSpecies) {
+  writeParams(deltaSeconds, spawnPerSpecies, projectileDeltaSeconds = deltaSeconds) {
     this.device.queue.writeBuffer(this.paramsBufferValue, 0, packSimParams({
       dt: deltaSeconds,
+      projectileDt: projectileDeltaSeconds,
       time: this.timeValue,
       playerPosition: this.playerPosition,
       neighborRadius: this.neighborRadius,

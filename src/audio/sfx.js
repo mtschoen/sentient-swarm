@@ -96,6 +96,10 @@ const WEAPON_VOICES = Object.freeze({
 
 export const WEAPON_VOICE_KINDS = Object.freeze(Object.keys(WEAPON_VOICES));
 
+// MIDI notes of the pickup cue's rising run, and the time warp's falling one below it.
+const WEAPON_PICKUP_NOTES = Object.freeze([72, 76, 79, 84]);
+const TIME_WARP_PICKUP_NOTES = Object.freeze([67, 62, 58, 55]);
+
 export class EffectsSynth {
   constructor(engine) {
     this.engine = engine;
@@ -142,11 +146,13 @@ export class EffectsSynth {
     return true;
   }
 
-  pickup() {
+  // type 'timewarp' (owner ruling R31) plays the same run falling and an octave and a half lower.
+  pickup(type = null) {
     const target = this.target();
     if (target === null) return;
     const { context, output, time } = target;
-    [72, 76, 79, 84].forEach((note, index) => {
+    const notes = type === 'timewarp' ? TIME_WARP_PICKUP_NOTES : WEAPON_PICKUP_NOTES;
+    notes.forEach((note, index) => {
       playTone(context, output, time + index * 0.05, { type: 'square', fromFrequency: 440 * 2 ** ((note - 69) / 12), level: 0.22, decaySeconds: 0.1 });
     });
   }

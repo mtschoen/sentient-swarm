@@ -316,3 +316,37 @@ test('setPaused leaves the arrangement and the scheduled notes untouched', () =>
   const paused = played.notes.filter((note) => note.step < 32).map((note) => [note.voice, note.step]);
   assert.deepEqual(paused, unpaused);
 });
+
+// Owner ruling R31: during a time warp the tempo falls by the warp's scale and the duck lowpass
+// closes partway, both following the game's ramped scale; scale 1 restores both.
+test('setTimeScale lowers the tempo target by the scale, closes the lowpass partway, and 1 restores both', () => {
+  const { context, music } = startedMusic(0.5);
+  play({ context, music }, 1);
+  const duck = duckNodes(context);
+  const normalTempo = music.tempo;
+  context.currentTime = 2;
+  music.setTimeScale(0.3);
+  assert.ok(Math.abs(music.tempo - normalTempo * 0.3) < 0.01, `tempo target ${music.tempo}`);
+  const closed = lastTarget(duck.filter.frequency);
+  assert.ok(closed.value < context.sampleRate / 2 && closed.value > 1000, `the lowpass closes partway (${closed.value} Hz)`);
+  assert.equal(lastTarget(duck.gain.gain).value, 1, 'the warp does not duck the level');
+  music.setIntensity(0.9);
+  assert.ok(Math.abs(music.tempo - (124 + 9) * 0.3) < 0.01, 'intensity keeps the scale');
+  music.setTimeScale(1);
+  assert.equal(music.tempo, 133);
+  assert.equal(lastTarget(duck.filter.frequency).value, context.sampleRate / 2);
+  music.setPaused(true);
+  assert.ok(lastTarget(duck.filter.frequency).value < 1000, 'a pause still ducks');
+});
+
+test('a time scale tempo change lands on the next beat, not the next bar', () => {
+  const played = startedMusic(0.5);
+  play(played, 1);
+  const { sequencer } = played.music;
+  played.music.setTimeScale(0.5);
+  const stepsBefore = sequencer.nextStepIndex;
+  const beatSeconds = 60 / sequencer.beatsPerMinute;
+  play(played, 1 + beatSeconds + 0.1, { startTime: 1 });
+  assert.equal(sequencer.pendingBeatsPerMinute, null, 'applied');
+  assert.ok(sequencer.nextStepIndex - stepsBefore <= 8, 'within a beat or so of steps');
+});

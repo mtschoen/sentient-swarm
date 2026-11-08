@@ -11,7 +11,9 @@
 // settings are read every frame, so they can be changed live. impulses (optional) are new
 // shockwaves { x, y, strength, time, bloomBoost } stamped with the same clock as time; they join
 // the renderer's ImpulseSet for the warp grid, and a bloomBoost one doubles bloom strength,
-// decaying back over BLOOM_BOOST_SECONDS.
+// decaying back over BLOOM_BOOST_SECONDS. sceneTime (optional, time by default) animates the
+// projectiles, pickups and ship, which keep real time through a time warp; timeWarp (0 to 1, the
+// warp strength) tints the composite cold (owner ruling R31).
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { SHADER_CONSTANTS } from '../sim/layout.js';
 import { BLOOM_DIVISORS, BloomPass } from './bloom.js';
@@ -134,7 +136,7 @@ export class Renderer {
   // ship: the ShipRenderer.encode state, or null to hide the ship }. interpolate (half simulation
   // rate): glyphs are drawn between the last two steps at alpha instead of extrapolated from the
   // newest one.
-  render(encoder, { alpha, time, deltaSeconds = 1 / 60, impulses = [], scene = null, interpolate = false }) {
+  render(encoder, { alpha, time, sceneTime = time, deltaSeconds = 1 / 60, impulses = [], scene = null, interpolate = false, timeWarp = 0 }) {
     for (const impulse of impulses) {
       this.impulses.add(impulse, impulse.time);
       if (impulse.bloomBoost) this.bloomBoostTime = Math.max(this.bloomBoostTime, impulse.time);
@@ -160,10 +162,10 @@ export class Renderer {
     this.trails.draw(scenePass, previousIndex, decay);
     this.gates.encode(scenePass, simulation, time);
     this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time, emissionScale, interpolate });
-    if (scene?.projectiles) this.projectileRenderer.encode(scenePass, time, scene.projectiles);
-    if (scene?.pickups) this.pickupRenderer.encode(scenePass, scene.pickups, time);
+    if (scene?.projectiles) this.projectileRenderer.encode(scenePass, sceneTime, scene.projectiles);
+    if (scene?.pickups) this.pickupRenderer.encode(scenePass, scene.pickups, sceneTime);
     this.particles.encode(scenePass, simulation.particlePool, emissionScale);
-    if (scene?.ship) this.ship.encode(scenePass, { ...scene.ship, time });
+    if (scene?.ship) this.ship.encode(scenePass, { ...scene.ship, time: sceneTime });
     scenePass.end();
     this.bloom.encode(encoder, currentIndex);
     const swapchainTexture = this.gpu.context.getCurrentTexture();
@@ -171,6 +173,7 @@ export class Renderer {
       arenaRect: viewport.arenaRectDevicePixels,
       bloomStrength: settings.bloomStrength * bloomBoostFactor(time - this.bloomBoostTime),
       exposure: settings.exposure,
+      timeWarp,
     });
     this.frameCapture.encode(encoder, swapchainTexture, { arenaRect: { ...viewport.arenaRectDevicePixels } });
     this.currentIndex = currentIndex;

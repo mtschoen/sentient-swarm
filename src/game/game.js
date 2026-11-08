@@ -20,7 +20,9 @@
 //      collection plays the pickup effect and, with pickupBlastRadius above 0, fires the pickup
 //      blast (owner ruling R22): simulation.requestRadialKill at the ship for this step (unscored,
 //      like a bomb) and a PICKUP_BLAST_IMPULSE_STRENGTH shockwave; with the blast off it queues
-//      the smaller PICKUP_IMPULSE_STRENGTH impulse instead.
+//      the smaller PICKUP_IMPULSE_STRENGTH impulse instead. A time warp pickup (owner ruling R31)
+//      leaves the weapons alone: it starts or extends timeWarp, plays pickup('timewarp') and its
+//      shockwave is the larger TIME_WARP_IMPULSE_STRENGTH (the blast still fires).
 //   4. weapons.update; the armed weapon's spawns and then the rail turrets' spawns go to
 //      projectiles.queueSpawn and the beam to setBeam (null on the expiry frame even when the
 //      weapon still returned one). A frame that fires plays one weaponFire cue: the armed weapon's
@@ -32,7 +34,10 @@
 //      (setSeekScale, setSpawnDistanceFraction: both ramp with the count), then the simulation
 //      step is submitted with the director's gate table. At half simulation rate (setSimulationRate('half')) step 6 runs every
 //      other update with the two updates' summed delta, so speeds, spawn pressure per second,
-//      fire rate and charge drain (steps 1 to 5 still run every update) do not change.
+//      fire rate and charge drain (steps 1 to 5 still run every update) do not change. During a
+//      time warp the director, spawn pressure and the simulation get deltaSeconds times
+//      timeWarp.scale while the projectile step gets the unscaled delta; the warp timer counts
+//      real time (every update not paused). Death, a new run and quit to title end the warp.
 //   7. every ready stats frame (readAllStats, oldest first): kills (killsSinceLastRead) score once
 //      per stats frame and only while Playing; awards add lives and bombs; a frame with pulse ring
 //      detonations queues one RING_IMPULSE_STRENGTH impulse at its reported ring position; every
@@ -54,6 +59,7 @@ import { PickupDirector } from './pickups.js';
 import { Awards, ScoreKeeper } from './score.js';
 import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
+import { TimeWarp } from './time-warp.js';
 import { SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../sim/spawner.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '../sim/layout.js';
@@ -64,6 +70,7 @@ const NO_AIM = Object.freeze({ x: 0, y: 0 });
 const RING_IMPULSE_STRENGTH = 0.3;
 const PICKUP_IMPULSE_STRENGTH = 0.15;
 const PICKUP_BLAST_IMPULSE_STRENGTH = 0.5;
+const TIME_WARP_IMPULSE_STRENGTH = 0.6;
 export const DEFAULT_PICKUP_BLAST_RADIUS = 1.5;
 // Matches the HUD's touch restart guard, so the press that ended the run cannot restart it.
 export const RESTART_GUARD_SECONDS = 0.7;
@@ -106,6 +113,11 @@ export class Game {
     this.simulationStepInterval = 1;
     this.updatesSinceSimulationStep = 0;
     this.pendingSimulationSeconds = 0;
+    // Real seconds for the same steps (the projectile step's delta, unscaled by a time warp), and
+    // the real time that animates projectiles, pickups and the ship.
+    this.pendingProjectileSeconds = 0;
+    this.sceneSeconds = 0;
+    this.timeWarp = new TimeWarp();
     this.clock = clock ?? (() => this.simulation.time);
     this.spawnPressure = spawnPressure ?? new SpawnPressure({ capacity });
     this.spawnDirector = spawnDirector ?? new SpawnDirector({ random });
@@ -173,6 +185,7 @@ export class Game {
       charge: this.weapons.charge,
       railTurrets: this.weapons.railTurrets,
       railTier: this.weapons.railTier,
+      timeWarp: this.timeWarp.fraction,
       offeredType: this.pickups.offeredType,
       phase: this.paused ? 'paused' : this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
@@ -270,6 +283,7 @@ export class Game {
     this.player.respawn();
     this.spawnPressure.reset();
     this.spawnDirector.reset();
+    this.timeWarp.end();
     this.projectiles.clear();
     this.simulation.requestKillAll();
     this.run.setRespawnSequence(this.simulation.frameSequence + 1);
@@ -299,6 +313,7 @@ export class Game {
   update(deltaSeconds) {
     this.freshStats = null;
     if (this.paused) return;
+    this.sceneSeconds += deltaSeconds;
     this.input.update();
     const inputState = this.input.state;
     const firingPressed = inputState.firing && !this.firingHeld;
@@ -330,14 +345,18 @@ export class Game {
     if (playing) {
       const collected = this.pickups.collect(x, y);
       if (collected !== null) {
-        this.weapons.collect(collected);
-        this.effects?.pickup?.();
-        if (this.pickupBlastRadiusValue > 0) {
-          this.simulation.requestRadialKill(x, y, this.pickupBlastRadiusValue);
-          this.queueImpulse(x, y, PICKUP_BLAST_IMPULSE_STRENGTH, false);
+        const timeWarp = collected === 'timewarp';
+        if (timeWarp) {
+          this.timeWarp.start();
+          this.effects?.pickup?.('timewarp');
         } else {
-          this.queueImpulse(x, y, PICKUP_IMPULSE_STRENGTH, false);
+          this.weapons.collect(collected);
+          this.effects?.pickup?.();
         }
+        const blast = this.pickupBlastRadiusValue > 0;
+        if (blast) this.simulation.requestRadialKill(x, y, this.pickupBlastRadiusValue);
+        const strength = blast ? PICKUP_BLAST_IMPULSE_STRENGTH : PICKUP_IMPULSE_STRENGTH;
+        this.queueImpulse(x, y, timeWarp ? TIME_WARP_IMPULSE_STRENGTH : strength, false);
       }
     }
 
@@ -360,17 +379,21 @@ export class Game {
       this.simulation.setPlayerState({ x, y, radius: this.player.radius, invulnerable: !playing || this.run.invulnerable || this.debugInvulnerableValue });
     }
 
-    this.pendingSimulationSeconds += deltaSeconds;
+    this.timeWarp.update(deltaSeconds);
+    this.pendingSimulationSeconds += deltaSeconds * this.timeWarp.scale;
+    this.pendingProjectileSeconds += deltaSeconds;
     this.updatesSinceSimulationStep += 1;
     if (this.updatesSinceSimulationStep >= this.simulationStepInterval) {
       const simulationSeconds = this.pendingSimulationSeconds;
+      const projectileSeconds = this.pendingProjectileSeconds;
       this.pendingSimulationSeconds = 0;
+      this.pendingProjectileSeconds = 0;
       this.updatesSinceSimulationStep = 0;
       const spawnPerSpecies = this.spawnCounts(simulationSeconds);
       const pressure = this.activeSpawnPressure;
       this.simulation.setSeekScale(pressure.seekScale);
       this.simulation.setSpawnDistanceFraction(pressure.spawnDistanceFraction);
-      this.stepSimulation(simulationSeconds, spawnPerSpecies, this.stepGates);
+      this.stepSimulation(simulationSeconds, spawnPerSpecies, this.stepGates, projectileSeconds);
     }
     this.simulation.pollDensity();
     const frames = this.simulation.readAllStats();
@@ -435,11 +458,11 @@ export class Game {
     return pressure.update(deltaSeconds, this.latestStats, this.simulation.shares, this.simulation.frameSequence + 1, this.spawnDirector.wave);
   }
 
-  stepSimulation(deltaSeconds, spawnPerSpecies, spawnGates = null) {
+  stepSimulation(deltaSeconds, spawnPerSpecies, spawnGates = null, projectileDeltaSeconds = deltaSeconds) {
     const { device } = this.gpu;
     const encoder = device.createCommandEncoder();
     this.frameTimer?.beginSection(encoder);
-    this.simulation.step(encoder, deltaSeconds, spawnPerSpecies, spawnGates);
+    this.simulation.step(encoder, deltaSeconds, spawnPerSpecies, spawnGates, projectileDeltaSeconds);
     this.frameTimer?.endSection(encoder);
     device.queue.submit([encoder.finish()]);
     this.simulation.afterSubmit();
@@ -466,6 +489,7 @@ export class Game {
       this.simulation.acknowledgeHit(hitSequence);
       if (this.run.playerHit(hitSequence, this.player.position)) {
         this.weapons.dropAll();
+        this.timeWarp.end();
         this.score.recordHit();
         this.effects?.death();
       }
@@ -569,9 +593,11 @@ export class Game {
       alpha: (this.updatesSinceSimulationStep + alpha) / interval,
       interpolate: interval > 1,
       time: this.simulation.time,
+      sceneTime: this.sceneSeconds,
       deltaSeconds,
       impulses: this.takeImpulses(),
       scene: this.scene(),
+      timeWarp: this.timeWarp.strength,
     });
     this.frameTimer?.endSection(encoder);
     this.frameTimer?.endFrame(encoder);

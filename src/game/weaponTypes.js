@@ -23,6 +23,13 @@ export const WEAPON_HUES = Object.freeze({
 
 export const WEAPON_TYPE_NAMES = Object.freeze(['beam', 'scatter', 'rail', 'pulse', 'sidewinders']);
 
+// The pickup rotation (owner ruling R31): the weapons in their order, then the time warp, so a
+// time warp is offered one slot in six. Its pickup is a cold white-violet clock (pickups.wgsl
+// draws the clock when PICKUP_SHAPE_CLOCK is added to the hue slot).
+export const PICKUP_TYPE_NAMES = Object.freeze([...WEAPON_TYPE_NAMES, 'timewarp']);
+export const PICKUP_HUES = Object.freeze({ timewarp: 0.72 });
+export const PICKUP_SHAPE_CLOCK = 1;
+
 // Rail pickups are add-on turrets, not an armed weapon (owner ruling R29): each adds one turret,
 // the turrets sit this far apart around the rear of the aim (and rotate with it), and past the cap
 // (all 360 degrees covered) each further pickup raises the turrets' rail tier instead.

@@ -72,13 +72,17 @@ export function createHud(rootElement, {
   const weapon = make('div', 'hud-weapon', 'BASE');
   // Under the weapon text; hidden by visibility at 0 turrets so its row stays reserved (hud.css).
   const turrets = make('div', 'hud-turrets');
+  // The time warp (owner ruling R31): a WARP bar under the turrets, draining over the warp; hidden
+  // by visibility at 0 so its row stays reserved, like the turrets.
+  const warpFill = make('div', 'hud-warp-fill');
+  const warp = row('hud-warp', [make('div', 'hud-warp-label', 'WARP'), row('hud-warp-track', [warpFill])]);
   const chargeFill = make('div', 'hud-charge-fill');
   const charge = row('hud-charge', [chargeFill]);
   const offer = make('div', 'hud-offer');
   const lives = make('div', 'hud-lives');
   const bombs = make('div', 'hud-bombs');
   const leftPanel = row('hud-panel hud-left', [score, multiplier]);
-  const rightPanel = row('hud-panel hud-right', [weapon, turrets, charge, offer, row('hud-icons', [lives, bombs])]);
+  const rightPanel = row('hud-panel hud-right', [weapon, turrets, warp, charge, offer, row('hud-icons', [lives, bombs])]);
 
   const finalScore = make('div', 'hud-final-score');
   const playAgain = make('button', 'hud-play-again', 'Play again');
@@ -149,6 +153,9 @@ export function createHud(rootElement, {
       setText(weapon, weaponText(state.armed, state.tier));
       setText(turrets, turretText(state.railTurrets, state.railTier));
       turrets.style.visibility = state.railTurrets > 0 ? 'visible' : 'hidden';
+      const warpLeft = Math.min(1, Math.max(0, state.timeWarp ?? 0));
+      warp.style.visibility = warpLeft > 0 ? 'visible' : 'hidden';
+      warpFill.style.width = `${Math.round(warpLeft * 100)}%`;
       setText(lives, LIFE_ICON.repeat(Math.max(0, state.lives ?? 0)));
       setText(bombs, BOMB_ICON.repeat(Math.max(0, state.bombs ?? 0)));
       setText(offer, state.offeredType ? `NEXT ${String(state.offeredType).toUpperCase()}` : '');

@@ -12,6 +12,11 @@
    RAIL x12 III is narrower than the band content the weapon text needs), and a fixed line box so the row
    stays reserved while it is hidden at 0 turrets. */
 .hud-turrets { font-size: 13px; line-height: 16px; min-height: 16px; white-space: nowrap; color: #3385ff; text-shadow: 0 0 6px #3385ff; }
+/* Time warp bar (owner ruling R31) in a cold white-violet, its row reserved while hidden. */
+.hud-warp { display: flex; align-items: center; gap: 6px; width: 100%; max-width: 120px; min-height: 16px; font-size: 13px; line-height: 16px;
+  color: #d8ccff; text-shadow: 0 0 6px #a68cff; }
+.hud-warp-track { flex: 1; height: 6px; border: 1px solid #d8ccff; border-radius: 3px; }
+.hud-warp-fill { height: 100%; background: #d8ccff; box-shadow: 0 0 8px #a68cff; }
 .hud-offer { font-size: 12px; opacity: 0.8; color: #7dff6b; text-shadow: 0 0 6px #7dff6b; }
 .hud-charge { width: 100%; max-width: 120px; height: 6px; border: 1px solid #ffe84a; border-radius: 3px; }
 .hud-charge-fill { height: 100%; background: #ffe84a; box-shadow: 0 0 8px #ffe84a; }
@@ -34,6 +39,7 @@
 .hud-top .hud-turrets { min-width: 4.5em; }
 .hud-top .hud-offer { display: none; }
 .hud-top .hud-charge { width: 40px; align-self: center; }
+.hud-top .hud-warp { width: 70px; align-self: center; }
 .hud-top .hud-icons { flex-direction: row; gap: 6px; font-size: 12px; }
 
 .hud-gameover { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;

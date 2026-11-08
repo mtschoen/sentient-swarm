@@ -199,3 +199,24 @@ test('the turret readout shows the count and the tier above 1, and hides at 0 wh
   hud.update({ ...STATE });
   assert.equal(turrets.style.visibility, 'hidden');
 });
+
+// Owner ruling R31: a WARP bar under the turret readout drains over the warp; its row is reserved.
+test('the warp bar sits under the turret readout, drains with the warp and hides at 0 while keeping its row', () => {
+  const { hud, root } = setup();
+  const warp = find(root, 'hud-warp');
+  assert.ok(warp, 'a warp bar exists');
+  const panel = find(root, 'hud-right');
+  assert.equal(panel.children.indexOf(warp), panel.children.indexOf(find(root, 'hud-turrets')) + 1, 'under the turret readout');
+  assert.equal(find(warp, 'hud-warp-label').textContent, 'WARP');
+  const fill = find(warp, 'hud-warp-fill');
+  hud.update({ ...STATE, timeWarp: 0 });
+  assert.equal(warp.style.visibility, 'hidden');
+  assert.equal(warp.hidden, false, 'the row stays in the layout');
+  hud.update({ ...STATE, timeWarp: 1 });
+  assert.equal(warp.style.visibility, 'visible');
+  assert.equal(fill.style.width, '100%');
+  hud.update({ ...STATE, timeWarp: 0.25 });
+  assert.equal(fill.style.width, '25%');
+  hud.update({ ...STATE });
+  assert.equal(warp.style.visibility, 'hidden');
+});

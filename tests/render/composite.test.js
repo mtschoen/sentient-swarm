@@ -20,3 +20,11 @@ test('packCompositeUniform: arena rect, bloom strength, then the exposure settin
   assert.equal(floats[5], Math.fround(0.6));
   assert.deepEqual(Array.from(floats.slice(6)), [0, 0]);
 });
+
+// Owner ruling R31: the warp tint follows the warp strength (0 to 1) in the first padding slot.
+test('packCompositeUniform writes the time warp strength after the exposure, clamped to [0, 1], 0 by default', () => {
+  assert.equal(packCompositeUniform({ arenaRect, bloomStrength: 1 })[6], 0);
+  assert.equal(packCompositeUniform({ arenaRect, bloomStrength: 1, timeWarp: 0.5 })[6], 0.5);
+  assert.equal(packCompositeUniform({ arenaRect, bloomStrength: 1, timeWarp: 3 })[6], 1);
+  assert.equal(packCompositeUniform({ arenaRect, bloomStrength: 1, timeWarp: 0.5 })[7], 0);
+});

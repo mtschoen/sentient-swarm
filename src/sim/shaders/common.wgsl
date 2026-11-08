@@ -78,7 +78,7 @@ struct Agent {
 // 224 wallStiffness      f32 (velocity change per second per world unit of penetration)
 // 228 comfortRadius      f32 (straight seek fades to zero inside it; 0 turns the fade off)
 // 232 coarseFieldPressure u32 (1: steer applies the coarse-field pressure term, 0: it does not)
-// 236 paramsPadding      u32
+// 236 projectileDt       f32 (the projectile step's dt: unscaled real time during a time warp)
 struct SimParams {
   dt: f32,
   time: f32,
@@ -113,7 +113,7 @@ struct SimParams {
   wallStiffness: f32,
   comfortRadius: f32,
   coarseFieldPressure: u32,
-  paramsPadding: u32,
+  projectileDt: f32,
 }
 
 // Bit 0 alive, bits 8..15 spawn-in frames remaining.

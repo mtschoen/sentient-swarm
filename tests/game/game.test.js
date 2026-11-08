@@ -55,9 +55,13 @@ function createFakeSimulation() {
       this.radialKills.push({ x, y, radius });
       this.events.push('radialKill');
     },
-    step(encoder, deltaSeconds, spawnPerSpecies) {
+    stepSeconds: [],
+    projectileStepSeconds: [],
+    step(encoder, deltaSeconds, spawnPerSpecies, spawnGates, projectileDeltaSeconds = deltaSeconds) {
       this.frameSequence += 1;
       this.time += deltaSeconds;
+      this.stepSeconds.push(deltaSeconds);
+      this.projectileStepSeconds.push(projectileDeltaSeconds);
       this.spawnBudgets.push(Array.from(spawnPerSpecies));
       this.events.push('step');
     },
@@ -1065,4 +1069,120 @@ test('quit to title clears the turrets', async () => {
   game.debugArm('rail', 5);
   game.quitToTitle();
   assert.deepEqual([game.state.railTurrets, game.state.railTier], [0, 1]);
+});
+
+// Owner ruling R31: the time warp pickup slows the swarm and nothing else.
+function collectTimeWarp(game) {
+  const { x, y } = game.player.position;
+  game.pickups.pickups.push({ x, y, type: 'timewarp', age: 0, fade: 1 });
+  game.update(STEP);
+}
+
+const sum = (values) => values.reduce((total, value) => total + value, 0);
+
+test('collecting a time warp keeps the armed weapon, its tier, its charge and the turrets, and starts the warp', async () => {
+  const played = [];
+  const gpu = createFakeGpu();
+  const simulation = createFakeSimulation();
+  const effects = { pickup: (type) => played.push(type) };
+  const game = await Game.create({
+    gpu, simulation, projectiles: createFakeProjectiles(), renderer: createFakeRenderer(), input: createFakeInput(), capacity: CAPACITY, random: () => 0.5, effects,
+  });
+  game.start();
+  game.weapons.collect('scatter');
+  game.weapons.collect('rail');
+  game.update(STEP);
+  const before = game.state;
+  collectTimeWarp(game);
+  const after = game.state;
+  assert.deepEqual(
+    [after.armed, after.tier, after.railTurrets, after.railTier],
+    [before.armed, before.tier, before.railTurrets, before.railTier],
+  );
+  assert.ok(Math.abs(after.charge - before.charge) < 0.01, 'the charge only drains as usual');
+  // The collection update already counts its own step of the warp.
+  assert.ok(Math.abs(after.timeWarp - (1 - STEP / 6)) < 1e-9, `warp left ${after.timeWarp}`);
+  assert.deepEqual(played, ['timewarp']);
+  game.render(0);
+  const impulses = game.renderer.frames.flatMap((frame) => frame.impulses);
+  assert.equal(impulses.length, 1, 'one shockwave at collection');
+});
+
+test('during a warp the simulation gets 0.3 of the time while the projectiles get all of it', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  collectTimeWarp(game);
+  runFor(game, 1);
+  simulation.stepSeconds.length = 0;
+  simulation.projectileStepSeconds.length = 0;
+  runFor(game, 1);
+  assert.ok(Math.abs(sum(simulation.stepSeconds) - 0.3) <= STEP, `simulation seconds ${sum(simulation.stepSeconds)}`);
+  assert.ok(Math.abs(sum(simulation.projectileStepSeconds) - 1) <= 1e-9, `projectile seconds ${sum(simulation.projectileStepSeconds)}`);
+});
+
+test('the warp also scales at half simulation rate', async () => {
+  const { game, simulation } = await createGame();
+  game.setSimulationRate('half');
+  game.start();
+  collectTimeWarp(game);
+  runFor(game, 1);
+  simulation.stepSeconds.length = 0;
+  simulation.projectileStepSeconds.length = 0;
+  runFor(game, 1);
+  assert.ok(Math.abs(sum(simulation.stepSeconds) - 0.3) <= 2 * STEP, `simulation seconds ${sum(simulation.stepSeconds)}`);
+  assert.ok(Math.abs(sum(simulation.projectileStepSeconds) - 1) <= 1e-9);
+});
+
+test('the warp lasts 6 s of real time, then the simulation runs at full speed again', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  collectTimeWarp(game);
+  runFor(game, 5.9);
+  assert.ok(game.state.timeWarp > 0);
+  runFor(game, 0.2);
+  assert.equal(game.state.timeWarp, 0);
+  simulation.stepSeconds.length = 0;
+  runFor(game, 1);
+  assert.ok(Math.abs(sum(simulation.stepSeconds) - 1) <= 1e-9);
+});
+
+test('death ends the warp at once', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  runFor(game, 3);
+  collectTimeWarp(game);
+  hitNow(game, simulation);
+  assert.equal(game.state.lives, 2);
+  assert.equal(game.state.timeWarp, 0);
+  assert.equal(game.timeWarp.scale, 1);
+});
+
+test('quit to title and a new run start with no warp; pause keeps the remaining warp time', async () => {
+  const { game } = await createGame();
+  game.start();
+  collectTimeWarp(game);
+  runFor(game, 1);
+  const remaining = game.state.timeWarp;
+  assert.ok(game.pause());
+  runFor(game, 3);
+  game.resume();
+  assert.equal(game.state.timeWarp, remaining);
+  game.quitToTitle();
+  assert.equal(game.state.timeWarp, 0);
+  game.start();
+  collectTimeWarp(game);
+  game.restart();
+  assert.equal(game.state.timeWarp, 0);
+});
+
+test('the render hands the warp strength to the renderer, 0 without a warp', async () => {
+  const { game, renderer } = await createGame();
+  game.start();
+  game.update(STEP);
+  game.render(0);
+  assert.equal(renderer.frames.at(-1).timeWarp, 0);
+  collectTimeWarp(game);
+  runFor(game, 1);
+  game.render(0);
+  assert.equal(renderer.frames.at(-1).timeWarp, 1);
 });

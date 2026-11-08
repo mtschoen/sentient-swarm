@@ -86,6 +86,8 @@ export function validatedComfortRadius(radius) {
 }
 
 const FLOAT_FIELDS = { dt: 0, time: 4, neighborRadius: 16, cellSize: 28, debugKillRadius: 80, playerRadius: 92 };
+// The projectile step's dt (owner ruling R31: full speed while a time warp slows the swarm); dt when omitted.
+const PROJECTILE_DT_OFFSET = 236;
 const UNSIGNED_FIELDS = {
   gridColumns: 20, gridRows: 24, capacity: 32, frameSequence: 84,
   playerInvulnerable: 96, acknowledgedHitSequence: 100, killAllRequested: 104,
@@ -141,6 +143,7 @@ export function packSimParams(values) {
   view.setFloat32(WALL_STIFFNESS_OFFSET, values.wallStiffness ?? DEFAULT_WALL_STIFFNESS, true);
   view.setFloat32(COMFORT_RADIUS_OFFSET, values.comfortRadius ?? DEFAULT_COMFORT_RADIUS, true);
   view.setUint32(COARSE_FIELD_PRESSURE_OFFSET, values.coarseFieldPressure ?? 1, true);
+  view.setFloat32(PROJECTILE_DT_OFFSET, values.projectileDt ?? values.dt ?? 0, true);
   // spawnGates: { gates: [{ x, y, radius, emit, species }], speciesBias } or none (wall band spawns).
   const gates = values.spawnGates?.gates ?? [];
   if (gates.length > SIM_PARAMS_GATES) throw new Error('spawnGates has ' + gates.length + ' gates; at most ' + SIM_PARAMS_GATES);

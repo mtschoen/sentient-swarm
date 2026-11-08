@@ -37,3 +37,14 @@ test('packPickupView packs x, y, hue and fade per pickup and caps at 32', () => 
   const many = Array.from({ length: 40 }, () => ({ x: 1, y: 1, type: 'rail', fade: 1 }));
   assert.equal(packPickupView({ viewport, time: 0, pickups: many }).count, MAXIMUM_PICKUPS);
 });
+
+// Owner ruling R31: the time warp pickup has its own hue, and the hue slot carries the clock shape
+// flag (1 added) so the shader draws a clock in place of the hexagon.
+test('a time warp pickup packs its cold hue plus the clock shape flag', async () => {
+  const { PICKUP_HUES, PICKUP_SHAPE_CLOCK } = await import('../../src/game/weaponTypes.js');
+  assert.ok(PICKUP_HUES.timewarp > 0 && PICKUP_HUES.timewarp < 1);
+  assert.equal(PICKUP_SHAPE_CLOCK, 1);
+  const { floats } = packPickupView({ viewport, time: 0, pickups: [{ x: 1, y: 2, type: 'timewarp', fade: 1 }, { x: 1, y: 2, type: 'rail', fade: 1 }] });
+  assert.equal(floats[10], Math.fround(PICKUP_HUES.timewarp + PICKUP_SHAPE_CLOCK));
+  assert.equal(floats[14], Math.fround(WEAPON_HUES.rail));
+});

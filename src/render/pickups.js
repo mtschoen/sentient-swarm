@@ -1,7 +1,7 @@
-// Pickup pass (pickups.wgsl): up to MAXIMUM_PICKUPS rotating hexagons, uploaded each frame into a
-// small uniform array, one instance each.
+// Pickup pass (pickups.wgsl): up to MAXIMUM_PICKUPS rotating hexagons (a clock for the time warp),
+// uploaded each frame into a small uniform array, one instance each.
 import { createUniformBuffer } from '../gpu/buffers.js';
-import { WEAPON_HUES } from '../game/weaponTypes.js';
+import { PICKUP_HUES, PICKUP_SHAPE_CLOCK, WEAPON_HUES } from '../game/weaponTypes.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
 import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
 
@@ -18,7 +18,8 @@ export function packPickupView({ viewport, time, pickups }) {
   const count = Math.min(pickups.length, MAXIMUM_PICKUPS);
   for (let index = 0; index < count; index += 1) {
     const { x, y, type, fade } = pickups[index];
-    floats.set([x, y, WEAPON_HUES[type] ?? WEAPON_HUES.base, fade], WORLD_VIEW_FLOATS + index * FLOATS_PER_PICKUP);
+    const hue = type === 'timewarp' ? PICKUP_HUES.timewarp + PICKUP_SHAPE_CLOCK : WEAPON_HUES[type] ?? WEAPON_HUES.base;
+    floats.set([x, y, hue, fade], WORLD_VIEW_FLOATS + index * FLOATS_PER_PICKUP);
   }
   return { floats, count };
 }

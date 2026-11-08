@@ -7,7 +7,8 @@
 //
 // The first step sits one lookahead after the first update, so it is never already late. Tempo
 // changes take effect at the next bar start (the first one applies at once), so a tempo that moves
-// every frame does not smear the groove. Step times come from an anchor (index, time) that moves
+// every frame does not smear the groove; setTempo(bpm, { quantumSteps: 4 }) lands on the next beat
+// instead (the time warp's slowdown), and a pending change keeps the shortest quantum asked for. Step times come from an anchor (index, time) that moves
 // only when the tempo changes, so they sit exactly on the grid without accumulating rounding error.
 export class StepSequencer {
   constructor({ stepsPerBar = 16, lookaheadSeconds = 0.1, scheduleIntervalSeconds = 0.025 } = {}) {
@@ -16,6 +17,7 @@ export class StepSequencer {
     this.scheduleIntervalSeconds = scheduleIntervalSeconds;
     this.beatsPerMinute = 128;
     this.pendingBeatsPerMinute = null;
+    this.pendingQuantumSteps = stepsPerBar;
     this.nextStepIndex = 0;
     this.anchorIndex = 0;
     this.anchorTime = null;
@@ -36,12 +38,16 @@ export class StepSequencer {
     return this.anchorTime + (this.nextStepIndex - this.anchorIndex) * this.stepDuration;
   }
 
-  setTempo(beatsPerMinute) {
+  setTempo(beatsPerMinute, { quantumSteps = this.stepsPerBar } = {}) {
     if (this.anchorTime === null) {
       this.beatsPerMinute = beatsPerMinute;
       this.pendingBeatsPerMinute = null;
+    } else if (beatsPerMinute === this.beatsPerMinute) {
+      this.pendingBeatsPerMinute = null;
     } else {
-      this.pendingBeatsPerMinute = beatsPerMinute === this.beatsPerMinute ? null : beatsPerMinute;
+      if (this.pendingBeatsPerMinute === null) this.pendingQuantumSteps = quantumSteps;
+      else this.pendingQuantumSteps = Math.min(this.pendingQuantumSteps, quantumSteps);
+      this.pendingBeatsPerMinute = beatsPerMinute;
     }
   }
 
@@ -55,11 +61,12 @@ export class StepSequencer {
   }
 
   applyPendingTempo() {
-    if (this.pendingBeatsPerMinute === null || this.nextStepIndex % this.stepsPerBar !== 0) return;
+    if (this.pendingBeatsPerMinute === null || this.nextStepIndex % this.pendingQuantumSteps !== 0) return;
     this.anchorTime = this.nextStepTime;
     this.anchorIndex = this.nextStepIndex;
     this.beatsPerMinute = this.pendingBeatsPerMinute;
     this.pendingBeatsPerMinute = null;
+    this.pendingQuantumSteps = this.stepsPerBar;
   }
 
   update(currentTime, scheduleStep) {

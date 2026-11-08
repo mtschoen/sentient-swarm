@@ -30,7 +30,7 @@ You are a one-hit ship in an arena full of flocking enemies. One touch kills you
 
 ### Weapons and pickups
 
-You start on the base gun: three energy balls in a spread with unlimited ammo. They are big and slow enough to read, live until they cross the arena, and pierce everything they hit, so each volley carves a tunnel the swarm cannot close at once. A pickup arms one of four upgrades with three tiers each, or adds a rail turret:
+You start on the base gun: three energy balls in a spread with unlimited ammo. They are big and slow enough to read, live until they cross the arena, and pierce everything they hit, so each volley carves a tunnel the swarm cannot close at once. A pickup arms one of four upgrades with three tiers each, adds a rail turret, or starts a time warp:
 
 | Weapon | What it does | Tier 1, 2, 3 |
 | --- | --- | --- |
@@ -43,6 +43,7 @@ You start on the base gun: three energy balls in a spread with unlimited ammo. T
 - Every shot pierces: it keeps going through the agents it kills.
 - The arena offers one pickup type at a time, rotating every 20 seconds (the HUD shows the next type). Pickups appear when your multiplier steps up and at least every 10 seconds while you are on the base gun. An untouched pickup fades out after 10 seconds. Every pickup also fires a clearing blast: agents within 1.5 world units of the ship die, unscored like a bomb, with a shockwave.
 - Picking up the same armed type adds a tier (up to 3) and refills the charge. A different type drops you one tier (never below 1) and refills the charge.
+- A time warp pickup (a pale violet clock, one rotation slot in six) arms nothing either: for 6 seconds the swarm moves, spawns and dies at 0.3 speed while your ship, your fire and your shots keep full speed, with a cold tint, slower music and a WARP bar on the HUD; another time warp extends it and a death ends it.
 - A rail pickup arms nothing. It adds a rear-firing turret that fires rail shots whenever you fire, on top of whatever weapon is armed (the beam included). Turrets fan out 30 degrees apart centred on the rear of your aim and rotate with it: one points straight back, then two, three and so on, up to 12 turrets all around. Further rail pickups after 12 raise the turrets' rail tier up to 3. Turrets have no charge; a hit drops them together with the armed weapon. The HUD shows the turret count and tier.
 - The charge ring around the ship is the charge left of the armed weapon: the bright arc is the fraction remaining, drawn clockwise from the top. It drains only while you fire, and when it empties you return to the base gun (turrets stay). Dying drops the weapon and the turrets.
 
@@ -94,7 +95,7 @@ Choose Lab on the title menu (or press backquote). The lab panel holds:
 - Watch (the default) and Play. Watch keeps the swarm running with no weapons and no contact; the swarm chases your pointer (or the move stick) and the alive count is held at a chosen fraction of capacity. Play runs the full game with the current mix.
 - Mixes: five bundled mixes (`default`, `allChasers`, `mixedFive`, `predatorsVsPrey`, `latticeStorm`) and mixes you save by name in the browser. A mix names the species shares, the five species rule rows, the 5 by 5 interaction matrix, the neighbor radius, the simulation rate and optional knob values.
 - Share writes the current mix into the address as `#mix=...` (no reload). Opening a link with `#mix=` applies it and opens the lab; a malformed link opens the lab with the shipped defaults and a status line.
-- Knob groups: Watch, Steering and walls, Spawn ramp, Spawn gates, Kills and particles, Weapons (the pickup blast radius, the base gun kill budget and the beam sweep budget), plus renderer sliders, a capacity select and a live readout of frames per second and alive counts.
+- Knob groups: Watch, Steering and walls, Spawn ramp, Spawn gates, Kills and particles, Weapons (the pickup blast radius, the base gun kill budget, the beam sweep budget and the time warp's seconds and speed), plus renderer sliders, a capacity select and a live readout of frames per second and alive counts.
 - The right mouse button holds the 4x inspect zoom here only.
 - Leaving to the title restores the settings the game had when you entered, so the next Play is the shipped game.
 

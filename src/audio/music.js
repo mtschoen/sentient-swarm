@@ -31,6 +31,14 @@ const PRESENCE_DECIBELS = 3;
 const DUCK_CLOSED_HERTZ = 500;
 const DUCK_CLOSED_GAIN = 0.4;
 const DUCK_TIME_CONSTANT_SECONDS = 0.05;
+// Time warp (owner ruling R31): the tempo falls by the warp's scale (the change lands on the next
+// beat) and the duck lowpass closes partway, log-interpolated from open toward WARP_FLOOR_HERTZ by
+// 1 - scale (about 2.2 kHz at scale 0.3). The game ramps the scale itself; the filter glides with a
+// third of the warp ramp as its time constant. Scale changes below WARP_SCALE_EPSILON are skipped.
+const WARP_FLOOR_HERTZ = 800;
+const WARP_TIME_CONSTANT_SECONDS = 0.35 / 3;
+const WARP_SCALE_EPSILON = 0.002;
+const BEAT_STEPS = 4;
 
 export function levelsForIntensity(intensity) {
   return {
@@ -75,6 +83,7 @@ export class ProceduralMusic {
     this.hitCount = 0;
     this.delayTempo = null;
     this.paused = false;
+    this.timeScale = 1;
     this.intensity = -1;
     this.setIntensity(0.2);
     this.scheduleStep = this.scheduleStep.bind(this);
@@ -115,15 +124,32 @@ export class ProceduralMusic {
     this.applyDuck();
   }
 
-  applyDuck() {
+  // The time warp's simulation speed (0 to 1, 1 is none), called every update with the ramped value.
+  setTimeScale(scale) {
+    const clamped = Math.min(1, Math.max(0.05, scale));
+    // Always land exactly on 1, so a warp that ends restores the tempo and the open filter.
+    if (clamped === this.timeScale || (clamped !== 1 && Math.abs(clamped - this.timeScale) < WARP_SCALE_EPSILON)) return;
+    this.timeScale = clamped;
+    this.applyTempo(BEAT_STEPS);
+    this.applyDuck(WARP_TIME_CONSTANT_SECONDS);
+  }
+
+  applyTempo(quantumSteps = STEPS_PER_BAR) {
+    const tempo = Math.round((124 + 10 * this.intensity) * this.timeScale * 100) / 100;
+    this.sequencer.setTempo(tempo, { quantumSteps });
+  }
+
+  applyDuck(timeConstant = DUCK_TIME_CONSTANT_SECONDS) {
     const context = this.engine.context;
     if (context === null || this.nodes === null) return;
     const { duckFilter, duckGain } = this.nodes;
-    const hertz = this.paused ? DUCK_CLOSED_HERTZ : context.sampleRate / 2;
+    const open = context.sampleRate / 2;
+    const warpHertz = open * (WARP_FLOOR_HERTZ / open) ** (1 - this.timeScale);
+    const hertz = this.paused ? Math.min(DUCK_CLOSED_HERTZ, warpHertz) : warpHertz;
     const gain = this.paused ? DUCK_CLOSED_GAIN : 1;
     for (const [parameter, value] of [[duckFilter.frequency, hertz], [duckGain.gain, gain]]) {
       parameter.cancelScheduledValues(context.currentTime);
-      parameter.setTargetAtTime(value, context.currentTime, DUCK_TIME_CONSTANT_SECONDS);
+      parameter.setTargetAtTime(value, context.currentTime, timeConstant);
     }
   }
 
@@ -133,7 +159,7 @@ export class ProceduralMusic {
     if (Math.abs(intensity - this.intensity) < 0.002) return;
     this.intensity = intensity;
     this.levels = levelsForIntensity(intensity);
-    this.sequencer.setTempo(Math.round((124 + 10 * intensity) * 100) / 100);
+    this.applyTempo();
     this.applyParameters();
   }
 

@@ -171,7 +171,7 @@ async function boot() {
   const update = (fixedStep) => {
     game.update(fixedStep);
     if (game.latestStats) window.__murmuration.stats = { ...game.latestStats, ...game.state };
-    if (!game.paused) audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity, phase: game.run.phase, multiplier: game.score.multiplier });
+    if (!game.paused) audio.update({ fixedStep, freshStats: game.freshStats, capacity: game.simulation.capacity, phase: game.run.phase, multiplier: game.score.multiplier, timeScale: game.timeWarp.scale });
   };
 
   const touchOverlay = createTouchOverlay(document.getElementById('touch-overlay'), { touch: input.touch, canvas });

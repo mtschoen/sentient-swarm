@@ -170,3 +170,19 @@ test('without densityAt the first valid candidate wins, as before', () => {
   withBias.spawn(8, 4.5, () => 0);
   assert.deepEqual(withBias.pickups[0], plain.pickups[0]);
 });
+
+// Owner ruling R31: the time warp joins the rotation after the weapons, one slot in six.
+test('the rotation offers the weapons in their order, then timewarp, one slot in six', async () => {
+  const { PICKUP_TYPE_NAMES, WEAPON_TYPE_NAMES } = await import('../../src/game/weaponTypes.js');
+  assert.deepEqual(PICKUP_TYPE_NAMES, [...WEAPON_TYPE_NAMES, 'timewarp']);
+  const director = makeDirector();
+  const offered = [director.offeredType];
+  for (let slot = 1; slot < 12; slot += 1) {
+    run(director, 20, { onBaseGun: false });
+    offered.push(director.offeredType);
+  }
+  assert.deepEqual(offered, [...PICKUP_TYPE_NAMES, ...PICKUP_TYPE_NAMES]);
+  assert.equal(offered.filter((type) => type === 'timewarp').length, 2);
+  director.update(STEP, { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: true, phasePlaying: true });
+  assert.equal(director.pickups.at(-1).type, 'timewarp', 'a time warp slot spawns a time warp pickup');
+});

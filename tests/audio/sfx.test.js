@@ -90,3 +90,17 @@ test('weapon voices stay under 20 per second across kinds', () => {
   }
   assert.ok(voices <= 20, `voices ${voices}`);
 });
+
+// Owner ruling R31: the time warp pickup plays the pickup cue as a lower, falling run.
+test('pickup("timewarp") plays a falling run below the weapon pickup', () => {
+  const firstFrequencies = (type) => {
+    const { context, effects } = unlockedEffects();
+    effects.pickup(type);
+    return context.started.filter((node) => node.kind === 'oscillator').map((node) => node.frequency.events[0].value);
+  };
+  const weapon = firstFrequencies();
+  const warp = firstFrequencies('timewarp');
+  assert.equal(warp.length, weapon.length);
+  assert.ok(warp.every((frequency, index) => index === 0 || frequency < warp[index - 1]), 'falling');
+  assert.ok(Math.max(...warp) < Math.min(...weapon), 'lower');
+});
