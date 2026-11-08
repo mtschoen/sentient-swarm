@@ -24,7 +24,7 @@ test('every server.stop() call site in the browser scripts is awaited', () => {
     lines.forEach((line, index) => {
       if (!line.includes('server.stop()')) return;
       callSites += 1;
-      if (!line.includes('await ') || line.indexOf('await ') > line.indexOf('server.stop()')) unawaited.push(`${name}:${index + 1}`);
+      if (!/\bawait\s+(?:\w+\.)*server\.stop\(\)/.test(line)) unawaited.push(`${name}:${index + 1}`);
     });
   }
   assert.ok(callSites > 0);

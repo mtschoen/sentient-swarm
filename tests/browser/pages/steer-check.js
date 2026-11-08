@@ -529,7 +529,8 @@ async function checkNoClump(gpu, common, count, label, peakReference = count / (
   };
 }
 
-// The shipped rows stay unscaled here (rows: defaultSpecies() in reference units, densityScale 1, no capacity scaling) as the saturated worst case at CLUMP_CAPACITY.
+// The shipped rows stay unscaled here (rows: defaultSpecies() in reference units, densityScale 1,
+// no capacity scaling) as the saturated worst case at CLUMP_CAPACITY.
 const checkNoClumpFull = (gpu, common) => checkNoClump(gpu, common, CLUMP_CAPACITY, 'full', undefined, { rows: defaultSpecies() });
 const checkNoClumpSparse = (gpu, common) => checkNoClump(gpu, common, SPARSE_CLUMP_COUNT, 'sparse');
 // At 5 percent population the average (about 5.7 per cell) is below every targetDensity, so a spread
