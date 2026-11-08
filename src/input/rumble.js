@@ -43,7 +43,12 @@ export function createRumble({ navigatorObject = typeof navigator === 'undefined
   const fire = (name) => () => {
     if (!isEnabled()) return;
     const actuator = findActuator(navigatorObject);
-    if (actuator) play(actuator, RUMBLE_PATTERNS[name]);
+    if (!actuator) return;
+    try {
+      play(actuator, RUMBLE_PATTERNS[name]);
+    } catch {
+      // playEffect may throw synchronously (a pad unplugged mid-call); rumble is best effort.
+    }
   };
   return { bomb: fire('bomb'), death: fire('death'), pickup: fire('pickup'), extraLife: fire('extraLife') };
 }

@@ -27,9 +27,8 @@ import {
 import { createMenu, createPauseMenu } from './ui/menu.js';
 import { createRotateOverlay } from './ui/rotateOverlay.js';
 import { createMenuInput } from './input/menuInput.js';
-import { routeMenuActions } from './ui/menuRouting.js';
+import { createSettingsOpener, routeMenuActions, routeSettingsKey } from './ui/menuRouting.js';
 
-const SETTINGS_KEY_CODE = 'KeyO';
 const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
 
 window.__murmuration = { ready: false, frame: 0, stats: null };
@@ -164,14 +163,12 @@ async function boot() {
   hud.settingsButton.addEventListener('click', () => openSettings());
   // O toggles the panel. Escape (and the gamepad's back and Options) close it through the menu
   // action path in render (menuRouting.js), so that press never also pauses or resumes the run.
-  window.addEventListener('keydown', (event) => {
-    const tag = event.target?.tagName;
-    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
-    if (event.code === SETTINGS_KEY_CODE && !event.repeat) {
-      if (settingsPanel.isOpen) settingsPanel.close();
-      else openSettings();
-    }
-  });
+  window.addEventListener('keydown', (event) => routeSettingsKey(event, {
+    settingsOpen: () => settingsPanel.isOpen,
+    closeSettings: () => settingsPanel.close(),
+    openSettings: () => openSettings(),
+    dispatch: () => {},
+  }));
   window.addEventListener('gamepadconnected', (event) => {
     hud.showToast(`Gamepad connected: ${String(event.gamepad?.id ?? 'controller').slice(0, GAMEPAD_TOAST_MAXIMUM_ID_LENGTH)}`);
   });
@@ -210,10 +207,11 @@ async function boot() {
   // keys never act behind the panel and closing it returns to the pause menu; from the title or the
   // pause menu it just opens over them (pauseForMenu does nothing in Ready, GameOver or when paused).
   const settingsOpen = () => settingsPanel.isOpen;
-  function openSettings() {
-    pauseForMenu();
-    settingsPanel.open();
-  }
+  const openSettings = createSettingsOpener({
+    isRotateShowing: () => rotateShowing,
+    pauseForMenu: () => pauseForMenu(),
+    openPanel: () => settingsPanel.open(),
+  });
   // The lab mode (task C6b) is created with the menus below; the title menu's Lab button enters it.
   const openLab = () => lab.enter();
   const startRun = () => {

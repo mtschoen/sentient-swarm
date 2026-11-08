@@ -92,3 +92,17 @@ test('the gamepad dead zone follows the setting', () => {
   setGamepadDeadZone(DEAD_ZONE);
   assert.equal(readGamepad(pad(0.4)).move.x, 0.4);
 });
+
+test('rumble survives a synchronous playEffect throw', () => {
+  const actuator = {
+    effects: ['dual-rumble'],
+    playEffect() { throw new Error('actuator gone'); },
+  };
+  const rumble = createRumble({ navigatorObject: navigatorWith({ vibrationActuator: actuator }) });
+  assert.doesNotThrow(() => { rumble.bomb(); rumble.death(); rumble.pickup(); rumble.extraLife(); });
+  const triggerOnly = {
+    effects: ['trigger-rumble', 'dual-rumble'],
+    playEffect() { throw new Error('actuator gone'); },
+  };
+  assert.doesNotThrow(() => createRumble({ navigatorObject: navigatorWith({ vibrationActuator: triggerOnly }) }).bomb());
+});

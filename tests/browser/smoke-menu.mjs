@@ -182,6 +182,18 @@ async function checkDesktop(url) {
     await page.keyboard.press('Escape');
     await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
     expect(!(await settingsShown(page)) && (await readStats(page)).phase === 'paused', 'Escape should close Settings and stay paused');
+    // An arrow step on a focused settings slider keeps its focus, and Escape still closes the panel.
+    await page.keyboard.press('KeyO');
+    await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
+    expect(await settingsOnTop(page), 'O from the pause menu should open Settings on top');
+    await page.focus('.settings-panel input[type="range"]');
+    await page.keyboard.press('ArrowRight');
+    await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
+    expect(await page.evaluate(() => document.activeElement?.matches('.settings-panel input[type="range"]')), 'an arrow step should keep the slider focused');
+    await page.keyboard.press('Escape');
+    await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
+    expect(!(await settingsShown(page)) && (await readStats(page)).phase === 'paused', 'Escape from a focused slider should close Settings and stay paused');
+    expect(await isShown(page, '.menu-pause'), 'closing Settings from a slider should return to the pause menu');
     await page.keyboard.press('Escape');
     await waitForPhase(page, 'playing');
 

@@ -364,3 +364,17 @@ test('setTimeScale(0.3) targets half tempo, not 0.3, and a scale above the floor
   music.setTimeScale(0.8);
   assert.ok(Math.abs(music.tempo - normalTempo * 0.8) < 0.01, `0.8 passes through, got ${music.tempo}`);
 });
+
+test('death dropout clears a pending melodic hit', () => {
+  const played = startedMusic(0.9);
+  played.music.hit(5);
+  played.music.cue('death');
+  play(played, 3);
+  assert.equal(byVoice(played.notes, 'hit').length, 0);
+  // A kill during the dropout does not queue a stab that lands after it either.
+  const during = startedMusic(0.9);
+  during.music.cue('death');
+  during.music.hit(3);
+  play(during, 3);
+  assert.equal(byVoice(during.notes, 'hit').length, 0);
+});

@@ -125,7 +125,7 @@ test('touch tap restarts only after the guard delay and mouse taps never do', ()
   assert.equal(restarts, 1);
 });
 
-test('a touch tap on Play again (pointerdown, then click) restarts once', () => {
+test('touch Play again restarts once for pointerdown then click', () => {
   const { hud, root, clock } = setup();
   let restarts = 0;
   hud.showGameOver(1, () => { restarts += 1; });

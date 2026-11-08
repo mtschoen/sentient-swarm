@@ -1,7 +1,8 @@
 // Settings panel: preset select, calibrated sliders, reduced motion, rumble, stick tuning and a
 // probe re-run, as plain DOM. Every change is applied live through onChange(settings) and saved
-// to the store once. Each control gives up focus once changed (as in labPanel.js) and close() blurs
-// whatever has it, so Escape, O and the gameplay keys reach the window again. The pure mappings
+// to the store once. A pointer-driven change gives a control up its focus (as in labPanel.js), an
+// arrow-key step on a slider keeps it, and close() blurs whatever has it; main.js routes Escape and
+// O from a focused non-text control (menuRouting.js routeSettingsKey), so the keys reach the panel. The pure mappings
 // below turn the stored percentages into the values the renderer, simulation and input use (100
 // percent is the tuned default; reduced motion disables trails and halves particles and shake).
 import { DEFAULT_KILL_BURST_PARTICLES, MAXIMUM_KILL_BURST_PARTICLES } from '../sim/params.js';
@@ -125,7 +126,14 @@ export function createSettingsPanel({
       readout.textContent = `${displayed}%`;
       commit(spec.key, displayed / spec.scale);
     });
-    slider.addEventListener('change', () => slider.blur());
+    // Only a pointer-driven change gives up focus; an arrow step keeps it so the next one works.
+    let pointerDriven = false;
+    slider.addEventListener('pointerdown', () => { pointerDriven = true; });
+    slider.addEventListener('change', () => {
+      if (!pointerDriven) return;
+      pointerDriven = false;
+      slider.blur();
+    });
     labelled(spec.label, slider, readout);
     controls.set(spec.key, show);
   }

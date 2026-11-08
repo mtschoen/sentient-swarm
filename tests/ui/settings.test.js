@@ -134,9 +134,9 @@ test('mappings read 100% as the tuned default', () => {
   assert.ok(Math.abs(bloomStrengthFor({ ...DEFAULT_SETTINGS, effects: 150 }) - 1.2) < 1e-9);
 });
 
-test('every control gives up focus once changed, so Escape and O reach the window again', () => {
+test('the select and checkboxes give up focus once changed (sliders only on a pointer change)', () => {
   const { panel } = setup();
-  for (const name of ['preset', 'effects', 'reducedMotion']) {
+  for (const name of ['preset', 'reducedMotion']) {
     const control = byName(panel.element, name);
     control.fire('change');
     assert.equal(control.blurs, 1, name);
@@ -152,4 +152,23 @@ test('close blurs the focused element', () => {
   panel.close();
   assert.equal(panel.isOpen, false);
   assert.equal(focused.blurs, 1);
+});
+
+test('arrow keys on a focused slider keep its focus; a pointer-driven change releases it', () => {
+  const { panel, changes } = setup();
+  const slider = byName(panel.element, 'music');
+  slider.value = '70';
+  slider.fire('input');
+  slider.fire('change');
+  assert.equal(slider.blurs, 0, 'a keyboard step keeps focus');
+  assert.equal(changes.at(-1).music, 70);
+  slider.fire('pointerdown');
+  slider.value = '60';
+  slider.fire('input');
+  slider.fire('change');
+  assert.equal(slider.blurs, 1, 'a pointer drag releases focus');
+  slider.value = '55';
+  slider.fire('input');
+  slider.fire('change');
+  assert.equal(slider.blurs, 1, 'the next keyboard step keeps focus again');
 });

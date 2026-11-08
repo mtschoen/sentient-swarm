@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BUNDLED_MIXES, SAVED_MIXES_KEY, decodeMix, encodeMix, listMixes, saveMix } from '../../src/ui/labPresets.js';
+import { BUNDLED_MIXES, RULE_FIELDS, RULE_RANGES, SAVED_MIXES_KEY, decodeMix, encodeMix, listMixes, saveMix } from '../../src/ui/labPresets.js';
 import { defaultMatrix, defaultSpecies } from '../../src/sim/species.js';
 
 function fakeStorage(initial = {}) {
@@ -117,4 +117,23 @@ test('decodeMix rejects shares past the finite cap, which would normalize to NaN
   assert.equal(decodeMix(encodeRaw({ ...good, shares: [3.5e38, 1, 1, 1, 1] })), null);
   assert.equal(decodeMix(encodeRaw({ ...good, shares: [1e7, 1, 1, 1, 1] })), null);
   assert.notEqual(decodeMix(encodeRaw({ ...good, shares: [1e6, 1, 1, 1, 1] })), null, 'the cap itself is valid');
+});
+
+test('decodeMix clamps rules into RULE_RANGES', () => {
+  const good = BUNDLED_MIXES.default;
+  for (const [fieldIndex, field] of RULE_FIELDS.entries()) {
+    const [minimum, maximum] = RULE_RANGES[field];
+    for (const bad of [maximum + 1, minimum - 1]) {
+      const rules = good.rules.map((row, rowIndex) => (rowIndex === 0 ? row.map((value, index) => (index === fieldIndex ? bad : value)) : row));
+      const decoded = decodeMix(encodeRaw({ ...good, rules }));
+      // Out-of-range rules are never admitted: the mix is refused, or every value lies inside its range.
+      if (decoded === null) continue;
+      decoded.rules.forEach((row) => row.forEach((value, index) => {
+        const [low, high] = RULE_RANGES[RULE_FIELDS[index]];
+        assert.ok(value >= low && value <= high, `${field} ${value}`);
+      }));
+    }
+  }
+  const outOfRange = good.rules.map((row, rowIndex) => (rowIndex === 0 ? row.map((value, index) => (index === 0 ? 99 : value)) : row));
+  assert.equal(decodeMix(encodeRaw({ ...good, rules: outOfRange })), null);
 });

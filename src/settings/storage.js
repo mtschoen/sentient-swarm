@@ -14,6 +14,13 @@ export const DEFAULT_SETTINGS = Object.freeze({
   rumble: true,
 });
 
+// The range of each numeric setting: the settings panel slider range (stored units), so a hand-edited
+// or corrupted store cannot push a value the panel could never produce.
+export const SETTING_RANGES = Object.freeze({
+  effects: [0, 300], shake: [0, 300], trails: [0, 300], music: [0, 100], effectsVolume: [0, 100],
+  stickDeadZone: [0, 0.5], stickRadius: [0.5, 2],
+});
+
 // preset and adapterKey are nullable strings (preset only a known PRESETS name, so an unknown one
 // loads as absent); the rest match their default's type.
 function matchesDefault(key, value) {
@@ -52,9 +59,9 @@ export class SettingsStore {
       return settings;
     }
     for (const name of Object.keys(DEFAULT_SETTINGS)) {
-      if (matchesDefault(name, parsed[name])) {
-        settings[name] = parsed[name];
-      }
+      if (!matchesDefault(name, parsed[name])) continue;
+      const range = SETTING_RANGES[name];
+      settings[name] = range ? Math.min(range[1], Math.max(range[0], parsed[name])) : parsed[name];
     }
     return settings;
   }

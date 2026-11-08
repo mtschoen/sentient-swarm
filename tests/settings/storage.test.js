@@ -62,3 +62,17 @@ test('an unknown stored preset loads as absent', () => {
   const known = JSON.stringify({ preset: 'phoneHigh' });
   assert.equal(new SettingsStore({ storage: fakeStorage({ 'murmuration.settings.v1': known }) }).load().preset, 'phoneHigh');
 });
+
+test('load clamps out-of-range numbers to the defaults\' ranges', () => {
+  const raw = JSON.stringify({
+    effects: 1e9, shake: -5, trails: 301, music: 250, effectsVolume: -1, stickDeadZone: 3, stickRadius: 0,
+  });
+  const loaded = new SettingsStore({ storage: fakeStorage({ 'murmuration.settings.v1': raw }) }).load();
+  assert.deepEqual(
+    [loaded.effects, loaded.shake, loaded.trails, loaded.music, loaded.effectsVolume, loaded.stickDeadZone, loaded.stickRadius],
+    [300, 0, 300, 100, 0, 0.5, 0.5],
+  );
+  const inside = JSON.stringify({ effects: 150, music: 40, stickRadius: 1.5 });
+  const kept = new SettingsStore({ storage: fakeStorage({ 'murmuration.settings.v1': inside }) }).load();
+  assert.deepEqual([kept.effects, kept.music, kept.stickRadius], [150, 40, 1.5]);
+});

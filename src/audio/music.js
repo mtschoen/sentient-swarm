@@ -173,7 +173,10 @@ export class ProceduralMusic {
   cue(name) {
     const context = this.engine.context;
     const next = this.sequencer.nextStepIndex;
-    if (name === 'death') this.muteUntilStep = next + DEATH_DROPOUT_STEPS;
+    if (name === 'death') {
+      this.muteUntilStep = next + DEATH_DROPOUT_STEPS;
+      this.pendingHit = 0;
+    }
     else if (name === 'expiry') this.dropUntilStep = next + EXPIRY_DROP_STEPS;
     else if (this.nodes !== null && context !== null) {
       const barSeconds = this.sequencer.stepDuration * STEPS_PER_BAR;
@@ -190,7 +193,8 @@ export class ProceduralMusic {
 
   // Kills this frame: a melodic stab on the next eighth (bigger counts play louder).
   hit(count) {
-    if (count > 0) this.pendingHit = Math.max(this.pendingHit, count);
+    // No stab is queued inside a death dropout, or it would land the moment the dropout ends.
+    if (count > 0 && this.sequencer.nextStepIndex >= this.muteUntilStep) this.pendingHit = Math.max(this.pendingHit, count);
   }
 
   update(currentTime) {
