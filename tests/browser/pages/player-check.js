@@ -7,9 +7,10 @@
 // (b) the latch: for LATCH_FRAMES unacknowledged frames, with alive agents overlapping the player,
 //     playerHitSequence stays at the first hit and hitLatch reads 1; after acknowledgeHit and 3
 //     more frames a second hit arrives whose sequence is past the acknowledging frame;
+//     (b) holds an agent on the player for its latch and stale-acknowledgement frames, as (c) does;
 // (c) invulnerable, with the second hit acknowledged: no hit for 60 frames while agents overlap.
 //     The ring's chasers drift in and out of reach (the per-frame overlap floor flaked, 44 to 60
-//     of 60 on real hardware), so case (c) also holds one extra agent on the player, rewritten
+//     of 60 on real hardware), so cases (b) and (c) also hold one extra agent on the player, rewritten
 //     each frame before the step: overlap then holds on every frame and the floor is exact. The
 //     check still fails if invulnerability breaks, since that held agent (and the ring) would
 //     contact-kill and raise playerHitSequence in the first frame, failing the hit verdict;
@@ -257,6 +258,7 @@ async function runCheck() {
   let latchHeld = true;
   const overlapLatched = new OverlapTally(LATCH_FRAMES);
   for (let frame = 0; frame < LATCH_FRAMES; frame += 1) {
+    harness.holdAgentOnPlayer();
     stats = await harness.step();
     if (stats.playerHitSequence !== firstHit || stats.hitLatch !== 1) latchHeld = false;
     overlapLatched.record(await harness.overlapping());
@@ -268,6 +270,7 @@ async function runCheck() {
   let staleHeld = true;
   const overlapStale = new OverlapTally(STALE_ACKNOWLEDGE_FRAMES);
   for (let frame = 0; frame < STALE_ACKNOWLEDGE_FRAMES; frame += 1) {
+    harness.holdAgentOnPlayer();
     stats = await harness.step();
     if (stats.playerHitSequence !== firstHit || stats.hitLatch !== 1) staleHeld = false;
     overlapStale.record(await harness.overlapping());
