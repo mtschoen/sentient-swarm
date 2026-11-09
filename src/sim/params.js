@@ -1,7 +1,7 @@
 // Packs the SimParams uniform. Byte layout matches the table at the top of common.wgsl.
-import { ARENA_HEIGHT, SPECIES_COUNT } from './layout.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT } from './layout.js';
 
-export const SIM_PARAMS_BYTES = 240;
+export const SIM_PARAMS_BYTES = 256;
 
 // Particles per kill (owner ruling R12, task C0b); the kill passes scale it down only when a step's
 // kills would outrun the free particle slots.
@@ -63,6 +63,17 @@ export function validatedSpawnBandWidth(width) {
   return width;
 }
 
+// Arena bounds (Simulation.setArenaBounds): finite, non-empty and inside the 16 by 9 world. Returns
+// a { minX, minY, maxX, maxY, width, height } copy or throws RangeError.
+export function validatedArenaBounds(bounds) {
+  const { minX, minY, maxX, maxY } = bounds ?? {};
+  const finite = [minX, minY, maxX, maxY].every(Number.isFinite);
+  if (!(finite && minX < maxX && minY < maxY && minX >= 0 && minY >= 0 && maxX <= ARENA_WIDTH && maxY <= ARENA_HEIGHT)) {
+    throw new RangeError(`arena bounds must be finite with minX < maxX and minY < maxY inside [0, ${ARENA_WIDTH}] by [0, ${ARENA_HEIGHT}], got ${JSON.stringify(bounds)}`);
+  }
+  return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+}
+
 export function validatedSpawnDensityBias(bias) {
   if (!(bias >= 0 && bias <= 1)) throw new RangeError(`spawnDensityBias must lie in [0, 1], got ${bias}`);
   return bias;
@@ -88,6 +99,9 @@ export function validatedComfortRadius(radius) {
 const FLOAT_FIELDS = { dt: 0, time: 4, neighborRadius: 16, cellSize: 28, debugKillRadius: 80, playerRadius: 92 };
 // The projectile step's dt (owner ruling R31: full speed while a time warp slows the swarm); dt when omitted.
 const PROJECTILE_DT_OFFSET = 236;
+// The playable arena (arenaBoundsForAspect in layout.js) as vec4f (minX, minY, maxX, maxY); the
+// whole world (FULL_ARENA_BOUNDS) when omitted.
+const ARENA_BOUNDS_OFFSET = 240;
 const UNSIGNED_FIELDS = {
   gridColumns: 20, gridRows: 24, capacity: 32, frameSequence: 84,
   playerInvulnerable: 96, acknowledgedHitSequence: 100, killAllRequested: 104,
@@ -96,7 +110,7 @@ const UNSIGNED_FIELDS = {
 const SAME_SPECIES_COHESION_OFFSET = 88;
 // Multiplier on every species' seek weight (SpawnPressure.seekScale); 1, full seek, when omitted.
 const SEEK_SCALE_OFFSET = 108;
-// Minimum spawn distance from the player as a fraction of the arena width (SpawnPressure); the
+// Minimum spawn distance from the player as a fraction of the arena bounds width (SpawnPressure); the
 // spec's quarter when omitted.
 const SPAWN_DISTANCE_FRACTION_OFFSET = 36;
 const KILL_BURST_PARTICLES_OFFSET = 112;
@@ -146,6 +160,8 @@ export function packSimParams(values) {
   view.setFloat32(COMFORT_RADIUS_OFFSET, values.comfortRadius ?? DEFAULT_COMFORT_RADIUS, true);
   view.setUint32(COARSE_FIELD_PRESSURE_OFFSET, values.coarseFieldPressure ?? 1, true);
   view.setFloat32(PROJECTILE_DT_OFFSET, values.projectileDt ?? values.dt ?? 0, true);
+  const { minX, minY, maxX, maxY } = values.arenaBounds ?? FULL_ARENA_BOUNDS;
+  [minX, minY, maxX, maxY].forEach((value, component) => view.setFloat32(ARENA_BOUNDS_OFFSET + component * 4, value, true));
   // spawnGates: { gates: [{ x, y, radius, emit, species }], speciesBias } or none (wall band spawns).
   const gates = values.spawnGates?.gates ?? [];
   if (gates.length > SIM_PARAMS_GATES) throw new Error('spawnGates has ' + gates.length + ' gates; at most ' + SIM_PARAMS_GATES);

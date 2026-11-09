@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_GATE_SCHEDULE, GATE_FADE_SECONDS, MAXIMUM_SPAWN_GATES, SpawnDirector, TELEGRAPH_SECONDS, inAimLane, validatedSchedule } from '../../src/sim/spawn-director.js';
 import { SpawnPressure } from '../../src/sim/spawner.js';
-import { ARENA_HEIGHT, ARENA_WIDTH } from '../../src/sim/layout.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, arenaBoundsForAspect } from '../../src/sim/layout.js';
 
 const STEP_SECONDS = 1 / 60;
 const SAFE_DISTANCE = 4;
@@ -274,4 +274,24 @@ test('validatedSchedule accepts the range edges and rejects each field just outs
   }
   for (const gateCount of [0, 5, 1.5, NaN]) assert.throws(() => validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, gateCount }), /gateCount/);
   assert.doesNotThrow(() => validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, gateCount: 4 }));
+});
+
+// A phone in portrait or a tall window: the playable arena is a narrow strip of the world.
+test('with narrow bounds every gate opens and drifts inside the bounds, centered on them by default', () => {
+  const bounds = arenaBoundsForAspect(0.5);
+  const director = new SpawnDirector({ random: seededRandom(77), driftSpeed: 3 });
+  let insideChecks = 0;
+  for (let step = 0; step < 60 * 40; step += 1) {
+    const seconds = step * STEP_SECONDS;
+    const playerX = (bounds.minX + bounds.maxX) / 2 + 1.5 * Math.sin(seconds * 0.5);
+    const playerY = (bounds.minY + bounds.maxY) / 2 + 3 * Math.sin(seconds * 0.3);
+    director.update(STEP_SECONDS, { bounds, playerX, playerY, safeDistance: bounds.width * 0.25, shares: EQUAL_SHARES });
+    for (const gate of director.gates) {
+      const inset = 0.15 + gate.radius;
+      assert.ok(gate.x >= bounds.minX + inset - 1e-9 && gate.x <= bounds.maxX - inset + 1e-9, `gate x ${gate.x} outside ${JSON.stringify(bounds)}`);
+      assert.ok(gate.y >= bounds.minY + inset - 1e-9 && gate.y <= bounds.maxY - inset + 1e-9, `gate y ${gate.y} outside ${JSON.stringify(bounds)}`);
+      insideChecks += 1;
+    }
+  }
+  assert.ok(insideChecks > 60 * 40 * 2, `only ${insideChecks} gate checks`);
 });
