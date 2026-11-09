@@ -11,8 +11,12 @@
 //     as well;
 //   - Quit to title (keyboard only) returns to the title menu in phase ready.
 // and on a phone: a portrait load (390 by 844, mobile user agent) shows the rotate overlay and a tap
-// does not start the run; a landscape run that rotates to portrait pauses behind the overlay and
-// resumes on rotating back with its score intact.
+// does not start the run; a landscape tap starts the run fullscreen, leaving fullscreen as the back
+// gesture does pauses under the pause menu, Resume goes fullscreen again and Quit to title leaves
+// it; and, in a browser without the Fullscreen API (removed by an init script, as on iPhone Safari;
+// a fullscreen window cannot be resized, and fullscreen locks landscape anyway), a landscape run
+// that rotates to portrait pauses behind the overlay and resumes on rotating back with its score
+// intact.
 // Saves artifacts/menu-title.png, menu-pause.png and rotate-overlay.png (page screenshots: the DOM
 // overlays are part of them, the WebGPU canvas may be blank in headless Chromium).
 // Exit codes: 0 ok, 1 failure, 2 WebGPU adapter unavailable.
@@ -230,6 +234,52 @@ async function checkDesktop(url) {
   return true;
 }
 
+// A browser without the Fullscreen API: the run plays windowed.
+function removeFullscreenApi() {
+  delete Element.prototype.requestFullscreen;
+}
+
+const isFullscreen = (page) => page.evaluate(() => document.fullscreenElement !== null);
+
+function waitForFullscreen(page, wanted) {
+  return page.waitForFunction((value) => (document.fullscreenElement !== null) === value, wanted, { timeout: STEP_TIMEOUT_MILLISECONDS });
+}
+
+function tapMenuItem(page, menuClass, label) {
+  return page.locator(`.${menuClass} .menu-item`, { hasText: label }).tap();
+}
+
+async function checkPhoneFullscreen(url, phone) {
+  const launched = await open(url, { ...phone, viewport: PHONE_LANDSCAPE });
+  if (launched === null) return false;
+  const { page } = launched;
+  try {
+    expect(!(await isFullscreen(page)), 'the title menu must not be fullscreen');
+    await page.touchscreen.tap(PHONE_LANDSCAPE.width / 2, PHONE_LANDSCAPE.height / 2);
+    await waitForPhase(page, 'playing');
+    await waitForFullscreen(page, true);
+    // What the back gesture does: fullscreen ends without the game asking for it.
+    await page.evaluate(() => document.exitFullscreen());
+    await waitForPhase(page, 'paused');
+    expect(await isShown(page, '.menu-pause'), 'leaving fullscreen mid-run should show the pause menu');
+    await tapMenuItem(page, 'menu-pause', 'Resume');
+    await waitForPhase(page, 'playing');
+    await waitForFullscreen(page, true);
+    await page.locator('.hud-pause').tap();
+    await waitForPhase(page, 'paused');
+    expect(await isFullscreen(page), 'the pause menu stays fullscreen');
+    await tapMenuItem(page, 'menu-pause', 'Quit to title');
+    await waitForPhase(page, 'ready');
+    await waitForFrame(page, (await readFrame(page)) + SETTLE_FRAMES);
+    expect(!(await isFullscreen(page)), 'the title menu must not be fullscreen after Quit to title');
+    expect(page.consoleErrors.length === 0, `console errors: ${page.consoleErrors.join(' | ')}`);
+    console.log('smoke-menu: phone fullscreen on start and resume, pause on leaving it, windowed at the title');
+  } finally {
+    await launched.browser.close();
+  }
+  return true;
+}
+
 async function checkPhone(url) {
   const phone = { isMobile: true, hasTouch: true, deviceScaleFactor: 2, userAgent: MOBILE_USER_AGENT };
   const portrait = await open(url, { ...phone, viewport: PHONE_PORTRAIT });
@@ -245,7 +295,9 @@ async function checkPhone(url) {
     await portrait.browser.close();
   }
 
-  const landscape = await open(url, { ...phone, viewport: PHONE_LANDSCAPE });
+  if (!(await checkPhoneFullscreen(url, phone))) return false;
+
+  const landscape = await open(url, { ...phone, viewport: PHONE_LANDSCAPE }, removeFullscreenApi);
   if (landscape === null) return false;
   const { page } = landscape;
   try {

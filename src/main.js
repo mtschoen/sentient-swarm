@@ -26,6 +26,7 @@ import {
 } from './ui/settings.js';
 import { createMenu, createPauseMenu } from './ui/menu.js';
 import { createRotateOverlay } from './ui/rotateOverlay.js';
+import { createFullscreenController } from './ui/fullscreen.js';
 import { createMenuInput } from './input/menuInput.js';
 import { createRotateBackHandler, createSettingsOpener, routeMenuActions, routeSettingsKey } from './ui/menuRouting.js';
 
@@ -218,8 +219,16 @@ async function boot() {
   });
   // The lab mode (task C6b) is created with the menus below; the title menu's Lab button enters it.
   const openLab = () => lab.enter();
+  // On a phone the run plays fullscreen (fullscreen.js): entered inside the gesture that starts,
+  // resumes or restarts it, left when the title menu shows (render below). The pause menu and game
+  // over stay fullscreen; leaving fullscreen by the back gesture mid-run pauses under the pause menu.
+  const fullscreen = createFullscreenController({
+    enabled: detectMobile(),
+    onExternalExit: () => pauseForMenu(),
+  });
   const startRun = () => {
     if (game.run.phase !== 'ready') return;
+    fullscreen.enter();
     audio.unlock();
     audio.restartRun();
     game.start();
@@ -227,6 +236,7 @@ async function boot() {
   };
   // Also the pause menu's Restart run, which goes Playing to Playing.
   const restartFromGameOver = () => {
+    fullscreen.enter();
     audio.unlock();
     audio.restartRun();
     game.restart();
@@ -246,7 +256,10 @@ async function boot() {
   };
   const menu = createMenu({ onStart: startRun, onLab: openLab, onSettings: openSettings });
   const pauseMenu = createPauseMenu({
-    onResume: resumeGame,
+    onResume: () => {
+      fullscreen.enter();
+      resumeGame();
+    },
     onSettings: openSettings,
     onRestart: () => {
       resumeGame();
@@ -317,6 +330,8 @@ async function boot() {
     }
     rotateShowing = rotating;
     if (state.phase !== 'ready' && menu.visible) menu.hide();
+    // The title menu is never fullscreen, whichever way it came up (quit, leaving the lab).
+    if (menu.visible) fullscreen.exit();
     game.startsOnGesture = !menu.visible;
     // Gamepad edges and key presses are consumed every frame so none go stale; only a free screen acts on them.
     const actions = menuInput.poll();
