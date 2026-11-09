@@ -5,7 +5,7 @@ import { Game } from '../../src/game/game.js';
 import { RunPhase } from '../../src/game/run.js';
 import { PICKUP_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { InputState } from '../../src/input/input.js';
-import { SPECIES_COUNT } from '../../src/sim/layout.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT, arenaBoundsForAspect } from '../../src/sim/layout.js';
 import { SHIP_TURN_RATE, ShipRenderer } from '../../src/render/ship.js';
 
 globalThis.GPUBufferUsage ??= { UNIFORM: 64, COPY_DST: 8 };
@@ -49,6 +49,8 @@ function createFakeSimulation() {
     setPlayerState(state) { this.playerStates.push(state); },
     setSeekScale(scale) { this.seekScales.push(scale); },
     setSpawnDistanceFraction(fraction) { this.spawnDistanceFractions.push(fraction); },
+    arenaBoundsCalls: [],
+    setArenaBounds(bounds) { this.arenaBoundsCalls.push(bounds); },
     acknowledgeHit(sequence) { this.acknowledged.push(sequence); },
     requestKillAll() {
       this.killAllRequests += 1;
@@ -1073,6 +1075,38 @@ test('watch mode holds the alive target at its fraction of capacity with full se
   assert.equal(game.watching, false);
   game.update(STEP);
   assert.ok(simulation.seekScales[simulation.seekScales.length - 1] < 1);
+});
+
+test('setArenaBounds forwards the bounds to the simulation, ship and pickups, and scales both pressures by area', async () => {
+  const { game, simulation } = await createGame();
+  assert.equal(game.arenaBounds, FULL_ARENA_BOUNDS);
+  const bounds = arenaBoundsForAspect(1);
+  const fraction = (bounds.width * bounds.height) / (ARENA_WIDTH * ARENA_HEIGHT);
+  const full = game.spawnPressure.targetAlive;
+  game.setWatch(0.5);
+  game.setArenaBounds(bounds);
+  assert.deepEqual(simulation.arenaBoundsCalls, [bounds]);
+  assert.equal(game.player.bounds, bounds);
+  assert.equal(game.pickups.bounds, bounds);
+  assert.equal(game.spawnPressure.targetAlive, full * fraction);
+  assert.equal(game.watchPressure.targetAlive, CAPACITY * 0.5 * fraction);
+  game.setWatch(0.25);
+  assert.equal(game.watchPressure.targetAlive, CAPACITY * 0.25 * fraction);
+});
+
+test('the spawn director context carries the bounds and the safe distance uses their width', async () => {
+  const { game } = await createGame();
+  const bounds = arenaBoundsForAspect(1);
+  game.setArenaBounds(bounds);
+  const contexts = [];
+  const original = game.spawnDirector.update.bind(game.spawnDirector);
+  game.spawnDirector.update = (deltaSeconds, context) => { contexts.push(context); return original(deltaSeconds, context); };
+  game.update(STEP);
+  assert.equal(contexts.length, 1);
+  assert.equal(contexts[0].bounds, bounds);
+  // The ramp has advanced one step by the time the director runs, so compare with a tolerance.
+  assert.ok(Math.abs(contexts[0].safeDistance - game.spawnPressure.spawnDistanceFraction * bounds.width) < 1e-6);
+  assert.ok(Math.abs(contexts[0].safeDistance - game.spawnPressure.spawnDistanceFraction * ARENA_WIDTH) > 0.1);
 });
 
 test('watch mode without a pointer moves the point with the move stick', async () => {
