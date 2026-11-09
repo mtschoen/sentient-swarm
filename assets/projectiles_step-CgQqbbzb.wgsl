@@ -40,8 +40,9 @@ fn totalDensity(coordinate: vec2i) -> f32 {
   return low.x + low.y + low.z + low.w + high.x;
 }
 
+// Inside the arena bounds (params.arenaBounds), the playable part of the world.
 fn isInsideArena(position: vec2f) -> bool {
-  return all(position >= vec2f(0.0, 0.0)) && all(position <= vec2f(ARENA_WIDTH, ARENA_HEIGHT));
+  return all(position >= params.arenaBounds.xy) && all(position <= params.arenaBounds.zw);
 }
 
 // Rotates velocity toward the density gradient by at most maximumTurn radians. totalDensity clamps
@@ -77,7 +78,7 @@ fn weave(velocity: vec2f, lifetime: f32, seed: f32, dt: f32) -> vec2f {
 fn detonate(orb: Projectile) -> Projectile {
   var ring = orb;
   ring.kind = PROJECTILE_KIND_PULSE_RING;
-  ring.position = clampToArena(orb.position);
+  ring.position = clampToBounds(orb.position, params);
   ring.previousPosition = ring.position;
   ring.velocity = vec2f(0.0, 0.0);
   ring.radius = RING_START_RADIUS;

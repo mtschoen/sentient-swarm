@@ -8,8 +8,9 @@
 // counter only dips below 0 between a failed subtraction and its give-back. A compare-exchange
 // retry loop was measured to give up under contention and leave much of the budget unspent.
 // The claimed agent lands in the wall band (owner ruling R13, task C0b): the strip of depth
-// params.spawnBandWidth along all four walls, sampled uniformly by area (a band of half the
-// arena height or more is the whole arena), at least ARENA_WIDTH * params.spawnDistanceFraction
+// params.spawnBandWidth along all four edges of the arena bounds (params.arenaBounds, a
+// sub-rectangle of the world), sampled uniformly by area (a band of half the bounds' shorter side
+// or more is the whole arena), at least the bounds width * params.spawnDistanceFraction
 // from the player (SpawnPressure ramps it from 0.4 down to the spec's quarter). It never lands in
 // the interior, so space the player clears refills only by agents steering in from the walls;
 // integrate's wall margin pushes it inward and its own steering carries it in.
@@ -17,9 +18,9 @@
 // previous step's blurred field) of up to DENSITY_CANDIDATES placeable draws, else the first
 // placeable draw, so new agents join existing masses. Up to POSITION_ATTEMPTS draws; when none
 // is placeable (a far spawn distance leaves only the corners far enough) one last draw sits in
-// the band-deep square at the corner farthest from the player; with bands up to about 0.9 that
-// square lies more than half the arena width from any player position, so every spawn distance
-// up to SpawnPressure's 0.5 maximum still places. If that draw is too close as well the slot
+// the band-deep square at the bounds corner farthest from the player; in the full 16 by 9 bounds,
+// with bands up to about 0.9, that square lies more than half the bounds width from any player
+// position, so every spawn distance up to SpawnPressure's 0.5 maximum still places. If that draw is too close as well the slot
 // stays dead and the unit goes back with atomicAdd. The agent gets zero velocity (a gate spawn its
 // outward ejection),
 // SPAWN_IN_FRAMES spawn-in frames (the harmless pulse), the alive bit, the species, a random
@@ -27,7 +28,7 @@
 // Spawn gates (owner ruling R14, task C0b2): while params.spawnGateCount > 0 and some gate emits,
 // the agent instead lands uniformly in the disc of one gate, picked per attempt with weight
 // emission times (1 for the gate's favored species, 1 - spawnGateSpeciesBias for the others; the
-// plain emission weights when that leaves nothing), clamped into the arena and still at least the
+// plain emission weights when that leaves nothing), clamped into the bounds and still at least the
 // minimum distance from the player. A gate overflows instead of piling up: a draw whose coarse
 // cell (the previous step's field) already holds GATE_OVERFLOW_DENSITY agents is redrawn with the
 // disc grown by GATE_OVERFLOW_GROWTH per attempt (the last attempt takes its draw anyway), so a big
@@ -78,34 +79,42 @@ fn claimSpecies() -> u32 {
   return NO_SPECIES;
 }
 
+// Half the shorter side of the bounds (the height in the 16 by 9 world) fills the whole arena.
 fn bandDepth() -> f32 {
-  return clamp(params.spawnBandWidth, 0.0, ARENA_HEIGHT * 0.5);
+  let size = boundsSize(params);
+  return clamp(params.spawnBandWidth, 0.0, min(size.x, size.y) * 0.5);
 }
 
-// A uniform point in the wall band: the top and bottom strips span the full width, the left and
-// right strips the height between them.
+// A uniform point in the wall band of the bounds: the top and bottom strips span the full bounds
+// width, the left and right strips the height between them.
 fn bandPoint(randomState: ptr<function, u32>) -> vec2f {
   let depth = bandDepth();
-  let horizontalArea = 2.0 * ARENA_WIDTH * depth;
-  let verticalArea = 2.0 * depth * (ARENA_HEIGHT - 2.0 * depth);
+  let low = params.arenaBounds.xy;
+  let high = params.arenaBounds.zw;
+  let size = boundsSize(params);
+  let horizontalArea = 2.0 * size.x * depth;
+  let verticalArea = 2.0 * depth * (size.y - 2.0 * depth);
   let pick = nextRandom(randomState) * (horizontalArea + verticalArea);
   let along = nextRandom(randomState);
   let inward = nextRandom(randomState) * depth;
   if (pick < horizontalArea) {
-    let x = along * ARENA_WIDTH;
-    return vec2f(x, select(ARENA_HEIGHT - inward, inward, pick < horizontalArea * 0.5));
+    let x = low.x + along * size.x;
+    return vec2f(x, select(high.y - inward, low.y + inward, pick < horizontalArea * 0.5));
   }
-  let y = depth + along * (ARENA_HEIGHT - 2.0 * depth);
-  return vec2f(select(ARENA_WIDTH - inward, inward, pick - horizontalArea < verticalArea * 0.5), y);
+  let y = low.y + depth + along * (size.y - 2.0 * depth);
+  return vec2f(select(high.x - inward, low.x + inward, pick - horizontalArea < verticalArea * 0.5), y);
 }
 
-// A point in the band-deep square at the arena corner farthest from the player.
+// A point in the band-deep square at the bounds corner farthest from the player.
 fn farCornerPoint(randomState: ptr<function, u32>) -> vec2f {
   let depth = bandDepth();
+  let low = params.arenaBounds.xy;
+  let high = params.arenaBounds.zw;
+  let center = boundsCenter(params);
   let offset = vec2f(nextRandom(randomState), nextRandom(randomState)) * depth;
-  let farX = params.playerPosition.x < ARENA_WIDTH * 0.5;
-  let farY = params.playerPosition.y < ARENA_HEIGHT * 0.5;
-  return vec2f(select(offset.x, ARENA_WIDTH - offset.x, farX), select(offset.y, ARENA_HEIGHT - offset.y, farY));
+  let farX = params.playerPosition.x < center.x;
+  let farY = params.playerPosition.y < center.y;
+  return vec2f(select(low.x + offset.x, high.x - offset.x, farX), select(low.y + offset.y, high.y - offset.y, farY));
 }
 
 // Gate pick weights for species: emission, scaled down for gates that favor another species.
@@ -126,7 +135,7 @@ fn gateWeightTotal(species: u32, biased: bool) -> f32 {
 }
 
 // A uniform point in the disc of a gate drawn by weight (total is gateWeightTotal), its radius
-// times spread, kept a little inside the walls; outward is the unit direction from the gate center.
+// times spread, kept a little inside the bounds; outward is the unit direction from the gate center.
 fn gatePoint(species: u32, biased: bool, total: f32, spread: f32, randomState: ptr<function, u32>) -> GateDraw {
   var remaining = nextRandom(randomState) * total;
   var chosen = 0u;
@@ -144,7 +153,7 @@ fn gatePoint(species: u32, biased: bool, total: f32, spread: f32, randomState: p
   let angle = nextRandom(randomState) * TAU;
   let reach = sqrt(nextRandom(randomState)) * row.z * spread;
   let direction = vec2f(cos(angle), sin(angle));
-  let position = clamp(row.xy + direction * reach, vec2f(GATE_WALL_MARGIN), vec2f(ARENA_WIDTH, ARENA_HEIGHT) - vec2f(GATE_WALL_MARGIN));
+  let position = clamp(row.xy + direction * reach, params.arenaBounds.xy + vec2f(GATE_WALL_MARGIN), params.arenaBounds.zw - vec2f(GATE_WALL_MARGIN));
   return GateDraw(position, direction * (reach / max(row.z * spread, 0.001)));
 }
 
@@ -168,7 +177,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   }
 
   var randomState = pcgHash(slot ^ pcgHash(params.frameSequence));
-  let minimumDistance = ARENA_WIDTH * params.spawnDistanceFraction;
+  let minimumDistance = boundsSize(params).x * params.spawnDistanceFraction;
   var position = vec2f(0.0, 0.0);
   var velocity = vec2f(0.0, 0.0);
   var found = 0u;

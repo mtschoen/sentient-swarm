@@ -1,6 +1,7 @@
 // Integrate, in place, one thread per agent slot, after steer: position += velocity * dt; inside
-// params.wallMargin of an edge the velocity gets a push toward the arena center proportional to the
-// penetration depth; the position is then clamped to the arena so nothing escapes. Spawn-in
+// params.wallMargin of an edge of the arena bounds (params.arenaBounds) the velocity gets a push
+// toward the arena center proportional to the penetration depth; the position is then clamped to
+// the bounds so nothing escapes. Spawn-in
 // frames count down by one. phase advances by dt * (2 + 0.5 * speed) radians and wraps at tau,
 // so faster agents pulse faster. Dead agents are left untouched.
 
@@ -21,11 +22,10 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
     return;
   }
   agent.position = agent.position + agent.velocity * params.dt;
-  let arena = vec2f(ARENA_WIDTH, ARENA_HEIGHT);
-  let lowPenetration = max(vec2f(params.wallMargin) - agent.position, vec2f(0.0));
-  let highPenetration = max(agent.position - (arena - vec2f(params.wallMargin)), vec2f(0.0));
+  let lowPenetration = max(params.arenaBounds.xy + vec2f(params.wallMargin) - agent.position, vec2f(0.0));
+  let highPenetration = max(agent.position - (params.arenaBounds.zw - vec2f(params.wallMargin)), vec2f(0.0));
   agent.velocity = agent.velocity + (lowPenetration - highPenetration) * params.wallStiffness * params.dt;
-  agent.position = clampToArena(agent.position);
+  agent.position = clampToBounds(agent.position, params);
 
   let spawnFrames = spawnFramesRemaining(agent.flags);
   if (spawnFrames > 0u) {
