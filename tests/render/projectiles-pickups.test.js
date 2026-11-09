@@ -27,6 +27,15 @@ test('packProjectileView puts one weapon hue per projectile kind after the world
   assert.equal(hueOf(PROJECTILE_KINDS.beam), hue('beam'));
 });
 
+test('packProjectileView ends with the arena bounds of the viewport', () => {
+  const tall = new Viewport();
+  tall.setCanvasSize(900, 1600);
+  const view = packProjectileView({ viewport: tall, time: 0 });
+  const bounds = tall.arenaBounds;
+  assert.deepEqual(Array.from(view.slice(16, 20)), Array.from(new Float32Array([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY])));
+  assert.deepEqual(Array.from(packProjectileView({ viewport, time: 0 }).slice(16, 20)), [0, 0, 16, 9]);
+});
+
 test('packPickupView packs x, y, hue and fade per pickup and caps at 32', () => {
   const pickups = [{ x: 3, y: 4, type: 'scatter', fade: 0.5 }, { x: 5, y: 6, type: 'beam', fade: 1 }];
   const { floats, count } = packPickupView({ viewport, time: 1, pickups });

@@ -26,7 +26,7 @@ test('packShipView fills the 64-byte GlyphView layout', () => {
   assert.equal(packShipView({ viewport, settings, alpha: 0.25, time: 3, interpolate: true })[12], 1);
 });
 
-test('ship size follows the arena height, with a minimum, and a zero fraction hides ships', () => {
+test('ship size follows the world height, with a minimum, and a zero fraction hides ships', () => {
   const large = new Viewport();
   large.setCanvasSize(3840, 2160);
   const small = new Viewport();
@@ -59,12 +59,14 @@ test('the inspect zoom grows ships by its square root and lowers their coverage'
   assert.equal(packShipView({ viewport, settings, alpha: 0, time: 0 })[10], Math.fround(coverageUnzoomed / 4));
 });
 
-test('glyph coverage grows as the arena shrinks at a fixed ship size', () => {
+test('glyph coverage follows the whole world in pixels, which a tall canvas enlarges past the canvas width', () => {
   const large = new Viewport();
   large.setCanvasSize(1280, 720);
   const small = new Viewport();
   small.setCanvasSize(800, 1200);
-  near(shipCoverageScale(small, 10) / shipCoverageScale(large, 10), (1280 * 720) / (800 * 450));
+  // The 800 by 1200 canvas shows a 6 by 9 unit arena at 133.33 pixels per unit, so the 16 by 9
+  // world is 2133.33 by 1200 pixels and a coarse cell is 33.33 by 33.33 against the large canvas's 20 by 20.
+  near(shipCoverageScale(small, 10) / shipCoverageScale(large, 10), (1280 * 720) / ((1200 * 16 / 9) * 1200));
 });
 
 test('packShipView world-to-clip transform matches viewport.worldToClip, zoom included', () => {
@@ -78,6 +80,16 @@ test('packShipView world-to-clip transform matches viewport.worldToClip, zoom in
     assert.ok(Math.abs(actual.x - expected.x) < 1e-5);
     assert.ok(Math.abs(actual.y - expected.y) < 1e-5);
   }
-  // The 2000 by 1000 canvas letterboxes to a 1000-pixel-tall arena; 4x zoom doubles the ship.
-  near(view[6], Math.fround(0.02 * 1000 * 2), 1e-4);
+  // The 2000 by 1000 canvas shows 16 by 8 world units at 125 pixels each, so the 9-unit world is
+  // 1125 pixels tall; 4x zoom doubles the ship.
+  near(view[6], Math.fround(0.02 * 1125 * 2), 1e-4);
+});
+
+test('the ship has the same world size at every aspect', () => {
+  const wide = new Viewport();
+  wide.setCanvasSize(1600, 900);
+  const tall = new Viewport();
+  tall.setCanvasSize(900, 1600);
+  const worldSize = (viewport) => shipDevicePixels(viewport, 0.02) / viewport.pixelsPerWorldUnit;
+  near(worldSize(wide), worldSize(tall));
 });

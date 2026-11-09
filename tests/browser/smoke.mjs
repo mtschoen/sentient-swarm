@@ -54,7 +54,6 @@ const TRAIL_SETTLE_FRAMES = 20;
 const RESIZE_TOLERANCE = 0.05;
 const PORTRAIT_VIEWPORT = { width: 800, height: 1200 };
 const DEFAULT_VIEWPORT = { width: 1280, height: 720 };
-const MAXIMUM_BAND_LUMINANCE = 0.01;
 // The start click lands this many frames into the flood capture's 30 settle frames
 // (CAPTURE_SETTLE_FRAMES in capture-hook.js), so the capture sees a young flood.
 const START_CLICK_SETTLE_FRAMES = 24;
@@ -124,8 +123,8 @@ function waitForFrame(page, target) {
   return page.waitForFunction((frame) => window.__murmuration.frame >= frame, target, { timeout: READY_TIMEOUT_MILLISECONDS });
 }
 
-// Resizes to a portrait viewport and back, checking the agent count survives, the arena letterboxes
-// and the bands stay black. Returns a failure message, or null. The spawner ramps the alive target
+// Resizes to a portrait viewport and back, checking the agent count survives, the arena fills the
+// whole canvas (the bounds follow the aspect, so no band exists at 2:3) and the band reads empty. Returns a failure message, or null. The spawner ramps the alive target
 // (easing in over 120 seconds, so the count still grows a little per 60 frames at this point), so
 // the check does not compare counts directly. Instead the growth over the 60 frames after the
 // resize must match the growth over the 60 frames before it, within 5 percent of the count.
@@ -142,18 +141,18 @@ async function checkResize(page) {
   const after = await readAlive();
   const portrait = await evaluateWithin(page, 'the portrait capture', () => window.__murmuration.capture());
   const { arenaRect } = portrait;
-  const expected = { x: 0, y: 375, width: 800, height: 450 };
+  const expected = { x: 0, y: 0, width: 800, height: 1200 };
   if (portrait.width !== PORTRAIT_VIEWPORT.width || JSON.stringify(arenaRect) !== JSON.stringify(expected)) {
     return `smoke: expected ${PORTRAIT_VIEWPORT.width}px canvas with arenaRect ${JSON.stringify(expected)}, got ${portrait.width}x${portrait.height} ${JSON.stringify(arenaRect)}`;
   }
   const band = portrait.bandLuminance;
-  if (!(band < MAXIMUM_BAND_LUMINANCE)) return `smoke: expected top band luminance < ${MAXIMUM_BAND_LUMINANCE}, got ${band}`;
+  if (band !== 0) return `smoke: expected an empty band (luminance 0), got ${band}`;
   const growthBefore = before - earlier;
   const growthAfter = after - before;
   if (Math.abs(growthAfter - growthBefore) > RESIZE_TOLERANCE * before) {
     return `smoke: aliveTotal ${earlier} -> ${before} before the resize and ${before} -> ${after} after it differ by more than ${RESIZE_TOLERANCE * 100} percent`;
   }
-  console.log(`smoke: resize aliveTotal ${earlier} -> ${before} -> ${after}, arenaRect ${JSON.stringify(arenaRect)}, top band luminance ${band.toFixed(4)}`);
+  console.log(`smoke: resize aliveTotal ${earlier} -> ${before} -> ${after}, arenaRect ${JSON.stringify(arenaRect)}, band luminance ${band}`);
   await page.setViewportSize(DEFAULT_VIEWPORT);
   const restored = await readFrame();
   await waitForFrame(page, restored + TRAIL_SETTLE_FRAMES);
@@ -289,14 +288,14 @@ async function checkSweep(page) {
 // stays at least half as bright as it is near the ship (the beam core is far brighter than the fan).
 async function measureBeamReach(captured) {
   const { arenaRect } = captured;
-  const { arenaWidth, arenaHeight } = window.__murmuration.arenaRect();
+  const { arenaWidth, arenaBounds, pixelsPerWorldUnit } = window.__murmuration.arenaRect();
   const spawn = window.__smokeSweptSpawn;
   const toEdge = (origin, direction) => {
     let nearest = Infinity;
-    if (direction.x > 0) nearest = Math.min(nearest, (arenaWidth - origin.x) / direction.x);
-    if (direction.x < 0) nearest = Math.min(nearest, -origin.x / direction.x);
-    if (direction.y > 0) nearest = Math.min(nearest, (arenaHeight - origin.y) / direction.y);
-    if (direction.y < 0) nearest = Math.min(nearest, -origin.y / direction.y);
+    if (direction.x > 0) nearest = Math.min(nearest, (arenaBounds.maxX - origin.x) / direction.x);
+    if (direction.x < 0) nearest = Math.min(nearest, (arenaBounds.minX - origin.x) / direction.x);
+    if (direction.y > 0) nearest = Math.min(nearest, (arenaBounds.maxY - origin.y) / direction.y);
+    if (direction.y < 0) nearest = Math.min(nearest, (arenaBounds.minY - origin.y) / direction.y);
     return nearest;
   };
   const direction = { x: spawn.velocityX, y: spawn.velocityY };
@@ -309,10 +308,9 @@ async function measureBeamReach(captured) {
   canvas.height = image.height;
   const context = canvas.getContext('2d');
   context.drawImage(image, 0, 0);
-  const pixelsPerUnit = arenaRect.width / arenaWidth;
   const luminanceAt = (distance) => {
-    const x = Math.round(arenaRect.x + (spawn.x + direction.x * distance) * pixelsPerUnit);
-    const y = Math.round(arenaRect.y + (spawn.y + direction.y * distance) * pixelsPerUnit);
+    const x = Math.round(arenaRect.x + (spawn.x + direction.x * distance - arenaBounds.minX) * pixelsPerWorldUnit);
+    const y = Math.round(arenaRect.y + (spawn.y + direction.y * distance - arenaBounds.minY) * pixelsPerWorldUnit);
     const [red, green, blue] = context.getImageData(x, y, 1, 1).data;
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
   };
@@ -370,8 +368,8 @@ async function checkPlay(page, frames) {
   const shipBox = await evaluateWithin(page, 'placing the ship box', ({ playerX, playerY, size }) => {
     const rect = window.__murmuration.arenaRect();
     return {
-      x: Math.round(rect.x + (playerX / rect.arenaWidth) * rect.width - size / 2),
-      y: Math.round(rect.y + (playerY / rect.arenaHeight) * rect.height - size / 2),
+      x: Math.round(rect.x + ((playerX - rect.arenaBounds.minX) / rect.arenaBounds.width) * rect.width - size / 2),
+      y: Math.round(rect.y + ((playerY - rect.arenaBounds.minY) / rect.arenaBounds.height) * rect.height - size / 2),
       width: size,
       height: size,
     };
