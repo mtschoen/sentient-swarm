@@ -107,3 +107,16 @@ test('leaving fullscreen any other way reports an external exit, once per fullsc
   state.leave();
   assert.equal(state.externalExits, 2);
 });
+
+test('onRefused names why enter did not go fullscreen', async () => {
+  const reasons = [];
+  const build = (options, hasApi = true, request = null) => {
+    const documentObject = { fullscreenElement: null, documentElement: hasApi ? { requestFullscreen: request ?? (() => Promise.resolve()) } : {}, addEventListener() {} };
+    return createFullscreenController({ ...options, documentObject, screenObject: {}, onRefused: (reason) => reasons.push(reason) });
+  };
+  await build({ enabled: false }).enter();
+  await build({ enabled: true }, false).enter();
+  await build({ enabled: true }, true, () => Promise.reject(new TypeError('Permissions check failed'))).enter();
+  await build({ enabled: true }, true, () => { throw new Error('boom'); }).enter();
+  assert.deepEqual(reasons, ['not a touch device', 'no Fullscreen API', 'TypeError: Permissions check failed', 'Error: boom']);
+});

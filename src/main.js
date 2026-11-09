@@ -13,7 +13,7 @@ import { capacityOptionsUpTo, pinnedCapacityFromSearch, probeDisabledFromSearch 
 import { PRESETS } from './settings/presets.js';
 import { FrameTimeProbe } from './settings/probe.js';
 import { SettingsStore } from './settings/storage.js';
-import { QualityController, adapterKeyFrom, detectMobile, resolveInitialPreset, settleApply } from './game/quality.js';
+import { QualityController, adapterKeyFrom, detectMobile, detectTouchDevice, resolveInitialPreset, settleApply } from './game/quality.js';
 import { createFrameTimer, frameTimerKindFromSearch } from './gpu/frame-timer.js';
 import { installAudio } from './audio/audio-hook.js';
 import { createHud } from './ui/hud.js';
@@ -219,12 +219,16 @@ async function boot() {
   });
   // The lab mode (task C6b) is created with the menus below; the title menu's Lab button enters it.
   const openLab = () => lab.enter();
-  // On a phone the run plays fullscreen (fullscreen.js): entered inside the gesture that starts,
-  // resumes or restarts it, left when the title menu shows (render below). The pause menu and game
-  // over stay fullscreen; leaving fullscreen by the back gesture mid-run pauses under the pause menu.
+  // On a phone or any touch-first device (a foldable or tablet does not report itself as mobile)
+  // the run plays fullscreen (fullscreen.js): entered inside the gesture that starts, resumes or
+  // restarts it, left when the title menu shows (render below). The pause menu and game over stay
+  // fullscreen; leaving fullscreen by the back gesture mid-run pauses under the pause menu.
+  // ?debug=fullscreen shows why a request was refused, for a device with no console at hand.
+  const fullscreenDebug = new URLSearchParams(location.search).get('debug') === 'fullscreen';
   const fullscreen = createFullscreenController({
-    enabled: detectMobile(),
+    enabled: detectMobile() || detectTouchDevice(),
     onExternalExit: () => pauseForMenu(),
+    onRefused: (reason) => { if (fullscreenDebug) hud.showToast(`Fullscreen refused: ${reason}`); },
   });
   const startRun = () => {
     if (game.run.phase !== 'ready') return;

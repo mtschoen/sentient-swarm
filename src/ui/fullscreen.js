@@ -4,12 +4,14 @@
 // a refusal (no activation, no API as on iPhone Safari, a policy) is ignored on purpose; exit()
 // needs none. Once fullscreen, the landscape lock that browsers refuse outside it is asked for
 // again (it ends with fullscreen). When the player leaves fullscreen some other way (the back
-// gesture, a system swipe), onExternalExit runs so the caller can pause the run.
+// gesture, a system swipe), onExternalExit runs so the caller can pause the run. onRefused gets a
+// short reason whenever enter() does not end fullscreen (main.js shows it with ?debug=fullscreen).
 export function createFullscreenController({
   enabled,
   documentObject = globalThis.document,
   screenObject = globalThis.screen,
   onExternalExit = () => {},
+  onRefused = () => {},
 }) {
   const element = documentObject?.documentElement;
   const supported = Boolean(enabled) && typeof element?.requestFullscreen === 'function';
@@ -18,12 +20,17 @@ export function createFullscreenController({
 
   const isActive = () => Boolean(documentObject.fullscreenElement);
 
-  // Runs fn and swallows a synchronous throw or a rejection: both are the same refusal.
-  function attempt(fn) {
+  // Runs fn and swallows a synchronous throw or a rejection: both are the same refusal, handed
+  // to onError.
+  function attempt(fn, onError = () => {}) {
+    const refuse = (error) => {
+      onError(error);
+      return false;
+    };
     try {
-      return Promise.resolve(fn()).then(() => true, () => false);
-    } catch {
-      return Promise.resolve(false);
+      return Promise.resolve(fn()).then(() => true, refuse);
+    } catch (error) {
+      return Promise.resolve(refuse(error));
     }
   }
 
@@ -45,10 +52,14 @@ export function createFullscreenController({
     get active() { return supported && isActive(); },
     // Call inside a user gesture's handler. Resolves true when the page is fullscreen.
     enter() {
-      if (!supported) return Promise.resolve(false);
+      if (!supported) {
+        onRefused(enabled ? 'no Fullscreen API' : 'not a touch device');
+        return Promise.resolve(false);
+      }
       if (isActive()) return Promise.resolve(true);
       exitRequested = false;
-      return attempt(() => element.requestFullscreen({ navigationUI: 'hide' })).then((entered) => {
+      const describe = (error) => onRefused(`${error?.name ?? 'Error'}: ${error?.message ?? error}`);
+      return attempt(() => element.requestFullscreen({ navigationUI: 'hide' }), describe).then((entered) => {
         if (entered) attempt(() => screenObject?.orientation?.lock?.('landscape'));
         return entered;
       });

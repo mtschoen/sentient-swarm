@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { QualityController, adapterKeyFrom, detectMobile, resolveInitialPreset, settleApply } from '../../src/game/quality.js';
+import { QualityController, adapterKeyFrom, detectMobile, detectTouchDevice, resolveInitialPreset, settleApply } from '../../src/game/quality.js';
 import { PRESETS } from '../../src/settings/presets.js';
 import { SettingsStore } from '../../src/settings/storage.js';
 import { agentBufferBytes } from '../../src/sim/layout.js';
@@ -294,4 +294,13 @@ test('a failed preset swap runs the failure callback so the caller can re-sync i
   const settlePreset = settleApply({ quality: controller, liveSettings: () => ({}), applySettings: () => {} });
   await settlePreset({ preset: 'phoneMedium' }, () => { failures += 1; });
   assert.equal(failures, 1);
+});
+
+test('detectTouchDevice ignores the mobile flag: a coarse pointer with touch points is enough', () => {
+  const coarse = (query) => ({ matches: query === '(pointer: coarse)' });
+  const fine = () => ({ matches: false });
+  assert.equal(detectTouchDevice({ navigatorObject: { userAgentData: { mobile: false }, maxTouchPoints: 5 }, matchMedia: coarse }), true);
+  assert.equal(detectTouchDevice({ navigatorObject: { maxTouchPoints: 5 }, matchMedia: fine }), false);
+  assert.equal(detectTouchDevice({ navigatorObject: { maxTouchPoints: 0 }, matchMedia: coarse }), false);
+  assert.equal(detectTouchDevice({ navigatorObject: {}, matchMedia: undefined }), false);
 });

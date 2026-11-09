@@ -26,6 +26,14 @@ export function detectMobile({ navigatorObject = globalThis.navigator, matchMedi
   return Boolean(coarse && (navigatorObject?.maxTouchPoints ?? 0) > 0);
 }
 
+// A touch-first device: the primary pointer is coarse and there are touch points. Unlike
+// detectMobile this ignores the browser's own mobile flag, which a foldable or a tablet reports
+// as false even on a phone-sized screen; fullscreen play (main.js) accepts either.
+export function detectTouchDevice({ navigatorObject = globalThis.navigator, matchMedia = globalThis.matchMedia } = {}) {
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  return Boolean(coarse && (navigatorObject?.maxTouchPoints ?? 0) > 0);
+}
+
 // A stable string for the adapter (GPUAdapter.info): vendor, architecture, device, description.
 export function adapterKeyFrom(info) {
   if (!info) return 'unknown';
