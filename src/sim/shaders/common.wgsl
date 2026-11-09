@@ -46,7 +46,7 @@ struct Agent {
   hueJitter: f32,
 }
 
-// Uniform layout (byte offsets), total 240 bytes:
+// Uniform layout (byte offsets), total 256 bytes:
 //   0 dt                 f32
 //   4 time               f32
 //   8 playerPosition     vec2f
@@ -55,7 +55,7 @@ struct Agent {
 //  24 gridRows           u32
 //  28 cellSize           f32
 //  32 capacity           u32
-//  36 spawnDistanceFraction f32 (minimum spawn distance from the player, of ARENA_WIDTH)
+//  36 spawnDistanceFraction f32 (minimum spawn distance from the player, of the arena bounds width)
 //  40 debugKillPosition  vec2f
 //  48 spawnPerSpecies0   vec4u (species 0 to 3)
 //  64 spawnPerSpecies1   vec4u (species 4 in .x, rest 0)
@@ -81,6 +81,7 @@ struct Agent {
 // 228 comfortRadius      f32 (straight seek fades to zero inside it; 0 turns the fade off)
 // 232 coarseFieldPressure u32 (1: steer applies the coarse-field pressure term, 0: it does not)
 // 236 projectileDt       f32 (the projectile step's dt: unscaled real time during a time warp)
+// 240 arenaBounds        vec4f (the playable arena inside the world: minX, minY, maxX, maxY)
 struct SimParams {
   dt: f32,
   time: f32,
@@ -116,6 +117,7 @@ struct SimParams {
   comfortRadius: f32,
   coarseFieldPressure: u32,
   projectileDt: f32,
+  arenaBounds: vec4f,
 }
 
 // Bit 0 alive, bits 8..15 spawn-in frames remaining.
@@ -127,8 +129,22 @@ fn spawnFramesRemaining(flags: u32) -> u32 {
   return (flags >> SPAWN_FRAMES_SHIFT) & SPAWN_FRAMES_MASK;
 }
 
+// The whole world, for cell indices; gameplay edges use clampToBounds.
 fn clampToArena(position: vec2f) -> vec2f {
   return clamp(position, vec2f(0.0, 0.0), vec2f(ARENA_WIDTH, ARENA_HEIGHT));
+}
+
+// The playable arena, a sub-rectangle of the world (the whole world at a 16:9 canvas).
+fn boundsSize(params: SimParams) -> vec2f {
+  return params.arenaBounds.zw - params.arenaBounds.xy;
+}
+
+fn boundsCenter(params: SimParams) -> vec2f {
+  return (params.arenaBounds.xy + params.arenaBounds.zw) * 0.5;
+}
+
+fn clampToBounds(position: vec2f, params: SimParams) -> vec2f {
+  return clamp(position, params.arenaBounds.xy, params.arenaBounds.zw);
 }
 
 fn cellIndexFor(position: vec2f, params: SimParams) -> u32 {

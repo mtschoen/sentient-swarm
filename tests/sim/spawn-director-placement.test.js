@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SpawnDirector, inAimLane } from '../../src/sim/spawn-director.js';
-import { ARENA_HEIGHT, ARENA_WIDTH } from '../../src/sim/layout.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, arenaBoundsForAspect } from '../../src/sim/layout.js';
 
 // Gate selection favors the far side of the arena from the player (R14, C0b2). The director takes
 // no density input: favoring dense coarse cells is the GPU spawn's density bias (spawn.wgsl), whose
@@ -136,4 +136,29 @@ test('pickSpecies follows the shares, and falls back to a uniform draw when all 
   assert.equal(new SpawnDirector({ random: () => 0.5 }).pickSpecies([]), 2);
   assert.equal(new SpawnDirector({ random: () => 0.9999 }).pickSpecies([0, 0, 0, 0, 0]), 4);
   assert.equal(new SpawnDirector({ random: () => 0.5 }).pickSpecies([-1, -1, 4, -1, -1]), 2);
+});
+
+test('wallBandPoint and placeGate stay inside narrow bounds, on every wall of the bounds', () => {
+  const inset = 0.95;
+  for (const bounds of [arenaBoundsForAspect(0.5), arenaBoundsForAspect(4)]) {
+    const director = new SpawnDirector({ random: seededRandom(31) });
+    const sides = new Set();
+    const bandDepth = Math.min(1.2, Math.min(bounds.width, bounds.height) / 2 - inset);
+    for (let trial = 0; trial < 400; trial += 1) {
+      const point = director.wallBandPoint(inset, bounds);
+      assert.ok(point.x >= bounds.minX + inset - 1e-9 && point.x <= bounds.maxX - inset + 1e-9, `x ${point.x} in ${JSON.stringify(bounds)}`);
+      assert.ok(point.y >= bounds.minY + inset - 1e-9 && point.y <= bounds.maxY - inset + 1e-9, `y ${point.y} in ${JSON.stringify(bounds)}`);
+      if (point.y <= bounds.minY + inset + bandDepth + 1e-9) sides.add('top');
+      if (point.y >= bounds.maxY - inset - bandDepth - 1e-9) sides.add('bottom');
+      if (point.x <= bounds.minX + inset + bandDepth + 1e-9) sides.add('left');
+      if (point.x >= bounds.maxX - inset - bandDepth - 1e-9) sides.add('right');
+    }
+    assert.deepEqual([...sides].sort(), ['bottom', 'left', 'right', 'top']);
+    const context = { ...NO_AIM, playerX: (bounds.minX + bounds.maxX) / 2, playerY: (bounds.minY + bounds.maxY) / 2, safeDistance: 0.5, bounds };
+    for (let trial = 0; trial < 100; trial += 1) {
+      const point = director.placeGate(context);
+      assert.ok(point.x >= bounds.minX + inset - 1e-9 && point.x <= bounds.maxX - inset + 1e-9, `gate x ${point.x}`);
+      assert.ok(point.y >= bounds.minY + inset - 1e-9 && point.y <= bounds.maxY - inset + 1e-9, `gate y ${point.y}`);
+    }
+  }
 });

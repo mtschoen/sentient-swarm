@@ -42,11 +42,11 @@ import { DensityReadback } from './density-readback.js';
 import { SpatialGrid } from './grid.js';
 import { DebugKillPass, KillAllPass, PlayerContactPass } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
 import {
   DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES,
   DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, SIM_PARAMS_BYTES,
-  packSimParams, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles,
+  packSimParams, validatedArenaBounds, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles,
   validatedKillFragmentParticles, validatedSpawnBandWidth, validatedSpawnDensityBias, validatedWallMargin,
   validatedWallStiffness,
 } from './params.js';
@@ -143,8 +143,10 @@ export class Simulation {
     this.sameSpeciesCohesion = true;
     // Multiplier on every species' seek weight; the game sets it from SpawnPressure every step.
     this.seekScale = 1;
-    // Minimum spawn distance from the player, a fraction of the arena width (also from SpawnPressure).
+    // Minimum spawn distance from the player, a fraction of the arena bounds width (also from SpawnPressure).
     this.spawnDistanceFraction = 0.25;
+    // The playable arena inside the world (arenaBoundsForAspect in layout.js); the whole world by default.
+    this.arenaBounds = FULL_ARENA_BOUNDS;
     // Lab knobs (task C0b): particles per kill, wall band depth and spawn density bias.
     this.killBurstParticles = DEFAULT_KILL_BURST_PARTICLES;
     this.spawnBandWidth = DEFAULT_SPAWN_BAND_WIDTH;
@@ -256,9 +258,17 @@ export class Simulation {
     this.seekScale = scale;
   }
 
-  // Spawns from the next step on land at least fraction * ARENA_WIDTH from the player.
+  // Spawns from the next step on land at least fraction * arenaBounds.width from the player.
   setSpawnDistanceFraction(fraction) {
     this.spawnDistanceFraction = fraction;
+  }
+
+  // The playable arena from the next step on: { minX, minY, maxX, maxY } in world units, a
+  // non-empty rectangle inside the 16 by 9 world (arenaBoundsForAspect). Integrate's walls, the wall
+  // band and gate spawns, the spawn distance and the projectile edges use it; the grid and the
+  // coarse field keep covering the whole world. Throws RangeError and changes nothing when invalid.
+  setArenaBounds(bounds) {
+    this.arenaBounds = validatedArenaBounds(bounds);
   }
 
   // Particles per kill from the next step on, an integer in [0, MAXIMUM_KILL_BURST_PARTICLES]
@@ -386,6 +396,7 @@ export class Simulation {
       sameSpeciesCohesion: this.sameSpeciesCohesion ? 1 : 0,
       seekScale: this.seekScale,
       spawnDistanceFraction: this.spawnDistanceFraction,
+      arenaBounds: this.arenaBounds,
       killBurstParticles: this.killBurstParticles,
       killFragmentParticles: this.killFragmentParticles,
       deathFloodParticles: this.killAllRequested && this.deathFloodRequested ? this.deathFloodParticles : 0,
@@ -523,6 +534,7 @@ export class Simulation {
     next.setSameSpeciesCohesion(this.sameSpeciesCohesion);
     next.setSeekScale(this.seekScale);
     next.setSpawnDistanceFraction(this.spawnDistanceFraction);
+    next.setArenaBounds(this.arenaBounds);
     next.setKillBurstParticles(this.killBurstParticles);
     next.setSpawnBandWidth(this.spawnBandWidth);
     next.setSpawnDensityBias(this.spawnDensityBias);

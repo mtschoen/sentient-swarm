@@ -5,10 +5,11 @@ import {
   DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, MAXIMUM_COMFORT_RADIUS, MAXIMUM_DEATH_FLOOD_PARTICLES,
   MAXIMUM_KILL_BURST_PARTICLES, MAXIMUM_KILL_FRAGMENT_PARTICLES, MAXIMUM_WALL_MARGIN, MAXIMUM_WALL_STIFFNESS, SIM_PARAMS_BYTES,
   packSimParams, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles, validatedKillFragmentParticles,
-  validatedSpawnBandWidth, validatedSpawnDensityBias, validatedWallMargin, validatedWallStiffness,
+  validatedArenaBounds, validatedSpawnBandWidth, validatedSpawnDensityBias, validatedWallMargin, validatedWallStiffness,
 } from '../../src/sim/params.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, arenaBoundsForAspect } from '../../src/sim/layout.js';
 
-test('packSimParams produces the 240-byte uniform layout', () => {
+test('packSimParams produces the 256-byte uniform layout', () => {
   const buffer = packSimParams({
     dt: 0.5,
     gridColumns: 160,
@@ -18,7 +19,7 @@ test('packSimParams produces the 240-byte uniform layout', () => {
     playerPosition: [3, 4],
     spawnPerSpecies: [1, 2, 3, 4, 5],
   });
-  assert.equal(SIM_PARAMS_BYTES, 240);
+  assert.equal(SIM_PARAMS_BYTES, 256);
   assert.equal(SIM_PARAMS_BYTES % 16, 0);
   assert.equal(buffer.byteLength, SIM_PARAMS_BYTES);
   const view = new DataView(buffer);
@@ -47,6 +48,8 @@ test('packSimParams defaults missing fields to zero', () => {
     else if (offset === 224) assert.equal(view.getFloat32(offset, true), DEFAULT_WALL_STIFFNESS);
     else if (offset === 228) assert.equal(view.getFloat32(offset, true), DEFAULT_COMFORT_RADIUS);
     else if (offset === 232) assert.equal(view.getUint32(offset, true), 1);
+    else if (offset === 248) assert.equal(view.getFloat32(offset, true), ARENA_WIDTH);
+    else if (offset === 252) assert.equal(view.getFloat32(offset, true), ARENA_HEIGHT);
     else assert.equal(view.getUint32(offset, true), offset === 88 ? 1 : 0);
   }
 });
@@ -183,12 +186,12 @@ test('every packSimParams field lands at its pinned byte offset with its type', 
   for (const [offset, value] of Object.entries(unsigned)) assert.equal(view.getUint32(Number(offset), true), value, `u32 at ${offset}`);
 });
 
-test('the unwritten bytes stay zero: 68 to 79 padding, 160 and 164 to 191 gate rows when no gates are given, and the tail past 240 does not exist', () => {
+test('the unwritten bytes stay zero: 68 to 79 padding, 160 and 164 to 191 gate rows when no gates are given, and the tail past 256 does not exist', () => {
   const view = new DataView(packSimParams({ spawnPerSpecies: [1, 1, 1, 1, 1] }));
   for (let offset = 68; offset < 80; offset += 4) assert.equal(view.getUint32(offset, true), 0, `offset ${offset}`);
   for (let offset = 128; offset < 208; offset += 4) assert.equal(view.getUint32(offset, true), 0, `offset ${offset}`);
-  assert.equal(view.byteLength, 240);
-  assert.throws(() => view.getUint32(240, true), RangeError);
+  assert.equal(view.byteLength, 256);
+  assert.throws(() => view.getUint32(256, true), RangeError);
 });
 
 test('the packed defaults when nothing is given pin the omitted-field values by offset', () => {
@@ -237,4 +240,28 @@ test('the range constants and defaults are pinned by value', () => {
     [0.5, 2, 40, 160, 1, 4],
   );
   assert.deepEqual([DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS], [0.6, 0.5]);
+});
+
+test('packSimParams packs the arena bounds as a vec4f at 240, the whole world when omitted', () => {
+  const read = (view) => [240, 244, 248, 252].map((offset) => view.getFloat32(offset, true));
+  assert.deepEqual(read(new DataView(packSimParams({}))), [0, 0, ARENA_WIDTH, ARENA_HEIGHT]);
+  assert.deepEqual(read(new DataView(packSimParams({ arenaBounds: FULL_ARENA_BOUNDS }))), [0, 0, 16, 9]);
+  const narrow = arenaBoundsForAspect(1);
+  assert.deepEqual(read(new DataView(packSimParams({ arenaBounds: narrow }))), [3.5, 0, 12.5, 9]);
+  // The bounds leave every earlier field where it was.
+  const view = new DataView(packSimParams({ arenaBounds: { minX: 1.25, minY: 0.5, maxX: 14.75, maxY: 8.5 }, projectileDt: 0.125 }));
+  assert.deepEqual(read(view), [1.25, 0.5, 14.75, 8.5]);
+  assert.equal(view.getFloat32(236, true), 0.125);
+});
+
+test('validatedArenaBounds accepts rectangles inside the world and rejects the rest', () => {
+  assert.deepEqual(validatedArenaBounds(FULL_ARENA_BOUNDS), { ...FULL_ARENA_BOUNDS });
+  assert.deepEqual(validatedArenaBounds({ minX: 2, minY: 1, maxX: 6, maxY: 4 }), { minX: 2, minY: 1, maxX: 6, maxY: 4, width: 4, height: 3 });
+  for (const bounds of [
+    undefined, {}, { minX: 0, minY: 0, maxX: Number.NaN, maxY: 9 }, { minX: 0, minY: 0, maxX: Infinity, maxY: 9 },
+    { minX: 4, minY: 0, maxX: 4, maxY: 9 }, { minX: 0, minY: 5, maxX: 16, maxY: 2 },
+    { minX: -0.5, minY: 0, maxX: 16, maxY: 9 }, { minX: 0, minY: 0, maxX: 16.5, maxY: 9 }, { minX: 0, minY: 0, maxX: 16, maxY: 9.5 },
+  ]) {
+    assert.throws(() => validatedArenaBounds(bounds), RangeError, JSON.stringify(bounds));
+  }
 });

@@ -19,9 +19,11 @@
 // lane the player is shooting open does not refill from its far end; a gate that stays in the lane
 // for AIM_LANE_CLOSE_SECONDS closes, so a new one opens elsewhere. The first fill ignores the lane.
 // Time is the summed deltaSeconds of update (injected), randomness the injected random.
+// Bounds: gates place, drift and bounce inside context.bounds (the playable arena, a
+// sub-rectangle of the world from arenaBoundsForAspect; FULL_ARENA_BOUNDS by default).
 // The shader side (spawn.wgsl) samples each new agent's position from the emitting gates, weighted
 // by emission and by speciesBias toward the gate's favored species; see spawnGates.
-import { ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from './layout.js';
+import { FULL_ARENA_BOUNDS, SPECIES_COUNT } from './layout.js';
 
 export const MAXIMUM_SPAWN_GATES = 4;
 // Seconds a gate takes to fade open and to fade closed; it emits only while fully open.
@@ -131,14 +133,17 @@ export class SpawnDirector {
     this.continuous = false;
   }
 
-  // options: playerX, playerY (world units), safeDistance (the minimum spawn distance from the
-  // player, SpawnPressure.spawnDistanceFraction times the arena width), filling (SpawnPressure's
-  // first fill), shares (species shares, for each new gate's favored species), continuous (no
-  // waves; see the header), aimX and aimY (the player's aim, a unit vector or zero for none).
+  // options: playerX, playerY (world units, the bounds center when omitted), safeDistance (the
+  // minimum spawn distance from the player, SpawnPressure.spawnDistanceFraction times the bounds
+  // width), filling (SpawnPressure's first fill), shares (species shares, for each new gate's
+  // favored species), continuous (no waves; see the header), aimX and aimY (the player's aim, a
+  // unit vector or zero for none), bounds (the playable arena { minX, minY, maxX, maxY, width,
+  // height }, FULL_ARENA_BOUNDS when omitted).
   update(deltaSeconds, {
-    playerX = ARENA_WIDTH / 2, playerY = ARENA_HEIGHT / 2, safeDistance = 0, filling = false, shares = [], continuous = false, aimX = 0, aimY = 0,
+    bounds = FULL_ARENA_BOUNDS, playerX = (bounds.minX + bounds.maxX) / 2, playerY = (bounds.minY + bounds.maxY) / 2,
+    safeDistance = 0, filling = false, shares = [], continuous = false, aimX = 0, aimY = 0,
   } = {}) {
-    const context = { playerX, playerY, safeDistance, shares, aimX, aimY };
+    const context = { playerX, playerY, safeDistance, shares, aimX, aimY, bounds };
     this.filling = filling;
     this.continuous = continuous;
     if (this.needsInitialGates) {
@@ -246,12 +251,13 @@ export class SpawnDirector {
     }
     const speed = this.schedule.driftSpeed * deltaSeconds;
     const inset = WALL_INSET + gate.radius;
+    const { minX, minY, maxX, maxY } = context.bounds ?? FULL_ARENA_BOUNDS;
     gate.x += driftX * speed;
     gate.y += driftY * speed;
-    if (gate.x < inset || gate.x > ARENA_WIDTH - inset) gate.driftX = -gate.driftX;
-    if (gate.y < inset || gate.y > ARENA_HEIGHT - inset) gate.driftY = -gate.driftY;
-    gate.x = clamp(gate.x, inset, ARENA_WIDTH - inset);
-    gate.y = clamp(gate.y, inset, ARENA_HEIGHT - inset);
+    if (gate.x < minX + inset || gate.x > maxX - inset) gate.driftX = -gate.driftX;
+    if (gate.y < minY + inset || gate.y > maxY - inset) gate.driftY = -gate.driftY;
+    gate.x = clamp(gate.x, minX + inset, maxX - inset);
+    gate.y = clamp(gate.y, minY + inset, maxY - inset);
   }
 
   // A closing gate fades out over GATE_FADE_SECONDS from now (or what is left of its lifetime).
@@ -290,14 +296,14 @@ export class SpawnDirector {
   // safe radius plus the gate radius) beat unplaceable ones; among them far from the player and
   // apart from the other gates scores higher. With no placeable draw the farthest one wins.
   placeGate(context) {
-    const { playerX, playerY, safeDistance } = context;
+    const { playerX, playerY, safeDistance, bounds = FULL_ARENA_BOUNDS } = context;
     const inset = WALL_INSET + this.schedule.gateRadius;
     let best = null;
     let bestScore = -Infinity;
     for (let candidate = 0; candidate < PLACEMENT_CANDIDATES; candidate += 1) {
-      const point = this.random() < WALL_BAND_CHANCE ? this.wallBandPoint(inset) : {
-        x: inset + this.random() * (ARENA_WIDTH - 2 * inset),
-        y: inset + this.random() * (ARENA_HEIGHT - 2 * inset),
+      const point = this.random() < WALL_BAND_CHANCE ? this.wallBandPoint(inset, bounds) : {
+        x: bounds.minX + inset + this.random() * (bounds.maxX - bounds.minX - 2 * inset),
+        y: bounds.minY + inset + this.random() * (bounds.maxY - bounds.minY - 2 * inset),
       };
       const playerDistance = Math.hypot(point.x - playerX, point.y - playerY);
       const spacing = this.gates.reduce((nearest, gate) => Math.min(nearest, Math.hypot(point.x - gate.x, point.y - gate.y)), PREFERRED_GATE_SPACING);
@@ -312,15 +318,19 @@ export class SpawnDirector {
     return best;
   }
 
-  wallBandPoint(inset) {
-    const depth = Math.min(WALL_BAND_DEPTH, ARENA_HEIGHT / 2 - inset);
+  // A point in the band of depth WALL_BAND_DEPTH inside the inset along a wall of bounds; the band
+  // never passes the middle of the bounds' shorter side.
+  wallBandPoint(inset, { minX, minY, maxX, maxY } = FULL_ARENA_BOUNDS) {
+    const width = maxX - minX;
+    const height = maxY - minY;
+    const depth = Math.max(0, Math.min(WALL_BAND_DEPTH, Math.min(width, height) / 2 - inset));
     const along = this.random();
     const inward = inset + this.random() * depth;
     switch (Math.floor(this.random() * 4)) {
-      case 0: return { x: inset + along * (ARENA_WIDTH - 2 * inset), y: inward };
-      case 1: return { x: inset + along * (ARENA_WIDTH - 2 * inset), y: ARENA_HEIGHT - inward };
-      case 2: return { x: inward, y: inset + along * (ARENA_HEIGHT - 2 * inset) };
-      default: return { x: ARENA_WIDTH - inward, y: inset + along * (ARENA_HEIGHT - 2 * inset) };
+      case 0: return { x: minX + inset + along * (width - 2 * inset), y: minY + inward };
+      case 1: return { x: minX + inset + along * (width - 2 * inset), y: maxY - inward };
+      case 2: return { x: minX + inward, y: minY + inset + along * (height - 2 * inset) };
+      default: return { x: maxX - inward, y: minY + inset + along * (height - 2 * inset) };
     }
   }
 

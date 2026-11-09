@@ -19,7 +19,7 @@
 //   (tests/sim/capsule-budget.test.js).
 // - sidewinder: walked with a kill budget of 1. If it killed, its slot is rewritten in place as a
 //   pulse ring (flag PROJECTILE_FLAG_MISSILE_RING, lifetime MISSILE_RING_LIFETIME, so it grows to
-//   half a pulse ring) at its position clamped to the arena, counted in stats ringsThisFrame and
+//   half a pulse ring) at its position clamped to the arena bounds, counted in stats ringsThisFrame and
 //   lastRingX/Y as an orb's detonation is; the rings entry then collides it. A miss flies on.
 // - pulseRing: skipped here, see rings.
 // Entry rings, a few workgroups (RING_WORKGROUP_COUNT in projectiles.js): every workgroup scans the
@@ -34,7 +34,7 @@
 // looped by one thread, as for capsules: the work is bounded by cell count, not by agent count.
 // Entry beam, one workgroup: slot 0 when it is an alive beam. The beam kills the sector swept since
 // the previous step: from position, between the previous direction (seed, extra) and the current
-// one (velocity), both unit, over the shortest arc, out to the arena edge, padded by the half width
+// one (velocity), both unit, over the shortest arc, out to the arena bounds edge, padded by the half width
 // (radius) around both edge rays, so a fast turn leaves no gaps between steps. A first step has
 // both directions equal, which is the plain capsule. The shortest arc is never wider than 180
 // degrees, so no clamp is needed; an exact reversal takes the counterclockwise half disc from the
@@ -323,7 +323,7 @@ fn main(
       if (detonates && killBudget == 0u) {
         var ring = projectile;
         ring.kind = PROJECTILE_KIND_PULSE_RING;
-        ring.position = clampToArena(projectile.position);
+        ring.position = clampToBounds(projectile.position, params);
         ring.previousPosition = ring.position;
         ring.velocity = vec2f(0.0, 0.0);
         ring.radius = RING_START_RADIUS;
@@ -381,13 +381,16 @@ fn rings(
   flushKills(localIndex);
 }
 
-// Distance along direction from origin (inside the arena) to the arena edge.
+// Distance along direction from origin (inside the arena bounds) to the bounds edge.
 fn distanceToArenaEdge(origin: vec2f, direction: vec2f) -> f32 {
-  var nearest = ARENA_WIDTH + ARENA_HEIGHT;
-  if (direction.x > 0.0) { nearest = min(nearest, (ARENA_WIDTH - origin.x) / direction.x); }
-  if (direction.x < 0.0) { nearest = min(nearest, -origin.x / direction.x); }
-  if (direction.y > 0.0) { nearest = min(nearest, (ARENA_HEIGHT - origin.y) / direction.y); }
-  if (direction.y < 0.0) { nearest = min(nearest, -origin.y / direction.y); }
+  let low = params.arenaBounds.xy;
+  let high = params.arenaBounds.zw;
+  let size = high - low;
+  var nearest = size.x + size.y;
+  if (direction.x > 0.0) { nearest = min(nearest, (high.x - origin.x) / direction.x); }
+  if (direction.x < 0.0) { nearest = min(nearest, (low.x - origin.x) / direction.x); }
+  if (direction.y > 0.0) { nearest = min(nearest, (high.y - origin.y) / direction.y); }
+  if (direction.y < 0.0) { nearest = min(nearest, (low.y - origin.y) / direction.y); }
   return nearest;
 }
 
@@ -412,7 +415,7 @@ fn crossProduct(first: vec2f, second: vec2f) -> f32 {
 
 fn beamSector(projectile: Projectile) -> BeamSector {
   var sector: BeamSector;
-  sector.origin = clampToArena(projectile.position);
+  sector.origin = clampToBounds(projectile.position, params);
   let current = projectile.velocity;
   var previous = vec2f(projectile.seed, projectile.extra);
   if (dot(previous, previous) < BEAM_MINIMUM_PREVIOUS_LENGTH_SQUARED) {
@@ -478,10 +481,12 @@ fn includeCorner(sector: BeamSector, corner: vec2f, bounds: vec4f) -> vec4f {
 // firstCell + cellStride, ... and colliding at most BEAM_CELL_BUDGET cells near the sector.
 fn collideSector(sector: BeamSector, firstCell: u32, cellStride: u32) {
   var bounds = vec4f(min(sector.origin, min(sector.startEnd, sector.finishEnd)), max(sector.origin, max(sector.startEnd, sector.finishEnd)));
-  bounds = includeCorner(sector, vec2f(0.0, 0.0), bounds);
-  bounds = includeCorner(sector, vec2f(ARENA_WIDTH, 0.0), bounds);
-  bounds = includeCorner(sector, vec2f(0.0, ARENA_HEIGHT), bounds);
-  bounds = includeCorner(sector, vec2f(ARENA_WIDTH, ARENA_HEIGHT), bounds);
+  let low = params.arenaBounds.xy;
+  let high = params.arenaBounds.zw;
+  bounds = includeCorner(sector, low, bounds);
+  bounds = includeCorner(sector, vec2f(high.x, low.y), bounds);
+  bounds = includeCorner(sector, vec2f(low.x, high.y), bounds);
+  bounds = includeCorner(sector, high, bounds);
   if (sector.limit < UNLIMITED_REACH) {
     // The limit's arc can bulge past the edge ray ends: the square around the origin bounds it.
     bounds = vec4f(min(bounds.xy, sector.origin - vec2f(sector.limit)), max(bounds.zw, sector.origin + vec2f(sector.limit)));
