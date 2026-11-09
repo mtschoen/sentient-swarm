@@ -64,7 +64,7 @@ import { CapacitySwap } from './capacity-swap.js';
 import { TimeWarp } from './time-warp.js';
 import { SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../sim/spawner.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '../sim/layout.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT } from '../sim/layout.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 const NO_AIM = Object.freeze({ x: 0, y: 0 });
@@ -127,9 +127,11 @@ export class Game {
     this.watchPressure = null;
     // The gate table for the next simulation step (null while Dying and Respawning).
     this.stepGates = null;
-    this.player = new PlayerShip({ arenaWidth: ARENA_WIDTH, arenaHeight: ARENA_HEIGHT });
+    // The playable rectangle inside the 16 by 9 world (setArenaBounds); the whole world until set.
+    this.arenaBounds = FULL_ARENA_BOUNDS;
+    this.player = new PlayerShip({ bounds: this.arenaBounds });
     this.weapons = new WeaponState({ random });
-    this.pickups = new PickupDirector({ random });
+    this.pickups = new PickupDirector({ random, bounds: this.arenaBounds });
     this.score = new ScoreKeeper({ capacity });
     this.awards = new Awards();
     this.run = new RunState();
@@ -255,7 +257,26 @@ export class Game {
       next.requests = previous.requests;
       next.filling = previous.filling;
     }
+    next.setAreaFraction(this.areaFraction());
     this.watchPressure = next;
+  }
+
+  // The playable rectangle's share of the world's area.
+  areaFraction() {
+    return (this.arenaBounds.width * this.arenaBounds.height) / (ARENA_WIDTH * ARENA_HEIGHT);
+  }
+
+  // The playable arena for the canvas aspect (Viewport.arenaBounds, on every resize): the ship,
+  // pickups, spawn gates and the simulation's walls follow it, and spawn pressure holds the same
+  // density by scaling the alive target with the area.
+  setArenaBounds(bounds) {
+    this.arenaBounds = bounds;
+    this.player.setBounds(bounds);
+    this.pickups.setBounds(bounds);
+    this.simulation.setArenaBounds(bounds);
+    const fraction = this.areaFraction();
+    this.spawnPressure.setAreaFraction(fraction);
+    this.watchPressure?.setAreaFraction(fraction);
   }
 
   get watching() {
@@ -426,9 +447,9 @@ export class Game {
       this.player.update(deltaSeconds, { ...controls, firing: false });
       return;
     }
-    const { radius, arenaWidth, arenaHeight } = this.player;
-    this.player.positionX = clamp(pointer.x, radius, arenaWidth - radius);
-    this.player.positionY = clamp(pointer.y, radius, arenaHeight - radius);
+    const { radius, bounds } = this.player;
+    this.player.positionX = clamp(pointer.x, bounds.minX + radius, bounds.maxX - radius);
+    this.player.positionY = clamp(pointer.y, bounds.minY + radius, bounds.maxY - radius);
   }
 
   // Stick or touch aim wins while it is pushed; otherwise the mouse aims from the ship to the
@@ -453,7 +474,8 @@ export class Game {
     this.spawnDirector.update(deltaSeconds, {
       playerX: this.player.position.x,
       playerY: this.player.position.y,
-      safeDistance: pressure.spawnDistanceFraction * ARENA_WIDTH,
+      safeDistance: pressure.spawnDistanceFraction * this.arenaBounds.width,
+      bounds: this.arenaBounds,
       filling: pressure.filling,
       shares: this.simulation.shares,
       // The Ready arena (before a run) trickles from every gate; waves start with the run.

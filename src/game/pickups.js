@@ -1,7 +1,7 @@
 // Pickup director: rotates the offered pickup type (the weapons, then the time warp) and spawns
 // pickups on milestones and the recovery guard.
 import { PICKUP_TYPE_NAMES } from './weaponTypes.js';
-import { ARENA_WIDTH, ARENA_HEIGHT } from '../sim/layout.js';
+import { FULL_ARENA_BOUNDS } from '../sim/layout.js';
 
 const PLACEMENT_ATTEMPTS = 16;
 const DENSITY_CANDIDATES = 8;
@@ -14,8 +14,7 @@ export class PickupDirector {
     fadeSeconds = 10,
     minimumDistance = 3,
     maximumDistance = 5,
-    arenaWidth = ARENA_WIDTH,
-    arenaHeight = ARENA_HEIGHT,
+    bounds = FULL_ARENA_BOUNDS,
     random = Math.random,
   } = {}) {
     if (!(rotationSeconds > 0)) throw new Error(`rotationSeconds must be above 0, got ${rotationSeconds}`);
@@ -24,10 +23,14 @@ export class PickupDirector {
     this.fadeSeconds = fadeSeconds;
     this.minimumDistance = minimumDistance;
     this.maximumDistance = maximumDistance;
-    this.arenaWidth = arenaWidth;
-    this.arenaHeight = arenaHeight;
+    this.bounds = bounds;
     this.random = random;
     this.reset();
+  }
+
+  // The playable rectangle changed (a canvas resize); pickups already placed stay where they are.
+  setBounds(bounds) {
+    this.bounds = bounds;
   }
 
   reset() {
@@ -81,7 +84,7 @@ export class PickupDirector {
       const distance = this.minimumDistance + this.random() * (this.maximumDistance - this.minimumDistance);
       const x = playerX + Math.cos(angle) * distance;
       const y = playerY + Math.sin(angle) * distance;
-      if (x >= 0 && x <= this.arenaWidth && y >= 0 && y <= this.arenaHeight) candidates.push({ x, y });
+      if (x >= this.bounds.minX && x <= this.bounds.maxX && y >= this.bounds.minY && y <= this.bounds.maxY) candidates.push({ x, y });
     }
     let chosen = null;
     if (candidates.length > 0) {
@@ -107,14 +110,14 @@ export class PickupDirector {
   // Every attempt missed the arena: step minimumDistance from the player toward the arena center
   // (always inward, so a corner player keeps the minimum distance), then clamp for tiny arenas.
   #fallbackPlacement(playerX, playerY) {
-    const towardX = this.arenaWidth / 2 - playerX;
-    const towardY = this.arenaHeight / 2 - playerY;
+    const towardX = (this.bounds.minX + this.bounds.maxX) / 2 - playerX;
+    const towardY = (this.bounds.minY + this.bounds.maxY) / 2 - playerY;
     const length = Math.hypot(towardX, towardY);
     const directionX = length === 0 ? 1 : towardX / length;
     const directionY = length === 0 ? 0 : towardY / length;
     return {
-      x: Math.min(this.arenaWidth, Math.max(0, playerX + directionX * this.minimumDistance)),
-      y: Math.min(this.arenaHeight, Math.max(0, playerY + directionY * this.minimumDistance)),
+      x: Math.min(this.bounds.maxX, Math.max(this.bounds.minX, playerX + directionX * this.minimumDistance)),
+      y: Math.min(this.bounds.maxY, Math.max(this.bounds.minY, playerY + directionY * this.minimumDistance)),
     };
   }
 

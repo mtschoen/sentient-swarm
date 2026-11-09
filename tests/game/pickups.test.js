@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PickupDirector } from '../../src/game/pickups.js';
+import { arenaBoundsForAspect } from '../../src/sim/layout.js';
 
 const STEP = 1 / 60;
 const WIDTH = 16;
@@ -15,7 +16,7 @@ function sequenceRandom() {
 }
 
 function makeDirector() {
-  return new PickupDirector({ arenaWidth: WIDTH, arenaHeight: HEIGHT, random: sequenceRandom() });
+  return new PickupDirector({ random: sequenceRandom() });
 }
 
 function run(director, seconds, context) {
@@ -84,7 +85,7 @@ test('placement stays within [3, 5] of the player and inside the arena at a corn
 });
 
 test('placement falls back to clamping when random never finds a valid angle', () => {
-  const director = new PickupDirector({ arenaWidth: WIDTH, arenaHeight: HEIGHT, random: () => 0.75 });
+  const director = new PickupDirector({ random: () => 0.75 });
   director.update(STEP, { playerX: 0, playerY: 0, onBaseGun: false, milestone: true, phasePlaying: true });
   const [pickup] = director.pickups;
   assert.ok(pickup.x >= 0 && pickup.x <= WIDTH && pickup.y >= 0 && pickup.y <= HEIGHT);
@@ -155,7 +156,7 @@ test('density placement avoids a dense half of the arena', () => {
 });
 
 test('densityAt falls back to the 16-attempt clamp when every candidate is outside the arena', () => {
-  const director = new PickupDirector({ arenaWidth: 1, arenaHeight: 1, minimumDistance: 50, maximumDistance: 60, random: sequenceRandom() });
+  const director = new PickupDirector({ bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1, width: 1, height: 1 }, minimumDistance: 50, maximumDistance: 60, random: sequenceRandom() });
   let calls = 0;
   director.spawn(0.5, 0.5, () => { calls += 1; return 0; });
   assert.equal(calls, 0);
@@ -206,7 +207,7 @@ test('rotationSeconds at or below zero throws', () => {
 });
 
 test('fallback placement keeps the minimum distance from a corner player', () => {
-  const director = new PickupDirector({ arenaWidth: WIDTH, arenaHeight: HEIGHT, random: () => 0 });
+  const director = new PickupDirector({ random: () => 0 });
   // random 0: angle 0, so every attempt lands at playerX + minimumDistance, outside the arena.
   director.spawn(WIDTH - 0.5, 0.5);
   const [pickup] = director.pickups;
@@ -229,7 +230,7 @@ test('pickups, the rotation and the pity timer are frozen outside play', () => {
 });
 
 test('a milestone spawn restarts the pity timer', () => {
-  const director = new PickupDirector({ arenaWidth: WIDTH, arenaHeight: HEIGHT, random: sequenceRandom(), fadeSeconds: 100 });
+  const director = new PickupDirector({ random: sequenceRandom(), fadeSeconds: 100 });
   run(director, 9);
   director.update(STEP, { ...FAR_FROM_EVERYTHING, onBaseGun: true, milestone: true, phasePlaying: true });
   assert.equal(director.pickups.length, 1);
@@ -255,7 +256,7 @@ test('collect takes the nearer of two pickups in reach, whichever order they wer
 });
 
 test('the rotation moving on does not retype a pickup already on the field', () => {
-  const director = new PickupDirector({ arenaWidth: WIDTH, arenaHeight: HEIGHT, random: sequenceRandom(), fadeSeconds: 100 });
+  const director = new PickupDirector({ random: sequenceRandom(), fadeSeconds: 100 });
   director.update(STEP, { ...FAR_FROM_EVERYTHING, milestone: true, phasePlaying: true });
   assert.equal(director.pickups[0].type, 'beam');
   run(director, 20, FAR_FROM_EVERYTHING);
@@ -264,4 +265,23 @@ test('the rotation moving on does not retype a pickup already on the field', () 
   assert.deepEqual(director.pickups.map((pickup) => pickup.type), ['beam', 'scatter']);
   run(director, 20, FAR_FROM_EVERYTHING);
   assert.deepEqual(director.pickups.map((pickup) => pickup.type), ['beam', 'scatter']);
+});
+
+test('pickups spawn inside narrow bounds, and setBounds changes where they may land', () => {
+  const bounds = arenaBoundsForAspect(1);
+  const director = new PickupDirector({ bounds, random: sequenceRandom() });
+  for (let index = 0; index < 40; index += 1) director.spawn(8, 4.5);
+  assert.ok(director.pickups.every((pickup) => pickup.x >= bounds.minX && pickup.x <= bounds.maxX && pickup.y >= bounds.minY && pickup.y <= bounds.maxY));
+  const wider = new PickupDirector({ random: sequenceRandom() });
+  wider.setBounds(bounds);
+  assert.equal(wider.bounds, bounds);
+});
+
+test('the fallback placement steps toward the bounds center and clamps to the bounds edges', () => {
+  const bounds = { minX: 4, minY: 2, maxX: 6, maxY: 4, width: 2, height: 2 };
+  const director = new PickupDirector({ bounds, minimumDistance: 50, maximumDistance: 60, random: sequenceRandom() });
+  director.spawn(4.2, 2.2);
+  const [pickup] = director.pickups;
+  assert.ok(pickup.x >= 4 && pickup.x <= 6 && pickup.y >= 2 && pickup.y <= 4);
+  assert.deepEqual({ x: pickup.x, y: pickup.y }, { x: 6, y: 4 });
 });

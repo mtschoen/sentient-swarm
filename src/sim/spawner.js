@@ -15,6 +15,10 @@
 // far spawns alone did not help either; weak early seek plus far early spawns did (task C0 report).
 // Counts are fractions of capacity and distances fractions of the arena, so the ramp feels the
 // same at every capacity.
+// The playable arena can be a sub-rectangle of the world (a canvas aspect other than 16 by 9):
+// setAreaFraction(fraction) scales the alive target by the playable area over the world area, so
+// the swarm's density, not its count, is what stays the same across aspects. The frame cap
+// (maximumPerFrame) stays on the raw capacity.
 // Each frame spawns the deficit between the target and the estimated alive count, capped at
 // capacity / 60, split across species by shares with largest-remainder rounding so the per-species
 // counts add up to exactly the frame's total. The first fill (from construction or reset, so after
@@ -117,6 +121,8 @@ export class SpawnPressure {
     this.capacity = capacity;
     this.ramp = validatedRamp({ ...DEFAULT_RAMP, ...pickRamp(ramp) });
     this.maximumPerFrame = Math.floor(capacity / SPAWN_CAP_DIVISOR);
+    // Playable area over world area, in (0, 1]; scales the alive target.
+    this.areaFraction = 1;
     this.elapsed = 0;
     this.carry = new Float64Array(SPECIES_COUNT);
     // True until the estimate first reaches the target after construction or reset.
@@ -135,13 +141,19 @@ export class SpawnPressure {
     this.ramp = validatedRamp({ ...this.ramp, ...pickRamp(ramp) });
   }
 
+  // For a playable arena smaller than the world: fraction of the world's area, in (0, 1].
+  setAreaFraction(fraction) {
+    if (!(fraction > 0 && fraction <= 1)) throw new RangeError(`SpawnPressure areaFraction must lie in (0, 1], got ${fraction}`);
+    this.areaFraction = fraction;
+  }
+
   // 0 at the start of a run or a life, 1 from rampSeconds on.
   get rampProgress() {
     return clampUnit(this.elapsed / this.ramp.rampSeconds) ** this.ramp.curveExponent;
   }
 
   get targetAlive() {
-    return this.capacity * lerp(this.ramp.floorFraction, this.ramp.ceilingFraction, this.rampProgress);
+    return this.capacity * this.areaFraction * lerp(this.ramp.floorFraction, this.ramp.ceilingFraction, this.rampProgress);
   }
 
   // Multiplier on every species' seek weight for this step.
