@@ -52,6 +52,8 @@ async function boot() {
   // The pause button asks for the same pause menu as Escape; requestPause is defined with the game.
   const hud = createHud(document.getElementById('hud'), { onPause: () => requestPause() });
   let renderer = null;
+  // Created after the first resize, so resizeCanvas reaches it only once it exists (`let` hoists the name).
+  let game = null;
   // The HUD lives in CSS pixels; the viewport rectangle is in device pixels.
   const layoutHud = () => {
     const scale = 1 / viewport.devicePixelRatio;
@@ -66,6 +68,7 @@ async function boot() {
     canvas.height = height;
     viewport.setCanvasSize(width, height, devicePixelRatio);
     renderer?.resize(width, height);
+    game?.setArenaBounds(viewport.arenaBounds);
     layoutHud();
   };
   // Sized explicitly before the first frame; the observer then keeps it current.
@@ -115,7 +118,7 @@ async function boot() {
   let liveSettings = settings;
   const rumble = createRumble({ isEnabled: () => liveSettings.rumble });
   const lifeWatcher = createLifeWatcher(rumble);
-  const game = await Game.create({
+  game = await Game.create({
     gpu,
     simulation,
     renderer,
@@ -127,6 +130,7 @@ async function boot() {
   quality = new QualityController({ game, store, probe: new FrameTimeProbe(), adapterKey, ceiling: initialPreset.ceiling });
   if (pinnedCapacity === null) quality.start(initialPreset.name, { allowUp: initialPreset.allowUp });
   window.__murmuration.quality = quality;
+  game.setArenaBounds(viewport.arenaBounds);
   window.__murmuration.game = game;
 
   // The settings panel applies every stored setting live: volumes, renderer effects, shake, trails,

@@ -11,7 +11,8 @@ function describeCapture(frame, arenaRect, regions) {
   canvas.width = width;
   canvas.height = height;
   canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels.buffer, pixels.byteOffset, pixels.byteLength), width, height), 0, 0);
-  // The letterbox band (top strip, or left strip when the canvas is wider than the arena) should stay black.
+  // The letterbox band (top strip, or left strip) exists only beyond the 1:4 to 4:1 aspect range; it is
+  // empty (luminance 0) at ordinary aspects, and otherwise should stay black.
   const band = arenaRect.y > 0
     ? { x: 0, y: 0, width, height: arenaRect.y }
     : { x: 0, y: 0, width: arenaRect.x, height };
@@ -44,8 +45,14 @@ function waitAnimationFrames(count) {
 // call order, so overlapping calls cannot save and restore each other's overrides. The arena rect
 // is the one the captured frame was drawn with.
 export function installCaptureHook({ viewport, renderer }) {
-  // The arena rect in device pixels plus the arena size in world units, to place capture regions.
-  window.__murmuration.arenaRect = () => ({ ...viewport.arenaRectDevicePixels, arenaWidth: viewport.arenaWidth, arenaHeight: viewport.arenaHeight });
+  // The arena rect in device pixels plus the world size, the playable bounds and the scale in world units, to place capture regions.
+  window.__murmuration.arenaRect = () => ({
+    ...viewport.arenaRectDevicePixels,
+    arenaWidth: viewport.arenaWidth,
+    arenaHeight: viewport.arenaHeight,
+    arenaBounds: { ...viewport.arenaBounds },
+    pixelsPerWorldUnit: viewport.pixelsPerWorldUnit,
+  });
   let queue = Promise.resolve();
   window.__murmuration.capture = (options) => {
     const result = queue.then(() => captureOnce(options));

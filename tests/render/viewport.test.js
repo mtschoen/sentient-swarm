@@ -1,21 +1,54 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Viewport } from '../../src/render/viewport.js';
+import { FULL_ARENA_BOUNDS } from '../../src/sim/layout.js';
 
-test('a wide canvas letterboxes the arena to width 1777 centered', () => {
+test('a 16:9 canvas plays the whole world, as before', () => {
   const viewport = new Viewport();
-  viewport.setCanvasSize(2000, 1000);
-  assert.deepEqual(viewport.arenaRectDevicePixels, { x: 111, y: 0, width: 1777, height: 1000 });
+  viewport.setCanvasSize(1600, 900);
+  assert.deepEqual(viewport.arenaRectDevicePixels, { x: 0, y: 0, width: 1600, height: 900 });
+  assert.deepEqual(viewport.arenaBounds, FULL_ARENA_BOUNDS);
+  assertNear(viewport.worldToClip(0, 0), { x: -1, y: 1 });
+  assertNear(viewport.worldToClip(16, 9), { x: 1, y: -1 });
+  assert.equal(viewport.pixelsPerWorldUnit, 100);
+  assert.deepEqual(viewport.worldRectDevicePixels, { width: 1600, height: 900 });
 });
 
-test('a square canvas letterboxes the arena to height 562', () => {
+test('a wide canvas fills the window with 16 by 8 bounds centered in the world', () => {
+  const viewport = new Viewport();
+  viewport.setCanvasSize(2000, 1000);
+  assert.deepEqual(viewport.arenaRectDevicePixels, { x: 0, y: 0, width: 2000, height: 1000 });
+  const bounds = viewport.arenaBounds;
+  assert.equal(bounds.width, 16);
+  assert.equal(bounds.height, 8);
+  assert.equal(bounds.minY, 0.5);
+  assert.equal(viewport.pixelsPerWorldUnit, 125);
+  assert.deepEqual(viewport.worldRectDevicePixels, { width: 2000, height: 1125 });
+});
+
+test('a square canvas fills the window with 9 by 9 bounds', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(1000, 1000);
-  const rect = viewport.arenaRectDevicePixels;
-  assert.equal(rect.width, 1000);
-  assert.equal(rect.height, 562);
-  assert.equal(rect.x, 0);
-  assert.equal(rect.y, 219);
+  assert.deepEqual(viewport.arenaRectDevicePixels, { x: 0, y: 0, width: 1000, height: 1000 });
+  assert.equal(viewport.arenaBounds.width, 9);
+  assert.equal(viewport.arenaBounds.height, 9);
+  assert.equal(viewport.arenaBounds.minX, 3.5);
+});
+
+test('beyond 4:1 the arena letterboxes at the clamped aspect', () => {
+  const viewport = new Viewport();
+  viewport.setCanvasSize(5000, 1000);
+  assert.deepEqual(viewport.arenaRectDevicePixels, { x: 500, y: 0, width: 4000, height: 1000 });
+  assert.equal(viewport.arenaBounds.width, 16);
+  assert.equal(viewport.arenaBounds.height, 4);
+});
+
+test('odd canvas sizes leave no one-pixel band from rounding', () => {
+  const viewport = new Viewport();
+  for (const [width, height] of [[844, 390], [915, 412], [1001, 777], [721, 1283]]) {
+    viewport.setCanvasSize(width, height);
+    assert.deepEqual(viewport.arenaRectDevicePixels, { x: 0, y: 0, width, height });
+  }
 });
 
 function assertNear(actual, expected, tolerance = 1e-9) {
@@ -28,7 +61,7 @@ function clipToDevice(viewport, clip) {
   return { x: (clip.x + 1) / 2 * viewport.canvasWidth, y: (1 - clip.y) / 2 * viewport.canvasHeight };
 }
 
-test('screenToWorld maps the canvas center to the arena center (8, 4.5)', () => {
+test('screenToWorld maps the canvas center to the world center (8, 4.5)', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(2000, 1000);
   assertNear(viewport.screenToWorld(1000, 500), { x: 8, y: 4.5 });
@@ -38,8 +71,8 @@ test('screenToWorld uses CSS pixels scaled by the device pixel ratio', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(2000, 1000, 2);
   assertNear(viewport.screenToWorld(500, 250), { x: 8, y: 4.5 });
-  // The arena's left edge sits 111.5 device pixels in (1777 wide, centered on 2000).
-  assertNear(viewport.screenToWorld(111.5 / 2, 0), { x: 0, y: 0 });
+  // The top-left canvas corner is the bounds corner (0, 0.5) at aspect 2.
+  assertNear(viewport.screenToWorld(0, 0), { x: 0, y: 0.5 });
 });
 
 test('the center stays at (8, 4.5) under 4x inspect zoom', () => {
@@ -60,14 +93,16 @@ test('under 4x zoom the arena corner pixel maps to the corner of the quarter-siz
   assert.ok(Math.abs(viewport.screenToWorld(960, 360).x - 9) < 1e-9);
 });
 
-test('screenToWorld inverts worldToClip at 1x and 4x zoom, letterboxed, at ratio 1.5', () => {
+test('screenToWorld inverts worldToClip at 1x and 4x zoom, on a square canvas and a letterboxed one, at ratio 1.5', () => {
   const viewport = new Viewport();
-  viewport.setCanvasSize(1000, 1000, 1.5);
-  for (const zoom of [1, 4]) {
-    viewport.inspectZoom = zoom;
-    for (const point of [{ x: 0, y: 0 }, { x: 3.25, y: 7.5 }, { x: 16, y: 9 }, { x: 9, y: 4 }]) {
-      const device = clipToDevice(viewport, viewport.worldToClip(point.x, point.y));
-      assertNear(viewport.screenToWorld(device.x / 1.5, device.y / 1.5), point, 1e-6);
+  for (const [width, height] of [[1000, 1000], [5000, 1000]]) {
+    viewport.setCanvasSize(width, height, 1.5);
+    for (const zoom of [1, 4]) {
+      viewport.inspectZoom = zoom;
+      for (const point of [{ x: 0, y: 0 }, { x: 3.25, y: 7.5 }, { x: 16, y: 9 }, { x: 9, y: 4 }]) {
+        const device = clipToDevice(viewport, viewport.worldToClip(point.x, point.y));
+        assertNear(viewport.screenToWorld(device.x / 1.5, device.y / 1.5), point, 1e-6);
+      }
     }
   }
 });
@@ -87,9 +122,9 @@ test('setCanvasSize stores a 1 by 1 minimum, so zero sizes give finite transform
 
 test('a point in the letterbox band lands outside the arena', () => {
   const viewport = new Viewport();
-  viewport.setCanvasSize(1000, 1000);
-  const world = viewport.screenToWorld(500, 10);
-  assert.ok(world.y < 0 || world.y > 9);
+  viewport.setCanvasSize(5000, 1000);
+  const world = viewport.screenToWorld(10, 500);
+  assert.ok(world.x < 0 || world.x > 16);
 });
 
 test('worldToClip maps the center to the origin and honors inspectZoom', () => {

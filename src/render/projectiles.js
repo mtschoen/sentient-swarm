@@ -8,8 +8,9 @@ import { PROJECTILE_KINDS, WEAPON_HUES } from '../game/weaponTypes.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
 import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
-export const PROJECTILE_VIEW_BYTES = 64;
+export const PROJECTILE_VIEW_BYTES = 80;
 const PROJECTILE_VIEW_FLOATS = PROJECTILE_VIEW_BYTES / Float32Array.BYTES_PER_ELEMENT;
+const ARENA_BOUNDS_FLOAT_OFFSET = 16;
 const VERTICES_PER_QUAD = 4;
 
 // The weapon whose palette entry colors each projectile kind.
@@ -23,13 +24,16 @@ const KIND_WEAPONS = Object.freeze({
   [PROJECTILE_KINDS.beam]: 'beam',
 });
 
-// Matches the ProjectileView table in projectiles.wgsl: the world view, then one hue per kind.
+// Matches the ProjectileView table in projectiles.wgsl: the world view (32 bytes), eight hue slots (bytes 32 to 63,
+// one per kind), then the arena bounds vec4f (minX, minY, maxX, maxY at bytes 64 to 79).
 // Fills floats (a new array by default) and returns it.
 export function packProjectileView({ viewport, time }, floats = new Float32Array(PROJECTILE_VIEW_FLOATS)) {
   packWorldView(viewport, time, floats);
   Object.entries(KIND_WEAPONS).forEach(([kind, weapon]) => {
     floats[WORLD_VIEW_FLOATS + Number(kind)] = WEAPON_HUES[weapon];
   });
+  const bounds = viewport.arenaBounds;
+  floats.set([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], ARENA_BOUNDS_FLOAT_OFFSET);
   return floats;
 }
 

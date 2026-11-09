@@ -1,6 +1,6 @@
 // Projectiles: one instance per projectile slot (4-vertex triangle strip) pulled straight from the
 // projectile storage buffer, max-blended (see MAX_BLEND). Dead slots collapse to a degenerate quad. Common
-// and quad headers prepended (Projectile, PROJECTILE_KIND_*, ARENA_*, hsvToRgb, segmentDistance).
+// and quad headers prepended (Projectile, PROJECTILE_KIND_*, hsvToRgb, segmentDistance).
 // All geometry is in world units in a frame whose +x is the projectile's heading (origin at its
 // position), so a quad is a centre, a heading and a half extent; each kind has its own silhouette in the fragment shader:
 //   bullet     energy ball: white core, hued body, halo        scatter  smaller flickering orange ball
@@ -14,9 +14,10 @@
 // Slot 0 is the beam; the CPU rewrites it every frame while firing, with the previous step's unit
 // direction in seed and extra (projectiles_collide.wgsl kills the same sector).
 
-// Uniform layout, total 64 bytes; ProjectileRenderer in projectiles.js writes it.
+// Uniform layout, total 80 bytes; ProjectileRenderer in projectiles.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
-//  28 header padding f32, 32 hues vec4f (bullet, scatter, rail, orb), 48 hues vec4f (ring, sidewinder, beam, pad)
+//  28 header padding f32, 32 hues vec4f (bullet, scatter, rail, orb), 48 hues vec4f (ring, sidewinder, beam, pad),
+//  64 arenaBounds vec4f (minX, minY, maxX, maxY: the playable arena in world units)
 struct ProjectileView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
@@ -25,6 +26,7 @@ struct ProjectileView {
   headerPadding: f32,
   huesFirst: vec4f,
   huesSecond: vec4f,
+  arenaBounds: vec4f,
 }
 
 @group(0) @binding(0) var<uniform> view: ProjectileView;
@@ -83,8 +85,8 @@ fn kindHue(kind: u32) -> f32 {
 // Distance from the origin along a unit direction to the arena boundary.
 fn distanceToArenaEdge(origin: vec2f, direction: vec2f) -> f32 {
   let toEdge = vec2f(
-    select(-origin.x, ARENA_WIDTH - origin.x, direction.x > 0.0),
-    select(-origin.y, ARENA_HEIGHT - origin.y, direction.y > 0.0),
+    select(view.arenaBounds.x - origin.x, view.arenaBounds.z - origin.x, direction.x > 0.0),
+    select(view.arenaBounds.y - origin.y, view.arenaBounds.w - origin.y, direction.y > 0.0),
   );
   let scaled = vec2f(
     select(1e9, toEdge.x / direction.x, abs(direction.x) > 1e-5),
@@ -221,7 +223,7 @@ fn beamSweepBounds(origin: vec2f, previous: vec2f, current: vec2f, limit: f32, m
   var high = max(origin, max(previousEnd, currentEnd));
   let sweep = sweptAngle(previous, current);
   for (var index = 0u; index < 4u; index = index + 1u) {
-    let corner = vec2f(f32(index & 1u) * ARENA_WIDTH, f32(index >> 1u) * ARENA_HEIGHT);
+    let corner = select(view.arenaBounds.xy, view.arenaBounds.zw, vec2<bool>((index & 1u) == 1u, (index >> 1u) == 1u));
     let angle = angleFromPrevious(previous, current, corner - origin);
     if (angle >= 0.0 && angle <= sweep && length(corner - origin) <= limit) {
       low = min(low, corner);
@@ -229,9 +231,8 @@ fn beamSweepBounds(origin: vec2f, previous: vec2f, current: vec2f, limit: f32, m
     }
   }
   if (limit < BEAM_UNLIMITED_REACH) {
-    let arena = vec2f(ARENA_WIDTH, ARENA_HEIGHT);
-    low = min(low, max(origin - vec2f(limit), vec2f(0.0)));
-    high = max(high, min(origin + vec2f(limit), arena));
+    low = min(low, max(origin - vec2f(limit), view.arenaBounds.xy));
+    high = max(high, min(origin + vec2f(limit), view.arenaBounds.zw));
   }
   return vec4f(low - vec2f(margin), high + vec2f(margin));
 }
@@ -356,7 +357,7 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
         let fanGlow = pow(clamp(1.0 - max(sectorDistance - radius, 0.0) / glowExtent, 0.0, 1.0), 2.5);
         let progress = clamp(angle / sweep, 0.0, 1.0);
         let world = origin + local;
-        let inArena = f32(all(world >= vec2f(0.0)) && all(world <= vec2f(ARENA_WIDTH, ARENA_HEIGHT)));
+        let inArena = f32(all(world >= view.arenaBounds.xy) && all(world <= view.arenaBounds.zw));
         let ramp = mix(BEAM_FAN_TAIL, BEAM_FAN_HEAD, progress);
         // White heat rises toward the current aim so the core blends into the fan instead of leaving comb lines.
         let heat = vec3f(fanBody * BEAM_FAN_HEAT * progress * progress * progress);
