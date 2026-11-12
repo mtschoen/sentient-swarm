@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createMenu, createPauseMenu } from '../../src/ui/menu.js';
+import { createMenu, createPauseMenu, SOURCE_URL } from '../../src/ui/menu.js';
 
 function createFakeDocument() {
   const make = (tagName) => {
@@ -133,4 +133,25 @@ test('Enter or Space after hovering Lab still means Play, and arrow keys take ov
   menu.handleAction('down');
   menu.handleAction('confirm');
   assert.equal(calls.settings, 1, 'the keyboard moves from the hovered item and confirms the focused one');
+});
+
+test('the title menu links to the source repository in a new tab, and following the link does not start play', () => {
+  const { menu, calls } = titleMenu();
+  const links = menu.element.children.filter((node) => node.tagName === 'A');
+  assert.equal(links.length, 1);
+  const [link] = links;
+  assert.equal(link.textContent, 'Source on GitHub');
+  assert.deepEqual(link.attributes, { href: SOURCE_URL, target: '_blank', rel: 'noopener noreferrer' });
+  assert.equal(SOURCE_URL, 'https://github.com/mtschoen/sentient-swarm');
+  let stopped = 0;
+  link.fire('click', { stopPropagation() { stopped += 1; } });
+  assert.equal(stopped, 1, 'the click never reaches the arena behind the menu');
+  menu.element.fire('click', { target: link });
+  assert.equal(calls.start, 0);
+  assert.equal(allButtons(menu.element).length, 3, 'the link is outside the focus list');
+});
+
+test('the pause menu carries no source link', () => {
+  const menu = createPauseMenu({ onResume() {}, onSettings() {}, onRestart() {}, onQuit() {}, documentObject: createFakeDocument() });
+  assert.equal(menu.element.children.filter((node) => node.tagName === 'A').length, 0);
 });

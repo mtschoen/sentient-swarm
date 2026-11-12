@@ -5,7 +5,11 @@
 // item; Enter or Space after only hovering still means the primary item. A hidden menu ignores
 // everything. The title menu (createMenu) also starts play on any tap on the arena behind the
 // buttons and on a non-primary face button; Lab and Settings never start play. Callers hide the menu themselves once the run has started.
-function buildMenu({ documentObject, className, title, items, onBackdrop = null, onAltConfirm = null, onBack = null }) {
+// The title menu also carries a footer link to the source repository (SOURCE_URL): a plain anchor
+// that opens a new tab, outside the focus list, and following it is not a tap on the arena.
+export const SOURCE_URL = 'https://github.com/mtschoen/sentient-swarm';
+
+function buildMenu({ documentObject, className, title, items, footerLink = null, onBackdrop = null, onAltConfirm = null, onBack = null }) {
   const make = (tagName, classNames, textContent = '') => {
     const created = documentObject.createElement(tagName);
     for (const name of classNames.split(' ')) created.classList.add(name);
@@ -44,16 +48,26 @@ function buildMenu({ documentObject, className, title, items, onBackdrop = null,
     return button;
   });
 
+  if (footerLink) {
+    const link = make('a', 'menu-link', footerLink.label);
+    link.setAttribute('href', footerLink.url);
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener noreferrer');
+    link.addEventListener('click', (event) => event.stopPropagation?.());
+    element.append(link);
+  }
+
   function renderFocus() {
     buttons.forEach((button, index) => button.classList.toggle('menu-focused', index === focusIndex));
   }
   renderFocus();
 
-  // The arena behind the buttons: anything but a button counts (a button click is stopped above).
+  // The arena behind the buttons: anything but a button or the footer link counts (their clicks are
+  // stopped above).
   element.addEventListener('click', (event) => {
     if (!visible || !onBackdrop) return;
     const target = event.target;
-    if (target && (target.closest ? target.closest('button') : target.tagName === 'BUTTON')) return;
+    if (target && (target.closest ? target.closest('button, a') : target.tagName === 'BUTTON' || target.tagName === 'A')) return;
     onBackdrop();
   });
 
@@ -99,6 +113,7 @@ export function createMenu({ onStart, onLab, onSettings, documentObject = docume
       { label: 'Lab', action: () => onLab() },
       { label: 'Settings', action: () => onSettings() },
     ],
+    footerLink: { label: 'Source on GitHub', url: SOURCE_URL },
     onBackdrop: () => onStart(),
     onAltConfirm: () => onStart(),
   });

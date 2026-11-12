@@ -13,6 +13,11 @@
   box-shadow: 0 0 18px #ffe84a; }
 /* The focus ring is visible for keyboard and gamepad as well as the mouse. */
 .menu-item.menu-focused { outline: 3px solid #ffe84a; outline-offset: 3px; box-shadow: 0 0 16px #ffe84a; }
+/* The title menu's source link sits at the bottom edge, clear of the centered list. */
+.menu-link { position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 8px 12px;
+  font-size: clamp(11px, 2.4vmin, 14px); font-weight: 600; letter-spacing: 0.08em; white-space: nowrap; color: rgba(207, 232, 255, 0.7);
+  text-decoration: underline; text-underline-offset: 3px; touch-action: manipulation; }
+.menu-link:hover, .menu-link:focus-visible { color: #19e6ff; text-shadow: 0 0 10px #19e6ff; outline: none; }
 /* Game over (hud.js): Play again is the one item, so its focus ring is always on; Enter or a face button restarts. */
 .hud-play-again { outline: 3px solid #ffe84a; outline-offset: 3px; }
 
