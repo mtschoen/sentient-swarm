@@ -99,7 +99,8 @@ export function createLoadingScreen({ element, setTimer = setTimeout }) {
         hidden = true;
         element.hidden = true;
       };
-      element.addEventListener('transitionend', hideOnce);
+      // Only the overlay's own fade counts: the bar fill's shorter width transition bubbles up too.
+      element.addEventListener('transitionend', (event) => { if (event.target === element) hideOnce(); });
       setTimer(hideOnce, FINISH_FALLBACK_MILLISECONDS);
     },
     fail() {

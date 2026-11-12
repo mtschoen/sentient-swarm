@@ -14,7 +14,7 @@ function createFakeLoadingElement() {
     classList: { add: (name) => classes.add(name), contains: (name) => classes.has(name) },
     querySelector: (selector) => parts[selector],
     addEventListener(type, listener) { (listeners[type] ??= []).push(listener); },
-    fire(type) { (listeners[type] ?? []).forEach((listener) => listener()); },
+    fire(type, event = {}) { (listeners[type] ?? []).forEach((listener) => listener(event)); },
   };
 }
 
@@ -110,7 +110,9 @@ test('finish fills the bar, fades, and hides on transitionend or the fallback ti
   assert.ok(element.classes.has('loading-done'));
   assert.equal(element.hidden, false);
   assert.equal(timers[0].milliseconds, 400);
-  element.fire('transitionend');
+  element.fire('transitionend', { target: element.fill });
+  assert.equal(element.hidden, false, 'the bar fill finishing its own transition does not cut the fade short');
+  element.fire('transitionend', { target: element });
   assert.equal(element.hidden, true);
   assert.equal(screen.visible, false);
   screen.finish();
