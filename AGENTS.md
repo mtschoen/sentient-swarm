@@ -12,7 +12,7 @@
 - Neighbor contributions are averaged, never summed. Per-agent fine-pass neighbor sampling is capped at `MAXIMUM_NEIGHBOR_SAMPLES = 32`.
 - The world is 16 by 9 world units. The playable arena is the largest rectangle of the window's aspect centered in it (`arenaBoundsForAspect` in `src/sim/layout.js`, carried by `Viewport.arenaBounds`, `Game.setArenaBounds` and `Simulation.setArenaBounds`), mapped to the whole canvas so the game fills the window at any aspect between 1:4 and 4:1 (letterboxed beyond that). The coarse field and grid still cover the whole world; the spawn pressure target scales with the arena's area fraction so density is what stays constant. Renderer works in device pixels.
 - Species count is 5. Coarse field is 64 by 36 cells with 8 float channels (5 species densities, 1 threat, 2 padding). Shipped shares are 0.9 Chaser, 0.03 Orbiter, 0.02 Skittish, 0 Lattice, 0.05 Predator (`DEFAULT_SHARES`, owner ruling R38); the lab's `equalFive` mix restores equal shares.
-- Commit after every task with a message in the imperative; end commit messages with `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+- Commit after every task with a message in the imperative.
 
 ## Commands
 
