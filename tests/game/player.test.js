@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PlayerShip } from '../../src/game/player.js';
+import { PlayerShip, turnAimToward } from '../../src/game/player.js';
 import { arenaBoundsForAspect } from '../../src/sim/layout.js';
 
 const ARENA = {};
@@ -100,4 +100,47 @@ test('bounds narrower than the ship diameter throw, in the constructor and in se
   const ship = new PlayerShip();
   assert.throws(() => ship.setBounds(tiny), /wider and taller/);
   assert.equal(ship.bounds.width, 16);
+});
+
+test('turnAimToward lands exactly on a target within the limit and keeps its length', () => {
+  assert.deepEqual(turnAimToward(1, 0, 0, 3, Math.PI), { x: 0, y: 3 });
+  assert.deepEqual(turnAimToward(1, 0, 0, 3, Math.PI / 2), { x: 0, y: 3 });
+  assert.deepEqual(turnAimToward(1, 0, 0.5, 0.5, Infinity), { x: 0.5, y: 0.5 });
+});
+
+test('turnAimToward turns by exactly the limit the shortest way, both directions', () => {
+  const limit = 0.1;
+  const counterclockwise = turnAimToward(1, 0, 0, 2, limit);
+  assert.ok(Math.abs(Math.atan2(counterclockwise.y, counterclockwise.x) - limit) < 1e-12);
+  assert.ok(Math.abs(Math.hypot(counterclockwise.x, counterclockwise.y) - 2) < 1e-12);
+  const clockwise = turnAimToward(1, 0, 0, -2, limit);
+  assert.ok(Math.abs(Math.atan2(clockwise.y, clockwise.x) + limit) < 1e-12);
+});
+
+test('turnAimToward takes the short way across the plus or minus pi seam', () => {
+  const angle = Math.PI - 0.05;
+  const across = turnAimToward(Math.cos(angle), Math.sin(angle), Math.cos(-angle), Math.sin(-angle), 0.02);
+  assert.ok(Math.abs(across.x - Math.cos(angle + 0.02)) < 1e-12 && Math.abs(across.y - Math.sin(angle + 0.02)) < 1e-12);
+  const back = turnAimToward(Math.cos(-angle), Math.sin(-angle), Math.cos(angle), Math.sin(angle), 0.02);
+  assert.ok(Math.abs(back.x - Math.cos(-angle - 0.02)) < 1e-12 && Math.abs(back.y - Math.sin(-angle - 0.02)) < 1e-12);
+});
+
+test('turnAimToward turns an exactly opposite target the same way every time', () => {
+  for (const [x, y] of [[1, 0], [0, 1], [-1, 0], [0.6, -0.8]]) {
+    const first = turnAimToward(x, y, -x, -y, 0.1);
+    assert.deepEqual(first, turnAimToward(x, y, -x, -y, 0.1));
+    const turned = Math.atan2(x * first.y - y * first.x, x * first.x + y * first.y);
+    assert.ok(Math.abs(turned - 0.1) < 1e-12, `${x},${y} turned ${turned}`);
+  }
+});
+
+test('PlayerShip.update without a limit snaps the aim, with a limit it turns by at most that much', () => {
+  const ship = new PlayerShip(ARENA);
+  ship.update(0.1, input(0, 0, 0, 5));
+  assert.deepEqual(ship.aim, { x: 0, y: 5 });
+  const limited = new PlayerShip(ARENA);
+  limited.update(0.1, input(0, 0, 0, 5), { maximumTurnRadians: 0.2 });
+  assert.ok(Math.abs(limited.facing - 0.2) < 1e-12);
+  limited.update(0.1, input(0, 0, 0.5, 0), { maximumTurnRadians: 0.5 });
+  assert.deepEqual(limited.aim, { x: 0.5, y: 0 });
 });

@@ -121,3 +121,7 @@ export const MAXIMUM_BASE_KILL_BUDGET = 64;
 export const DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES = 0;
 export const MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES = 90;
 export const BEAM_SWEEP_MINIMUM_REACH_SCALE = 0.25;
+// Beam turn rate: while the beam is armed the ship's aim turns toward the input aim at no more than
+// this many revolutions per second (0 means no limit, instant aim); other weapons aim instantly.
+export const DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND = 1.5;
+export const MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND = 4;

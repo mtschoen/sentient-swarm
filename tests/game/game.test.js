@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../../src/game/game.js';
 import { RunPhase } from '../../src/game/run.js';
-import { PICKUP_TYPE_NAMES } from '../../src/game/weaponTypes.js';
+import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND, PICKUP_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { InputState } from '../../src/input/input.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT, arenaBoundsForAspect } from '../../src/sim/layout.js';
 import { SHIP_TURN_RATE, ShipRenderer } from '../../src/render/ship.js';
@@ -1371,4 +1371,34 @@ test('the lab arm-weapon wiring arms each weapon at each tier and the scene show
   onArmWeapon('base', 1);
   assert.deepEqual([game.scene().ship.armed, game.scene().ship.charge, game.scene().ship.railTurrets], ['base', 0, 0]);
   assert.throws(() => onArmWeapon('laser', 1), /Unknown weapon type/);
+});
+
+test('with the beam armed the aim turns at the beam turn rate; with the base weapon it snaps', async () => {
+  const { game, input } = await createGame();
+  game.start();
+  assert.equal(game.beamTurnRevolutionsPerSecond, DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND);
+  input.state.aim = { x: 0, y: 1 };
+  game.update(STEP);
+  assert.ok(Math.abs(game.player.facing - Math.PI / 2) < 1e-12, 'base weapon snaps');
+  game.player.respawn();
+  game.weapons.collect('beam');
+  game.update(STEP);
+  const expected = DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND * 2 * Math.PI * STEP;
+  assert.ok(Math.abs(game.player.facing - expected) < 1e-12, `facing ${game.player.facing}`);
+});
+
+test('a beam turn rate of 0 aims the beam instantly and setBeamTurnRate rejects out-of-range values', async () => {
+  const { game, input } = await createGame();
+  game.setBeamTurnRate(0);
+  assert.equal(game.beamTurnRevolutionsPerSecond, 0);
+  game.start();
+  game.weapons.collect('beam');
+  input.state.aim = { x: 0, y: 1 };
+  game.update(STEP);
+  assert.ok(Math.abs(game.player.facing - Math.PI / 2) < 1e-12);
+  game.setBeamTurnRate(MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND);
+  for (const bad of [-1, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND + 0.1, Number.NaN, Infinity]) {
+    assert.throws(() => game.setBeamTurnRate(bad), RangeError);
+  }
+  assert.equal(game.beamTurnRevolutionsPerSecond, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND);
 });

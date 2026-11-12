@@ -94,6 +94,8 @@ function createContext() {
       setBaseKillBudget(value) { this.baseKillBudget = value; },
       setBeamSweepThreshold(value) { this.beamSweepThresholdDegrees = value; },
     },
+    beamTurnRevolutionsPerSecond: 1.5,
+    setBeamTurnRate(value) { this.beamTurnRevolutionsPerSecond = value; },
     pickupBlastRadius: 1.5,
     setPickupBlastRadius(value) { this.pickupBlastRadius = value; },
     timeWarp: new TimeWarp(),

@@ -10,6 +10,7 @@ import { SpawnDirector } from '../../src/sim/spawn-director.js';
 import { defaultMatrix, defaultSpecies, normalizeShares } from '../../src/sim/species.js';
 import { DEFAULT_RENDER_SETTINGS } from '../../src/render/renderer.js';
 import { SPECIES_COUNT } from '../../src/sim/layout.js';
+import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND } from '../../src/game/weaponTypes.js';
 import { TIME_WARP_SCALE, TIME_WARP_SECONDS, TimeWarp } from '../../src/game/time-warp.js';
 
 const CAPACITY = 65536;
@@ -55,6 +56,8 @@ function createContext() {
       setBaseKillBudget(value) { this.baseKillBudget = value; },
       setBeamSweepThreshold(value) { this.beamSweepThresholdDegrees = value; },
     },
+    beamTurnRevolutionsPerSecond: 1.5,
+    setBeamTurnRate(value) { this.beamTurnRevolutionsPerSecond = value; },
     pickupBlastRadius: 1.5,
     setPickupBlastRadius(value) { this.pickupBlastRadius = value; },
     timeWarp: new TimeWarp(),
@@ -351,4 +354,21 @@ test('the time warp duration and scale are lab knobs with the shipped defaults, 
   writeKnob(context, specFor('timeWarpScale'), 0.5);
   assert.equal(context.game.timeWarp.durationSeconds, 10);
   assert.equal(context.game.timeWarp.targetScale, 0.5);
+});
+
+test('the beam turn rate is a lab knob with the shipped default, written to the game and carried by a mix', () => {
+  const context = createContext();
+  assert.equal(LAB_KNOB_DEFAULTS.beamTurnRevolutionsPerSecond, DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND);
+  assert.equal(readKnob(context, specFor('beamTurnRevolutionsPerSecond')), DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND);
+  writeKnob(context, specFor('beamTurnRevolutionsPerSecond'), 3);
+  assert.equal(context.game.beamTurnRevolutionsPerSecond, 3);
+  const mix = decodeMix(encodeMix(captureMix(context)));
+  assert.equal(mix.knobs.beamTurnRevolutionsPerSecond, 3);
+  writeKnob(context, specFor('beamTurnRevolutionsPerSecond'), 0);
+  applyMix(context, mix);
+  assert.equal(context.game.beamTurnRevolutionsPerSecond, 3);
+  const state = captureLabState(context);
+  writeKnob(context, specFor('beamTurnRevolutionsPerSecond'), 0.5);
+  restoreLabState(context, state);
+  assert.equal(context.game.beamTurnRevolutionsPerSecond, 3);
 });

@@ -14,7 +14,8 @@
 //   1. input.update and read input.state (a gesture starts or restarts the run); a rising bomb
 //      edge that run.useBomb accepts calls simulation.requestKillAll before this step, so the
 //      bomb kills before projectiles and contact.
-//   2. player.update (Playing only), with mouse aim derived as pointerWorld minus the player.
+//   2. player.update (Playing only), with mouse aim derived as pointerWorld minus the player; with
+//      the beam armed the aim turns at most beamTurnRevolutionsPerSecond (0 is instant).
 //   3. pickups.update, then collect at the player into weapons.collect (before charge expiry; a
 //      rail pickup adds a turret and leaves the armed weapon alone, owner ruling R29); a
 //      collection plays the pickup effect and, with pickupBlastRadius above 0, fires the pickup
@@ -56,6 +57,7 @@
 // it; start() (the lab's Play) leaves it too.
 import { Projectiles } from './projectiles.js';
 import { PlayerShip } from './player.js';
+import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND } from './weaponTypes.js';
 import { WeaponState } from './weapons.js';
 import { PickupDirector } from './pickups.js';
 import { Awards, ScoreKeeper } from './score.js';
@@ -154,6 +156,8 @@ export class Game {
     this.densityAt = (positionX, positionY) => this.simulation.densityAt(positionX, positionY);
     // World units cleared around the ship on every pickup (0 disables); setPickupBlastRadius.
     this.pickupBlastRadiusValue = DEFAULT_PICKUP_BLAST_RADIUS;
+    // Revolutions per second the aim may turn while the beam is armed (0 is instant); setBeamTurnRate.
+    this.beamTurnRevolutionsPerSecondValue = DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND;
     // Debug switch (debugInvulnerable): player contact stays off while it is on.
     this.debugInvulnerableValue = false;
     // The old simulation keeps stepping while a capacity change is prepared (CapacitySwap); commit
@@ -359,7 +363,11 @@ export class Game {
 
     const playing = this.run.phase === RunPhase.Playing;
     const controls = this.controlsFrom(inputState);
-    if (playing) this.player.update(deltaSeconds, controls);
+    if (playing) {
+      const limited = this.weapons.armed === 'beam' && this.beamTurnRevolutionsPerSecondValue > 0;
+      const maximumTurnRadians = limited ? this.beamTurnRevolutionsPerSecondValue * 2 * Math.PI * deltaSeconds : Infinity;
+      this.player.update(deltaSeconds, controls, { maximumTurnRadians });
+    }
     else if (this.watching) this.moveWatchPoint(deltaSeconds, inputState, controls);
     const { x, y } = this.player.position;
 
@@ -603,6 +611,18 @@ export class Game {
 
   get pickupBlastRadius() {
     return this.pickupBlastRadiusValue;
+  }
+
+  // Beam aim turn rate in revolutions per second (the lab sets it); 0 turns the limit off.
+  setBeamTurnRate(revolutionsPerSecond) {
+    if (!(Number.isFinite(revolutionsPerSecond) && revolutionsPerSecond >= 0 && revolutionsPerSecond <= MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND)) {
+      throw new RangeError(`beamTurnRevolutionsPerSecond must lie in [0, ${MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND}], got ${revolutionsPerSecond}`);
+    }
+    this.beamTurnRevolutionsPerSecondValue = revolutionsPerSecond;
+  }
+
+  get beamTurnRevolutionsPerSecond() {
+    return this.beamTurnRevolutionsPerSecondValue;
   }
 
   // Debug hook (browser checks, a lab sandbox): while enabled, the GPU contact test never hits, so

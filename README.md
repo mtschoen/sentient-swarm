@@ -44,7 +44,7 @@ You start on the base gun: three energy balls in a spread with unlimited ammo. T
 
 | Weapon | What it does | Tier 1, 2, 3 |
 | --- | --- | --- |
-| Beam | A continuous swept beam that cuts everything along it | Wider each tier |
+| Beam | A continuous swept beam that cuts everything along it | Wider each tier; your aim turns toward the pointer or stick at a limited rate while it is armed |
 | Scatter | A short-range fan of small energy orbs | 9, 13, 17 orbs |
 | Pulse | A slow orb that detonates into an expanding ring in dense crowds, or when it expires or leaves the arena | 1, 2, 3 orbs |
 | Sidewinders | Missiles that turn toward the densest part of the swarm | 2, 4, 6 missiles |
@@ -105,7 +105,7 @@ Choose Lab on the title menu (or press backquote). The lab panel holds:
 - Watch (the default) and Play. Watch keeps the swarm running with no weapons and no contact; the swarm chases your pointer (or the move stick) and the alive count is held at a chosen fraction of capacity. Play runs the full game with the current mix.
 - Mixes: six bundled mixes (`default`, the shipped chaser-dominant shares, `equalFive`, `allChasers`, `mixedFive`, `predatorsVsPrey`, `latticeStorm`) and mixes you save by name in the browser. A mix names the species shares, the five species rule rows, the 5 by 5 interaction matrix, the neighbor radius, the simulation rate and optional knob values.
 - Share writes the current mix into the address as `#mix=...` (no reload). Opening a link with `#mix=` applies it and opens the lab; a malformed link opens the lab with the shipped defaults and a status line.
-- Knob groups: Watch, Steering and walls, Spawn ramp, Spawn gates, Kills and particles, Weapons (the pickup blast radius, the base gun kill budget, the beam sweep budget and the time warp's seconds and speed), plus renderer sliders, a capacity select and a live readout of frames per second and alive counts.
+- Knob groups: Watch, Steering and walls, Spawn ramp, Spawn gates, Kills and particles, Weapons (the pickup blast radius, the base gun kill budget, the beam sweep budget, the beam turn rate and the time warp's seconds and speed), plus renderer sliders, a capacity select and a live readout of frames per second and alive counts.
 - The right mouse button holds the 4x inspect zoom here only.
 - Leaving to the title restores the settings the game had when you entered, so the next Play is the shipped game.
 

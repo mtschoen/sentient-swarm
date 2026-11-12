@@ -43,6 +43,7 @@ export const KNOB_RANGES = {
   burstFraction: [0.01, 1], driftSpeed: [0, 3], gateRadius: [0.2, 2], speciesBias: [0, 1],
   killFragmentParticles: [0, 16], deathFloodParticles: [0, 4096], particleDevicePixels: [1, 16],
   pickupBlastRadius: [0, 4], baseKillBudget: [0, 64], beamSweepThresholdDegrees: [0, 90],
+  beamTurnRevolutionsPerSecond: [0, 4],
   timeWarpSeconds: [1, 20], timeWarpScale: [0.1, 1],
   trailDecay: [0, 0.99], bloomStrength: [0, 3], warpDensityWeight: [0, 1], warpThreatWeight: [0, 2],
   shipArenaFraction: [0.012, 0.04],

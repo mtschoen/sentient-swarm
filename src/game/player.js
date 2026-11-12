@@ -1,7 +1,8 @@
 // The player ship on the CPU: position, aim and facing, stepped from the unified InputState.
 // Pure: no GPU, DOM or clock. Each update moves by inputState.move * speed * deltaSeconds and
 // clamps the center inside the arena bounds by radius (the playable rectangle, setBounds). The aim follows inputState.aim while that vector
-// is longer than AIM_DEADZONE and otherwise holds its last value; facing is the aim's angle.
+// is longer than AIM_DEADZONE and otherwise holds its last value; facing is the aim's angle. An
+// optional maximumTurnRadians per update limits how far the aim turns toward the input aim.
 // Getters return copies.
 import { FULL_ARENA_BOUNDS } from '../sim/layout.js';
 
@@ -10,6 +11,20 @@ const INITIAL_AIM = { x: 1, y: 0 };
 
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+// Rotates the vector (currentX, currentY) toward the direction of (targetX, targetY) by the shortest
+// way, by at most maximumTurnRadians; within the limit it returns the target itself. The result has
+// the target's length. An exactly opposite target turns counterclockwise, so it never jitters.
+export function turnAimToward(currentX, currentY, targetX, targetY, maximumTurnRadians) {
+  if (!(maximumTurnRadians < Infinity)) return { x: targetX, y: targetY };
+  let delta = Math.atan2(currentX * targetY - currentY * targetX, currentX * targetX + currentY * targetY);
+  if (delta <= -Math.PI) delta = Math.PI;
+  const limit = Math.max(0, maximumTurnRadians);
+  if (Math.abs(delta) <= limit) return { x: targetX, y: targetY };
+  const angle = Math.atan2(currentY, currentX) + Math.sign(delta) * limit;
+  const length = Math.hypot(targetX, targetY);
+  return { x: Math.cos(angle) * length, y: Math.sin(angle) * length };
 }
 
 export class PlayerShip {
@@ -52,7 +67,7 @@ export class PlayerShip {
     this.velocityY = 0;
   }
 
-  update(deltaSeconds, inputState) {
+  update(deltaSeconds, inputState, { maximumTurnRadians = Infinity } = {}) {
     const step = this.speed * deltaSeconds;
     const previousX = this.positionX;
     const previousY = this.positionY;
@@ -62,8 +77,9 @@ export class PlayerShip {
     this.velocityX = deltaSeconds > 0 ? (this.positionX - previousX) / deltaSeconds : 0;
     this.velocityY = deltaSeconds > 0 ? (this.positionY - previousY) / deltaSeconds : 0;
     if (Math.hypot(inputState.aim.x, inputState.aim.y) > AIM_DEADZONE) {
-      this.aimX = inputState.aim.x;
-      this.aimY = inputState.aim.y;
+      const aim = turnAimToward(this.aimX, this.aimY, inputState.aim.x, inputState.aim.y, maximumTurnRadians);
+      this.aimX = aim.x;
+      this.aimY = aim.y;
     }
   }
 }

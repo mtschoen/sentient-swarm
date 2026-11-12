@@ -95,6 +95,7 @@ export const LAB_KNOB_GROUPS = [
     { key: 'pickupBlastRadius', label: 'pickup blast (0 off)', minimum: 0, maximum: 4, step: 0.05 },
     { key: 'baseKillBudget', label: 'base gun kills (0 unlimited)', minimum: 0, maximum: 64, step: 1, integer: true },
     { key: 'beamSweepThresholdDegrees', label: 'beam sweep budget (0 off)', minimum: 0, maximum: 90, step: 1 },
+    { key: 'beamTurnRevolutionsPerSecond', label: 'beam turn rate, rev/s (0 instant)', minimum: 0, maximum: 4, step: 0.05 },
     // The time warp pickup (owner ruling R31): real seconds per pickup and the swarm's speed meanwhile.
     { key: 'timeWarpSeconds', label: 'time warp seconds', minimum: 1, maximum: 20, step: 0.5 },
     { key: 'timeWarpScale', label: 'time warp speed', minimum: 0.1, maximum: 1, step: 0.05 },
