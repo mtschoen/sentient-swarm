@@ -34,6 +34,7 @@
 // freshly integrated), gridBuffers (built from agentsIn, so cell membership is one step stale),
 // fieldBuffers, particlePool, statsBuffer (per-frame prefix cleared this step; kill passes add to
 // its cumulative kills index), paramsBuffer, speciesTableBuffer }.
+import { trackEach } from '../gpu/track-progress.js';
 import { StagingRing, createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { AgentCompaction } from './compact.js';
@@ -67,6 +68,7 @@ export class Simulation {
     shares = normalizeShares(DEFAULT_SHARES),
     particleCapacity = DEFAULT_PARTICLE_CAPACITY,
     scaleDensityToCapacity = false,
+    onProgress,
   }) {
     const agentBytes = agentBufferBytes(capacity);
     if (agentBytes > gpu.limits.maxStorageBufferBindingSize) {
@@ -82,7 +84,7 @@ export class Simulation {
       simulation.destroy();
       throw new Error(`Simulation capacity ${capacity} ran out of GPU memory: ${memoryError.message}`);
     }
-    await Promise.all([
+    await trackEach([
       simulation.grid.initialize(),
       simulation.field.initialize(),
       simulation.densityReadback.initialize(),
@@ -93,7 +95,7 @@ export class Simulation {
       simulation.killAllPass.initialize(),
       simulation.playerContactPass.initialize(),
       simulation.particlePoolValue.initialize(),
-    ]);
+    ], onProgress);
     return simulation;
   }
 

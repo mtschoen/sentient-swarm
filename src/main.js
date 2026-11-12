@@ -24,6 +24,7 @@ import { createLifeWatcher, createRumble } from './input/rumble.js';
 import {
   bloomStrengthFor, createSettingsPanel, killBurstParticlesFor, shakeMultiplierFor, trailDecayFor,
 } from './ui/settings.js';
+import { LoadProgress, WarmUp, createLoadingScreen } from './ui/loading.js';
 import { createMenu, createPauseMenu } from './ui/menu.js';
 import { createRotateOverlay } from './ui/rotateOverlay.js';
 import { createFullscreenController } from './ui/fullscreen.js';
@@ -32,15 +33,25 @@ import { createRotateBackHandler, createSettingsOpener, routeMenuActions, routeS
 
 const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
 
-window.__murmuration = { ready: false, frame: 0, stats: null };
+window.__murmuration = { ready: false, frame: 0, stats: null, loading: { done: false } };
 
 async function boot() {
   const canvas = document.getElementById('arena');
+  // The loading screen covers boot and a short hidden warm-up (the first rendered frames).
+  const loading = createLoadingScreen({ element: document.getElementById('loading') });
+  const progress = new LoadProgress();
+  const warmUp = new WarmUp();
+  const showProgress = (stageName, completed, total) => {
+    progress.report(stageName, completed, total);
+    loading.update(progress.fraction, progress.label);
+  };
   let gpu;
   try {
     gpu = await createGpuContext(canvas);
+    showProgress('device', 1, 1);
   } catch (error) {
     if (error instanceof WebGpuUnavailableError) {
+      loading.fail();
       const message = document.getElementById('message');
       message.textContent = describeUnsupported(error);
       message.hidden = false;
@@ -92,9 +103,9 @@ async function boot() {
   });
   const preset = PRESETS[initialPreset.name];
   const simulation = await Simulation.create(gpu, pinnedCapacity !== null
-    ? { capacity: pinnedCapacity, scaleDensityToCapacity: true }
-    : { capacity: preset.capacity, neighborRadius: preset.neighborRadius, particleCapacity: preset.particleCapacity, scaleDensityToCapacity: true });
-  renderer = await Renderer.create(gpu, { simulation, viewport });
+    ? { capacity: pinnedCapacity, scaleDensityToCapacity: true, onProgress: (completed, total) => showProgress('simulation', completed, total) }
+    : { capacity: preset.capacity, neighborRadius: preset.neighborRadius, particleCapacity: preset.particleCapacity, scaleDensityToCapacity: true, onProgress: (completed, total) => showProgress('simulation', completed, total) });
+  renderer = await Renderer.create(gpu, { simulation, viewport, onProgress: (completed, total) => showProgress('renderer', completed, total) });
   const input = createInput(canvas, viewport);
   // Read by the browser checks (the mobile smoke asserts on the aim vector).
   window.__murmuration.input = input;
@@ -128,6 +139,7 @@ async function boot() {
     effects: withHaptics(audio.cues, undefined, rumble),
     frameTimer,
   });
+  showProgress('game', 1, 1);
   quality = new QualityController({ game, store, probe: new FrameTimeProbe(), adapterKey, ceiling: initialPreset.ceiling });
   if (pinnedCapacity === null) quality.start(initialPreset.name, { allowUp: initialPreset.allowUp });
   window.__murmuration.quality = quality;
@@ -336,10 +348,12 @@ async function boot() {
     if (state.phase !== 'ready' && menu.visible) menu.hide();
     // The title menu is never fullscreen, whichever way it came up (quit, leaving the lab).
     if (menu.visible) fullscreen.exit();
-    game.startsOnGesture = !menu.visible;
-    // Gamepad edges and key presses are consumed every frame so none go stale; only a free screen acts on them.
+    const warming = !warmUp.done;
+    game.startsOnGesture = !menu.visible && !warming;
+    // Gamepad edges and key presses are consumed every frame so none go stale; only a free screen
+    // acts on them, and none does while the loading screen is up.
     const actions = menuInput.poll();
-    if (!rotating) {
+    if (!rotating && !warming) {
       routeMenuActions(actions, {
         settingsOpen,
         closeSettings: () => settingsPanel.close(),
@@ -348,7 +362,10 @@ async function boot() {
     }
 
     window.__murmuration.frame = loop.frameCount;
-    window.__murmuration.ready = true;
+    if (warming && warmUp.frame(deltaSeconds)) loading.finish();
+    if (warming) showProgress('warmUp', warmUp.progress, 1);
+    window.__murmuration.loading.done = warmUp.done;
+    window.__murmuration.ready = warmUp.done;
   };
 
   installCaptureHook({ viewport, renderer });

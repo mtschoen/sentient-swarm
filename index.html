@@ -26,6 +26,7 @@
     <link rel="stylesheet" href="/src/ui/settings.css" />
     <link rel="stylesheet" href="/src/ui/menu.css" />
     <link rel="stylesheet" href="/src/ui/lab.css" />
+    <link rel="stylesheet" href="/src/ui/loading.css" />
     <style>
       html, body { margin: 0; height: 100vh; height: 100dvh; background: #05060a; overflow: hidden; }
       #arena { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; }
@@ -41,6 +42,13 @@
     <div id="touch-overlay"></div>
     <div id="menu"></div>
     <div id="rotate-overlay"></div>
+    <div id="loading">
+      <div class="loading-title">Sentient Swarm</div>
+      <div class="loading-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Loading">
+        <div class="loading-bar-fill"></div>
+      </div>
+      <div class="loading-status">Loading</div>
+    </div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

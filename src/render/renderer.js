@@ -14,6 +14,7 @@
 // decaying back over BLOOM_BOOST_SECONDS. sceneTime (optional, time by default) animates the
 // projectiles, pickups and ship, which keep real time through a time warp; timeWarp (0 to 1, the
 // warp strength) tints the composite cold (owner ruling R31).
+import { trackEach } from '../gpu/track-progress.js';
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
 import { SHADER_CONSTANTS } from '../sim/layout.js';
 import { BLOOM_DIVISORS, BloomPass } from './bloom.js';
@@ -46,13 +47,13 @@ export const DEFAULT_RENDER_SETTINGS = {
 };
 
 export class Renderer {
-  static async create(gpu, { simulation, viewport }) {
+  static async create(gpu, { simulation, viewport, onProgress }) {
     const [common, fullscreenHeader] = await Promise.all([
       loadShader('common').then((source) => substituteConstants(source, SHADER_CONSTANTS)),
       loadFullscreenHeader(),
     ]);
     const renderer = new Renderer(gpu, { simulation, viewport, common, fullscreenHeader });
-    await Promise.all([
+    await trackEach([
       renderer.warpGrid.initialize(),
       renderer.trails.initialize(),
       renderer.gates.initialize(),
@@ -63,7 +64,7 @@ export class Renderer {
       renderer.ship.initialize(),
       renderer.bloom.initialize(),
       renderer.composite.initialize(),
-    ]);
+    ], onProgress);
     renderer.resize(viewport.canvasWidth, viewport.canvasHeight);
     return renderer;
   }
