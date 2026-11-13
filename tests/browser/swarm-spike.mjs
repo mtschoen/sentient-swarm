@@ -2,15 +2,16 @@
 // a synthetic gamepad and prints evidence for the swarm. Three runs, each on a fresh page:
 //   1. ?swarm=12 (the default size): fire right for PLAY_FRAMES frames while the swarm sits in the
 //      arena; reports the swarm size over time (losses on contact, growth from kills), the kills and
-//      a screenshot artifacts/swarm-12-v2.png.
+//      a screenshot artifacts/swarm-12-v3.png.
 //   2. ?swarm=1: no fire, the point parked; the run must reach game over when the one ship dies.
 //   3. ?swarm=256, contact off (debugInvulnerable) so the swarm stays full: fire for MEASURE_FRAMES
 //      frames (the base gun, then scatter III); reports the mean and 95th percentile frame
 //      interval, the mean CPU time of Game.update, the mean GPU completion latency of a render
 //      (onSubmittedWorkDone), the most projectile spawns in any 3 s window (the longest projectile
-//      lifetime) against the 8192-slot pool, and a screenshot artifacts/swarm-256-v2.png.
-//   4. ?swarm=12 idle: contact off, no fire, the point held still; IDLE_SHOTS close-ups of the
-//      arena centre at 2x, IDLE_SHOT_FRAMES apart, as artifacts/swarm-idle-N.png (the motion as stills).
+//      lifetime) against the 8192-slot pool, and a screenshot artifacts/swarm-256-v3.png.
+//   4. ?swarm=12 idle, then firing right: contact off, the point held still; IDLE_SHOTS close-ups of
+//      the arena centre at 2x, IDLE_SHOT_FRAMES apart, as artifacts/swarm-v3-idle-N.png and
+//      artifacts/swarm-v3-fire-N.png (the motion and the per-ship fire as stills).
 // The page never gets a user gesture, so audio stays locked (nothing plays). Exit 1 on a failed
 // expectation or console errors.
 // Usage: SMOKE_PORT=5197 node tests/browser/swarm-spike.mjs
@@ -32,7 +33,7 @@ const IDLE_SHOTS = 6;
 const IDLE_SHOT_FRAMES = 30;
 const IDLE_SETTLE_FRAMES = 180;
 // CSS pixels around the arena centre (the point's start).
-const IDLE_CLIP = { x: 640 - 160, y: 360 - 100, width: 320, height: 200 };
+const IDLE_CLIP = { x: 640 - 240, y: 360 - 150, width: 480, height: 300 };
 
 function installSyntheticGamepad() {
   const buttons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
@@ -79,6 +80,19 @@ const readState = (page) => page.evaluate(() => {
   return { phase: game.state.phase, ships: game.swarm.aliveCount, score: game.state.score, kills: game.score.kills ?? null, killsTotal: game.latestStats?.killsTotal ?? 0, aliveTotal: game.state.aliveTotal };
 });
 
+// Starts the run and confirms it is Playing a few frames later, starting again if something (the
+// page's title menu settling) returned it to Ready first; one oneShipGameOver run once read Ready.
+async function startRun(page) {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await page.evaluate(() => window.__murmuration.game.start());
+    await waitFrames(page, 10);
+    const phase = await page.evaluate(() => window.__murmuration.game.state.phase);
+    if (phase !== 'ready') return;
+    console.log(`swarm-spike: the run read ${phase} after start, starting again`);
+  }
+  throw new Error('the run never left Ready');
+}
+
 async function screenshot(page, name) {
   await mkdir(ARTIFACTS_DIRECTORY, { recursive: true });
   const file = fileURLToPath(new URL(name, ARTIFACTS_DIRECTORY));
@@ -88,7 +102,7 @@ async function screenshot(page, name) {
 
 async function defaultSwarm(browser, server, failures) {
   const { context, page } = await openGame(browser, server, 12);
-  await page.evaluate(() => window.__murmuration.game.start());
+  await startRun(page);
   await setSticks(page, [0, 0, 1, 0]);
   const samples = [];
   let shot = null;
@@ -96,7 +110,7 @@ async function defaultSwarm(browser, server, failures) {
     await waitFrames(page, SAMPLE_EVERY_FRAMES);
     const state = await readState(page);
     samples.push(state);
-    if (shot === null && frame >= 300) shot = await screenshot(page, 'swarm-12-v2.png');
+    if (shot === null && frame >= 300) shot = await screenshot(page, 'swarm-12-v3.png');
     if (state.phase !== 'playing') break;
   }
   console.log('swarm-12 samples (phase ships score killsTotal aliveEnemies):');
@@ -113,7 +127,7 @@ async function defaultSwarm(browser, server, failures) {
 
 async function oneShipGameOver(browser, server, failures) {
   const { context, page } = await openGame(browser, server, 1);
-  await page.evaluate(() => window.__murmuration.game.start());
+  await startRun(page);
   const startFrame = await currentFrame(page);
   let state = await readState(page);
   for (let waited = 0; waited < GAME_OVER_FRAMES && state.phase !== 'gameOver'; waited += 60) {
@@ -165,7 +179,7 @@ async function fullSwarm(browser, server, failures) {
   await waitFrames(page, MEASURE_FRAMES / 2);
   await page.evaluate(() => window.__murmuration.game.debugArm('scatter', 3));
   await waitFrames(page, MEASURE_FRAMES / 2);
-  const shot = await screenshot(page, 'swarm-256-v2.png');
+  const shot = await screenshot(page, 'swarm-256-v3.png');
   const result = await page.evaluate(({ window: windowSeconds }) => {
     const { intervals, updateMilliseconds, gpuMilliseconds } = window.__measure;
     const sorted = [...intervals].sort((first, second) => first - second);
@@ -198,24 +212,25 @@ async function fullSwarm(browser, server, failures) {
   await context.close();
 }
 
-async function idleStills(browser, server, failures) {
+async function stills(browser, server, failures, { name, firing }) {
   const { context, page } = await openGame(browser, server, 12, 2);
   await page.evaluate(() => {
     const { game } = window.__murmuration;
     game.start();
     game.debugInvulnerable(true);
   });
+  if (firing) await setSticks(page, [0, 0, 1, 0]);
   await waitFrames(page, IDLE_SETTLE_FRAMES);
   await mkdir(ARTIFACTS_DIRECTORY, { recursive: true });
   const files = [];
   for (let shot = 1; shot <= IDLE_SHOTS; shot += 1) {
-    const file = fileURLToPath(new URL(`swarm-idle-${shot}.png`, ARTIFACTS_DIRECTORY));
+    const file = fileURLToPath(new URL(`swarm-v3-${name}-${shot}.png`, ARTIFACTS_DIRECTORY));
     await page.screenshot({ path: file, clip: IDLE_CLIP });
     files.push(file);
     await waitFrames(page, IDLE_SHOT_FRAMES);
   }
-  console.log(`swarm-idle: ${files.join(' ')}`);
-  if (page.consoleErrors.length > 0) failures.push(`swarm-idle console errors: ${page.consoleErrors.join(' | ')}`);
+  console.log(`swarm-${name}: ${files.join(' ')}`);
+  if (page.consoleErrors.length > 0) failures.push(`swarm-${name} console errors: ${page.consoleErrors.join(' | ')}`);
   await context.close();
 }
 
@@ -228,7 +243,8 @@ async function run() {
     await defaultSwarm(browser, server, failures);
     await oneShipGameOver(browser, server, failures);
     await fullSwarm(browser, server, failures);
-    await idleStills(browser, server, failures);
+    await stills(browser, server, failures, { name: 'idle', firing: false });
+    await stills(browser, server, failures, { name: 'fire', firing: true });
   } finally {
     if (browser) await browser.close().catch(() => {});
     await server.stop();

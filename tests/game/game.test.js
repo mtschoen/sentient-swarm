@@ -7,6 +7,7 @@ import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS
 import { InputState } from '../../src/input/input.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT, SWARM_HIT_MASK_WORDS, arenaBoundsForAspect } from '../../src/sim/layout.js';
 import { INITIAL_SWARM_SHIPS, KILLS_PER_SWARM_SHIP } from '../../src/game/player-swarm.js';
+import { SWARM_FIRE_CONE_RADIANS } from '../../src/game/swarm-fire.js';
 import { SHIP_TURN_RATE, ShipRenderer } from '../../src/render/ship.js';
 
 globalThis.GPUBufferUsage ??= { UNIFORM: 64, COPY_DST: 8 };
@@ -426,16 +427,21 @@ test('a bomb press kills everything before the step, once per press', async () =
   assert.equal(simulation.killAllRequests, 3);
 });
 
-test('mouse aim is the pointer minus the player and the primary button fires', async () => {
+test('mouse aim is the pointer minus the player and the primary button fires, from ships flying near the aim', async () => {
   const { game, input, projectiles } = await createGame();
   game.start();
   input.state.pointerWorld = { x: 8, y: 2.5 };
   input.state.pointerPrimaryDown = true;
-  runFor(game, 0.5);
+  runFor(game, 2);
+  assert.deepEqual(game.player.aim, { x: 0, y: -1 });
   assert.ok(projectiles.spawns.length > 0);
-  const middle = projectiles.spawns[1];
-  assert.ok(Math.abs(middle.velocityX) < 1e-9);
-  assert.ok(middle.velocityY < 0);
+  // Every shot leaves along its ship's heading, inside the fire cone around the aim (straight up),
+  // widened by the base gun's half spread.
+  const limit = SWARM_FIRE_CONE_RADIANS + game.weapons.types.base.tiers[0].spreadRadians / 2 + 1e-9;
+  for (const spawn of projectiles.spawns) {
+    const offset = Math.atan2(spawn.velocityX, -spawn.velocityY);
+    assert.ok(Math.abs(offset) <= limit, `shot ${offset} radians off the aim`);
+  }
 });
 
 test('the expiry frame sends no beam even when the weapon still returned one', async () => {
@@ -1135,17 +1141,22 @@ test('turret shots are queued with the weapon shots, and a turret-only frame pla
   input.state.firing = true;
   const steps = Math.round(1.2 / STEP);
   let framesThatFired = 0;
+  let mostCuesInOneFrame = 0;
   for (let frame = 0; frame < steps; frame += 1) {
     const before = projectiles.spawns.length;
+    const cuesBefore = played.length;
     game.update(STEP);
     if (projectiles.spawns.length > before) framesThatFired += 1;
+    mostCuesInOneFrame = Math.max(mostCuesInOneFrame, played.length - cuesBefore);
   }
   const railShots = projectiles.spawns.filter((spawn) => spawn.kind === game.weapons.types.rail.kind);
   const baseShots = projectiles.spawns.filter((spawn) => spawn.kind === game.weapons.types.base.kind);
   // Four volleys from 12 turrets at tier 2 (two parallel rails each).
   assert.equal(railShots.length, 4 * 12 * 2);
   assert.ok(baseShots.length > 0);
-  assert.equal(played.length, framesThatFired, 'one cue per frame that fires');
+  // The cues follow the weapon's own volleys (swarm shots are staggered across other frames).
+  assert.ok(played.length > 0 && framesThatFired > 0);
+  assert.equal(mostCuesInOneFrame, 1, 'at most one cue per frame');
   assert.ok(played.includes('fire rail 2'), 'a turret-only frame plays the rail cue');
   assert.ok(played.every((entry) => entry === 'fire rail 2' || entry === 'fire base 1'));
   // A frame where both fire keeps the armed weapon's cue: the beam fires every frame.

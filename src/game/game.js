@@ -158,6 +158,8 @@ export class Game {
     this.initialSwarmShips = INITIAL_SWARM_SHIPS;
     this.swarm.reset(this.player.position.x, this.player.position.y, this.initialSwarmShips);
     this.swarmFire = new SwarmFire();
+    // Reused each update: the swarm's attack-run controls (firing, unit aim).
+    this.swarmControls = { firing: false, aimX: 0, aimY: 0 };
     this.latestStats = null;
     // This update's read-back stats (the newest frame, kills summed over every frame read), or null.
     this.freshStats = null;
@@ -394,7 +396,13 @@ export class Game {
     }
     else if (this.watching) this.moveWatchPoint(deltaSeconds, inputState, controls);
     const { x, y } = this.player.position;
-    this.swarm.update(deltaSeconds, x, y);
+    const swarmFiring = playing && controls.firing;
+    const aimLength = Math.hypot(this.player.aim.x, this.player.aim.y);
+    const swarmControls = this.swarmControls;
+    swarmControls.firing = swarmFiring;
+    swarmControls.aimX = aimLength > 0 ? this.player.aim.x / aimLength : 0;
+    swarmControls.aimY = aimLength > 0 ? this.player.aim.y / aimLength : 0;
+    this.swarm.update(deltaSeconds, x, y, swarmControls);
 
     this.pickups.update(deltaSeconds, {
       playerX: x,
@@ -428,7 +436,14 @@ export class Game {
     const firedTier = this.weapons.tier;
     const fire = this.weapons.update(deltaSeconds, { firing: playing && controls.firing, aimX: aim.x, aimY: aim.y, x, y });
     const railTier = this.weapons.railTier;
-    const swarmShots = this.swarmFire.distribute(fire, this.swarm.ships, { x, y }, this.swarm.centroid);
+    const swarmShots = this.swarmFire.distribute(fire, this.swarm.ships, { x, y }, this.swarm.centroid, {
+      firing: swarmFiring,
+      aimX: swarmControls.aimX,
+      aimY: swarmControls.aimY,
+      fireInterval: this.weapons.types[firedKind].tiers[firedTier - 1].fireInterval,
+      deltaSeconds,
+      kind: firedKind,
+    });
     swarmShots.spawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
     swarmShots.turretSpawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
     this.projectiles.setBeam(fire.expired ? null : swarmShots.beam);

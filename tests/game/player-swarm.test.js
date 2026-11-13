@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { INITIAL_SWARM_SHIPS, KILLS_PER_SWARM_SHIP, MAXIMUM_SWARM_SHIPS, PlayerSwarm } from '../../src/game/player-swarm.js';
 import {
-  INITIAL_SWARM_SHIPS, KILLS_PER_SWARM_SHIP, MAXIMUM_SWARM_SHIPS, PlayerSwarm, SWARM_LOOP_SECONDS_MAXIMUM, SWARM_LOOP_SECONDS_MINIMUM,
-  SWARM_LOOP_SIZE_MAXIMUM, SWARM_MAXIMUM_SPEED, SWARM_SEPARATION_RADIUS, SWARM_WANDER_SIZE, slotHash,
-} from '../../src/game/player-swarm.js';
+  SWARM_CRUISE_SPEED, SWARM_MAXIMUM_SPEED, SWARM_SPEED_FLOOR, homeRadiusFor, slotHash, temperamentFor,
+} from '../../src/game/swarm-flocking.js';
+import { SWARM_FIRE_CONE_RADIANS } from '../../src/game/swarm-fire.js';
 import { SWARM_HIT_MASK_WORDS } from '../../src/sim/layout.js';
 
 const STEP = 1 / 60;
@@ -23,19 +24,6 @@ function maskFor(slots) {
   return mask;
 }
 
-// Steps the swarm for seconds around a fixed point, calling observe after each step.
-function hold(swarm, seconds, x, y, observe = () => {}) {
-  const steps = Math.round(seconds / STEP);
-  for (let step = 0; step < steps; step += 1) {
-    swarm.update(STEP, x, y);
-    observe();
-  }
-}
-
-// Bound on a settled ship's distance from the point for a 12-ship swarm: the biggest loop, the
-// wander and a margin for the spring's overshoot.
-const IDLE_BOUND = SWARM_LOOP_SIZE_MAXIMUM + SWARM_WANDER_SIZE + 0.25;
-
 test('reset spawns the initial swarm around the point; the cap holds 256 slots', () => {
   const swarm = new PlayerSwarm({ random: sequenceRandom() });
   swarm.reset(8, 4.5);
@@ -46,84 +34,139 @@ test('reset spawns the initial swarm around the point; the cap holds 256 slots',
   assert.equal(swarm.aliveCount, MAXIMUM_SWARM_SHIPS);
 });
 
-test('idle ships stay near a still point, loop both ways and keep turning both ways (figure eights)', () => {
+// Steps the swarm for seconds around a fixed point, calling observe after each step.
+function hold(swarm, seconds, x, y, observe = () => {}, controls = undefined) {
+  const steps = Math.round(seconds / STEP);
+  for (let step = 0; step < steps; step += 1) {
+    swarm.update(STEP, x, y, controls);
+    observe();
+  }
+}
+
+// The square root of the ratio of the principal axes of the position covariance (1 for a disc).
+function axisRatio(ships) {
+  let meanX = 0;
+  let meanY = 0;
+  for (const ship of ships) {
+    meanX += ship.x / ships.length;
+    meanY += ship.y / ships.length;
+  }
+  let xx = 0;
+  let xy = 0;
+  let yy = 0;
+  for (const ship of ships) {
+    xx += (ship.x - meanX) ** 2;
+    xy += (ship.x - meanX) * (ship.y - meanY);
+    yy += (ship.y - meanY) ** 2;
+  }
+  const half = (xx + yy) / 2;
+  const spread = Math.sqrt(((xx - yy) / 2) ** 2 + xy * xy);
+  return Math.sqrt((half + spread) / Math.max(half - spread, 1e-12));
+}
+
+// 1 minus the length of the mean heading vector: 0 when all ships fly the same way.
+function headingSpread(ships) {
+  let sumX = 0;
+  let sumY = 0;
+  for (const ship of ships) {
+    sumX += Math.cos(ship.heading);
+    sumY += Math.sin(ship.heading);
+  }
+  return 1 - Math.hypot(sumX, sumY) / ships.length;
+}
+
+function centroidDistance(swarm, x, y) {
+  const { x: centroidX, y: centroidY } = swarm.centroid;
+  return Math.hypot(centroidX - x, centroidY - y);
+}
+
+// The stated controllability bound: the centroid stays within one home radius plus this of a still point.
+const CENTROID_MARGIN = 0.3;
+
+test('a flock around a still point keeps its centroid within the bound, never stops, and keeps changing shape', () => {
   const swarm = new PlayerSwarm({ random: sequenceRandom() });
   swarm.reset(8, 4.5);
   hold(swarm, 5, 8, 4.5);
-  const alive = swarm.slots.filter((slot) => slot.alive);
-  const left = new Array(alive.length).fill(0);
-  const right = new Array(alive.length).fill(0);
-  const previous = alive.map((ship) => [ship.velocityX, ship.velocityY]);
-  let farthest = 0;
-  hold(swarm, 20, 8, 4.5, () => {
-    alive.forEach((ship, index) => {
-      const turn = previous[index][0] * ship.velocityY - previous[index][1] * ship.velocityX;
-      if (turn > 0) left[index] += 1;
-      else if (turn < 0) right[index] += 1;
-      previous[index] = [ship.velocityX, ship.velocityY];
-      farthest = Math.max(farthest, Math.hypot(ship.x - 8, ship.y - 4.5));
-    });
+  const bound = homeRadiusFor(INITIAL_SWARM_SHIPS) + CENTROID_MARGIN;
+  let farthestCentroid = 0;
+  let slowest = Infinity;
+  const ratios = [];
+  const spreads = [];
+  let step = 0;
+  hold(swarm, 30, 8, 4.5, () => {
+    farthestCentroid = Math.max(farthestCentroid, centroidDistance(swarm, 8, 4.5));
+    for (const slot of swarm.slots) if (slot.alive) slowest = Math.min(slowest, Math.hypot(slot.velocityX, slot.velocityY));
+    step += 1;
+    if (step % 15 === 0) {
+      ratios.push(axisRatio(swarm.ships));
+      spreads.push(headingSpread(swarm.ships));
+    }
   });
-  assert.ok(farthest < IDLE_BOUND, `farthest ${farthest}`);
-  // A circling ship always turns one way; a figure eight turns both ways in every loop.
-  alive.forEach((ship, index) => {
-    const share = left[index] / (left[index] + right[index]);
-    assert.ok(share > 0.2 && share < 0.8, `slot ${index} turned left ${(share * 100).toFixed(0)} percent of the time`);
-  });
-  assert.deepEqual([...new Set(alive.map((ship) => ship.loopDirection))].sort(), [-1, 1]);
-  const periods = alive.map((ship) => (2 * Math.PI) / ship.loopRadiansPerSecond);
-  assert.ok(periods.every((period) => period >= SWARM_LOOP_SECONDS_MINIMUM && period <= SWARM_LOOP_SECONDS_MAXIMUM));
-  assert.equal(new Set(periods).size, alive.length, 'every ship has its own loop speed');
-  // The heading follows the velocity.
-  const ship = alive[0];
-  assert.ok(Math.abs(Math.atan2(ship.velocityY, ship.velocityX) - ship.heading) < 1e-9);
-  assert.equal(swarm.ships[0].heading, ship.heading);
+  assert.ok(farthestCentroid < bound, `centroid strayed ${farthestCentroid} (bound ${bound})`);
+  assert.ok(slowest >= SWARM_SPEED_FLOOR * SWARM_CRUISE_SPEED * 0.8 - 1e-9, `slowest ${slowest}`);
+  // Not a disc: the shape is clearly elongated for a good share of the samples, and it changes.
+  const elongated = ratios.filter((ratio) => ratio > 1.3).length / ratios.length;
+  assert.ok(elongated > 0.3, `elongated in ${(elongated * 100).toFixed(0)} percent of samples`);
+  assert.ok(Math.max(...ratios) - Math.min(...ratios) > 0.5, 'the shape changes over time');
+  // Ships choose their own way: the headings are not one direction.
+  const meanSpread = spreads.reduce((sum, value) => sum + value, 0) / spreads.length;
+  assert.ok(meanSpread > 0.2, `mean heading spread ${meanSpread}`);
+  const ship = swarm.slots.find((slot) => slot.alive);
+  assert.ok(Math.abs(Math.atan2(ship.velocityY, ship.velocityX) - ship.heading) < 1e-9, 'heading is the velocity');
+  assert.equal(swarm.ships[0].heading, swarm.slots.find((slot) => slot.alive).heading);
 });
 
-test('the idle character comes from the slot alone, not the random source', () => {
+test('the temperament comes from the slot alone, not the random source, and differs per slot', () => {
   const first = new PlayerSwarm({ random: () => 0.1 });
   const second = new PlayerSwarm({ random: () => 0.9 });
   first.reset(8, 4.5);
   second.reset(8, 4.5);
-  const character = (slot) => [slot.loopRadiansPerSecond, slot.loopSizeFraction, slot.loopDirection, slot.axisAngle, slot.axisDrift];
+  const character = (slot) => [slot.cruiseSpeed, slot.maximumTurn, slot.alignmentScale, slot.flockHold, slot.wander, slot.leash];
   assert.deepEqual(first.slots.slice(0, 12).map(character), second.slots.slice(0, 12).map(character));
+  assert.equal(new Set(first.slots.slice(0, 12).map((slot) => slot.cruiseSpeed)).size, 12);
+  assert.deepEqual(temperamentFor(5), temperamentFor(5));
   assert.ok(slotHash(3, 1) >= 0 && slotHash(3, 1) < 1);
   assert.notEqual(slotHash(3, 1), slotHash(4, 1));
 });
 
-test('the swarm converges back on the point after it jumps', () => {
+test('the flock catches up after the point jumps', () => {
   const swarm = new PlayerSwarm({ random: sequenceRandom() });
   swarm.reset(8, 4.5);
   hold(swarm, 3, 8, 4.5);
-  hold(swarm, 4, 11, 6);
-  const centroid = swarm.centroid;
-  assert.ok(Math.hypot(centroid.x - 11, centroid.y - 6) < 0.35, `centroid ${centroid.x}, ${centroid.y}`);
-  for (const ship of swarm.ships) assert.ok(Math.hypot(ship.x - 11, ship.y - 6) < IDLE_BOUND, `ship at ${ship.x}, ${ship.y}`);
+  hold(swarm, 3, 11, 6);
+  assert.ok(centroidDistance(swarm, 11, 6) < homeRadiusFor(INITIAL_SWARM_SHIPS) + CENTROID_MARGIN, `centroid ${centroidDistance(swarm, 11, 6)} away`);
 });
 
-test('a point moving at the player speed stretches the flock behind it, still close, then it settles', () => {
+test('a point moving at the player speed is chased by a stretched stream that keeps up, then re-forms', () => {
   const bounds = { minX: 0, maxX: 16, minY: 0, maxY: 9, width: 16, height: 9 };
   const swarm = new PlayerSwarm({ random: sequenceRandom(), bounds });
   swarm.reset(2, 4.5);
   hold(swarm, 2, 2, 4.5);
   let x = 2;
+  let farthestCentroid = 0;
+  const ratios = [];
   for (let step = 0; step < 120; step += 1) {
     x += 6 * STEP;
     swarm.update(STEP, x, 4.5);
+    farthestCentroid = Math.max(farthestCentroid, centroidDistance(swarm, x, 4.5));
+    if (step % 10 === 0) ratios.push(axisRatio(swarm.ships));
   }
-  const trailing = x - swarm.centroid.x;
-  assert.ok(trailing > 0.2 && trailing < 1.2, `the flock trails by ${trailing}`);
-  hold(swarm, 4, x, 4.5);
-  assert.ok(Math.abs(swarm.centroid.x - x) < 0.35, `settled centroid ${swarm.centroid.x} vs point ${x}`);
+  assert.ok(farthestCentroid < 1.5, `the centroid fell ${farthestCentroid} behind`);
+  assert.ok(Math.max(...ratios) > 1.5, `the flock stretched to ${Math.max(...ratios)}`);
+  hold(swarm, 3, x, 4.5);
+  assert.ok(centroidDistance(swarm, x, 4.5) < homeRadiusFor(INITIAL_SWARM_SHIPS) + CENTROID_MARGIN);
   hold(swarm, 5, 16, 9);
   for (const ship of swarm.ships) assert.ok(ship.x <= 16 && ship.y <= 9);
   for (const slot of swarm.slots.filter((entry) => entry.alive)) assert.ok(Math.hypot(slot.velocityX, slot.velocityY) <= SWARM_MAXIMUM_SPEED + 1e-9);
 });
 
-test('a full swarm spreads wider than a small one without blobbing', () => {
+test('a full swarm stays within its bound and does not collapse into a blob', () => {
   const swarm = new PlayerSwarm({ random: sequenceRandom() });
   swarm.reset(8, 4.5, MAXIMUM_SWARM_SHIPS);
-  hold(swarm, 10, 8, 4.5);
+  hold(swarm, 5, 8, 4.5);
+  let farthestCentroid = 0;
+  hold(swarm, 10, 8, 4.5, () => { farthestCentroid = Math.max(farthestCentroid, centroidDistance(swarm, 8, 4.5)); });
+  assert.ok(farthestCentroid < homeRadiusFor(MAXIMUM_SWARM_SHIPS) + CENTROID_MARGIN, `centroid strayed ${farthestCentroid}`);
   const ships = swarm.ships;
   let nearestSum = 0;
   for (const ship of ships) {
@@ -131,9 +174,27 @@ test('a full swarm spreads wider than a small one without blobbing', () => {
     for (const other of ships) if (other !== ship) nearest = Math.min(nearest, Math.hypot(ship.x - other.x, ship.y - other.y));
     nearestSum += nearest;
   }
-  assert.ok(nearestSum / ships.length > SWARM_SEPARATION_RADIUS * 0.5, `mean nearest neighbour ${nearestSum / ships.length}`);
-  const farthest = Math.max(...ships.map((ship) => Math.hypot(ship.x - 8, ship.y - 4.5)));
-  assert.ok(farthest > SWARM_LOOP_SIZE_MAXIMUM && farthest < 4, `farthest ${farthest}`);
+  assert.ok(nearestSum / ships.length > 0.03, `mean nearest neighbour ${nearestSum / ships.length}`);
+});
+
+test('firing makes attack runs: more ships fly within the fire cone of the aim', () => {
+  const coneShare = (controls) => {
+    const swarm = new PlayerSwarm({ random: sequenceRandom() });
+    swarm.reset(8, 4.5, 64);
+    hold(swarm, 3, 8, 4.5, () => {}, controls);
+    let inside = 0;
+    let samples = 0;
+    hold(swarm, 10, 8, 4.5, () => {
+      for (const ship of swarm.ships) {
+        samples += 1;
+        if (Math.abs(Math.atan2(Math.sin(ship.heading), Math.cos(ship.heading))) <= SWARM_FIRE_CONE_RADIANS) inside += 1;
+      }
+    }, controls);
+    return inside / samples;
+  };
+  const idle = coneShare(undefined);
+  const attacking = coneShare({ firing: true, aimX: 1, aimY: 0 });
+  assert.ok(attacking > idle + 0.03, `cone share ${attacking} firing against ${idle} idle`);
 });
 
 test('a hit kills an alive ship once and only from a frame at or after its first upload', () => {
