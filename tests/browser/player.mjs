@@ -1,6 +1,8 @@
-// Browser check for player contact, the GPU hit latch and the kill-all pass. Loads
-// tests/browser/pages/player.html, which seeds 5000 Chasers around the player, waits for a
-// contact hit, checks the latch, invulnerability and kill-all, and reports window.__playerCheck.
+// Browser check for player swarm contact, the persistent swarm hit mask, the kill-all pass and the
+// pickup blast. Loads tests/browser/pages/player.html, which places motionless agents on chosen
+// swarm ship positions, checks the hit bits, one kill per ship, persistence, dead and fresh slots
+// clearing their bits, disarmed contact, kill-all and the capacity rebuild, and reports
+// window.__playerCheck.
 // Usage: SMOKE_PORT=5184 node tests/browser/player.mjs (SMOKE_PORT picks the Vite port).
 // Exit codes: 0 pass, 1 failure (check failed, console errors or timeout).
 import { launchWebGpuBrowser } from './launch.mjs';

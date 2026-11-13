@@ -1,51 +1,52 @@
-// Player contact check. A 16384-slot Simulation gets 5000 alive Chasers (species 0, no spawn-in
-// frames, at rest) seeded on a circle of radius 3 around the player at the arena center; nothing
-// spawns. The page calls setPlayerState every step like the game will, then checks:
-// (a) a contact hit is reported (playerHitSequence > 0) within 10 s of sim time; the hit frame
-//     has exactly one contact kill (killsUnscored 1: one toucher per latch) and scores none
-//     (killsSinceLastRead 0), and the alive total dropped by at least 1;
-// (b) the latch: for LATCH_FRAMES unacknowledged frames, with alive agents overlapping the player,
-//     playerHitSequence stays at the first hit and hitLatch reads 1; after acknowledgeHit and 3
-//     more frames a second hit arrives whose sequence is past the acknowledging frame;
-// (c) invulnerable, with the second hit acknowledged: no hit for 60 frames while agents overlap.
-//     The ring's chasers drift in and out of reach (the per-frame overlap floor flaked, 44 to 60
-//     of 60 on real hardware), so cases (b) and (c) hold one extra agent on the player for their
-//     latch, stale-acknowledgement and invulnerable frames, rewritten each frame before the step:
-//     overlap then holds on every frame and the floor is exact. The
-//     check still fails if invulnerability breaks, since that held agent (and the ring) would
-//     contact-kill and raise playerHitSequence in the first frame, failing the hit verdict;
-// (d) requestKillAll in a step that also spawns (so spawn-in agents exist when kill-all runs):
-//     aliveTotal 0, killsUnscored > 0, killsSinceLastRead 0; the next frame killsUnscored is back to 0
-//     while playerHitSequence persists across the per-step clear;
-// (e) recreateWithCapacity carries the persistent tail: playerHitSequence survives the rebuild;
-// (f) the pickup blast (owner ruling R22) through a real Game (fake renderer and input) on a fresh
+// Player swarm contact check (player_collide.wgsl). A 16384-slot Simulation whose species never
+// move gets motionless alive agents placed exactly on chosen swarm ship positions; nothing spawns.
+// The page calls setPlayerState and setSwarmShips every step like the game does, then checks:
+// (a) one step with slots 0 and 37 (two agents on slot 0, one on slot 37) alive and fresh, slot 5
+//     alive with no agent near it, and slot 200 dead on an agent: the hit mask has exactly bits 0
+//     and 37, the step counts 2 contact kills (one toucher per ship) in killsUnscored and none
+//     scored, and the agents on slots 0 (one of two) and 37 are dead while slot 200's agent lives;
+// (b) the next step with the same ships (no longer fresh): bits 0 and 37 stay set (persistent) and
+//     nothing more dies, so a hit ship stays hit until the CPU uploads it dead;
+// (c) slot 0 uploaded dead clears bit 0 and kills nothing (its second agent lives); uploaded again
+//     alive and fresh, it hits that agent: bit 0 set again, one kill;
+// (d) disarmed (setPlayerState invulnerable): a fresh ship on a new agent sets no bit and kills
+//     nothing;
+// (e) requestKillAll in a step that also spawns (so spawn-in agents exist when kill-all runs):
+//     aliveTotal 0, killsUnscored > 0, killsSinceLastRead 0; the next frame killsUnscored is back
+//     to 0 while the hit mask persists across the per-step clear;
+// (f) recreateWithCapacity carries the persistent tail: the hit mask survives the rebuild;
+// (g) the pickup blast (owner ruling R22) through a real Game (fake renderer and input) on a fresh
 //     simulation whose species never move: after the start clear, BLAST_AGENT_COUNT agents seeded
-//     on rings from 0.3 to 3 around the ship and a pickup under it, one update collects it. Every
+//     on rings from 0.3 to 3 around the point and a pickup under it, one update collects it. Every
 //     seeded agent inside pickupBlastRadius dies and every one outside lives, the blast step's
 //     stats count them all in killsUnscored and none in killsSinceLastRead, the score stays 0,
 //     and the next step kills nothing.
 import { createGpuContext } from '/src/gpu/device.js';
-import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, SPECIES_COUNT } from '/src/sim/layout.js';
-import { DEFAULT_PLAYER_RADIUS, Simulation } from '/src/sim/simulation.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, MAXIMUM_SWARM_SHIPS, SPECIES_COUNT } from '/src/sim/layout.js';
+import { Simulation } from '/src/sim/simulation.js';
 import { Game } from '/src/game/game.js';
+import { SWARM_SHIP_RADIUS } from '/src/game/player-swarm.js';
 import { InputState } from '/src/input/input.js';
 import { defaultSpecies, normalizeShares } from '/src/sim/species.js';
 
 const CAPACITY = 16384;
 const GROWN_CAPACITY = 32768;
-const AGENT_COUNT = 5000;
-const SEED_RADIUS = 3;
 const STEP_SECONDS = 1 / 60;
-const HIT_FRAME_LIMIT = 600;
-const LATCH_FRAMES = 60;
-const STALE_ACKNOWLEDGE_FRAMES = 30;
-const ACKNOWLEDGE_FRAMES = 3;
-const SECOND_HIT_FRAME_LIMIT = 120;
-const INVULNERABLE_FRAMES = 60;
 const CLEAR_SPAWN = [200, 0, 0, 0, 0];
 const READBACK_ATTEMPTS = 20;
-const CONTACT_MARGIN = 0.02;
 const CENTER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
+// Ship positions for the cases, far apart so no ship reaches another's agents.
+const SPOTS = {
+  slotZero: [4, 3],
+  slotThirtySeven: [6, 3],
+  slotFive: [8, 3],
+  slotTwoHundred: [10, 3],
+  disarmed: [12, 3],
+};
+// Agent slots: two on slot 0's spot, one each on slot 37's, slot 200's and the disarmed spot.
+const AGENTS = [
+  ['slotZero', 0], ['slotZero', 1], ['slotThirtySeven', 2], ['slotTwoHundred', 3], ['disarmed', 4],
+];
 
 async function readBuffer(device, source) {
   const staging = device.createBuffer({ size: source.size, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
@@ -59,6 +60,24 @@ async function readBuffer(device, source) {
   return copy;
 }
 
+function maskBits(mask) {
+  const bits = [];
+  mask.forEach((word, wordIndex) => {
+    for (let bit = 0; bit < 32; bit += 1) if (((word >>> bit) & 1) === 1) bits.push(wordIndex * 32 + bit);
+  });
+  return bits;
+}
+
+// One swarm table entry per slot; ships maps a slot to { spot, fresh }.
+function swarmTable(ships) {
+  return Array.from({ length: MAXIMUM_SWARM_SHIPS }, (_, slot) => {
+    const ship = ships[slot];
+    if (ship === undefined) return { x: 0, y: 0, alive: false, fresh: false };
+    const [x, y] = SPOTS[ship.spot];
+    return { x, y, alive: ship.alive !== false, fresh: ship.fresh === true };
+  });
+}
+
 class Harness {
   constructor(device, simulation) {
     this.device = device;
@@ -67,24 +86,24 @@ class Harness {
     this.invulnerable = false;
   }
 
-  seedRing() {
+  seedAgents() {
     const bytes = new ArrayBuffer(this.simulation.capacity * AGENT_STRIDE_BYTES);
     const view = new DataView(bytes);
-    for (let slot = 0; slot < AGENT_COUNT; slot += 1) {
-      const angle = (slot / AGENT_COUNT) * Math.PI * 2;
+    for (const [spot, slot] of AGENTS) {
       const base = slot * AGENT_STRIDE_BYTES;
-      view.setFloat32(base + AGENT_OFFSETS.position, CENTER[0] + Math.cos(angle) * SEED_RADIUS, true);
-      view.setFloat32(base + AGENT_OFFSETS.position + 4, CENTER[1] + Math.sin(angle) * SEED_RADIUS, true);
+      view.setFloat32(base + AGENT_OFFSETS.position, SPOTS[spot][0], true);
+      view.setFloat32(base + AGENT_OFFSETS.position + 4, SPOTS[spot][1], true);
       view.setUint32(base + AGENT_OFFSETS.species, 0, true);
       view.setUint32(base + AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
-      view.setFloat32(base + AGENT_OFFSETS.phase, angle, true);
     }
     this.device.queue.writeBuffer(this.simulation.agentsBuffer, 0, bytes);
   }
 
-  // One step (player state set first, as the game does), submitted and awaited; returns its stats.
-  async step(spawnPerSpecies = new Uint32Array(SPECIES_COUNT)) {
-    this.simulation.setPlayerState({ x: CENTER[0], y: CENTER[1], radius: DEFAULT_PLAYER_RADIUS, invulnerable: this.invulnerable });
+  // One step with this swarm table (player state set first, as the game does), submitted and
+  // awaited; returns its stats.
+  async step(ships = {}, spawnPerSpecies = new Uint32Array(SPECIES_COUNT)) {
+    this.simulation.setPlayerState({ x: CENTER[0], y: CENTER[1], invulnerable: this.invulnerable });
+    this.simulation.setSwarmShips(swarmTable(ships), SWARM_SHIP_RADIUS);
     const encoder = this.device.createCommandEncoder({ label: 'player-check-frame' });
     this.simulation.step(encoder, STEP_SECONDS, spawnPerSpecies);
     this.device.queue.submit([encoder.finish()]);
@@ -100,51 +119,10 @@ class Harness {
     return stats;
   }
 
-  // Writes one alive agent on the player in a slot past the seeded ring, so case (c) overlap does
-  // not depend on the chasers' drift. Called before each step.
-  holdAgentOnPlayer() {
-    const bytes = new ArrayBuffer(AGENT_STRIDE_BYTES);
-    const view = new DataView(bytes);
-    view.setFloat32(AGENT_OFFSETS.position, CENTER[0], true);
-    view.setFloat32(AGENT_OFFSETS.position + 4, CENTER[1], true);
-    view.setUint32(AGENT_OFFSETS.species, 0, true);
-    view.setUint32(AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
-    this.device.queue.writeBuffer(this.simulation.agentsBuffer, AGENT_COUNT * AGENT_STRIDE_BYTES, bytes);
-  }
-
-  // Alive agents within contact reach of the player in the newest agents buffer.
-  async overlapping() {
+  // Alive flags of the seeded agent slots, in AGENTS order.
+  async seededAlive() {
     const view = new DataView(await readBuffer(this.device, this.simulation.agentsBuffer));
-    let count = 0;
-    for (let slot = 0; slot < this.simulation.capacity; slot += 1) {
-      const base = slot * AGENT_STRIDE_BYTES;
-      if ((view.getUint32(base + AGENT_OFFSETS.flags, true) & AGENT_FLAG_ALIVE) === 0) continue;
-      const x = view.getFloat32(base + AGENT_OFFSETS.position, true);
-      const y = view.getFloat32(base + AGENT_OFFSETS.position + 4, true);
-      if (Math.hypot(x - CENTER[0], y - CENTER[1]) <= DEFAULT_PLAYER_RADIUS + CONTACT_MARGIN) count += 1;
-    }
-    return count;
-  }
-}
-
-// Per-frame overlap tally. Chasing agents drift in and out of the player's reach (a contact kill
-// empties it for a few frames, and the edge flickers), so a window asserts that overlap held on
-// at least MINIMUM_OVERLAP_FRACTION of its frames, counted frame by frame, rather than once at
-// the end of the window.
-const MINIMUM_OVERLAP_FRACTION = 0.75;
-
-class OverlapTally {
-  constructor(frames) {
-    this.frames = frames;
-    this.overlapping = 0;
-  }
-
-  record(count) {
-    if (count > 0) this.overlapping += 1;
-  }
-
-  get sufficient() {
-    return this.overlapping >= Math.ceil(this.frames * MINIMUM_OVERLAP_FRACTION);
+    return AGENTS.map(([, slot]) => (view.getUint32(slot * AGENT_STRIDE_BYTES + AGENT_OFFSETS.flags, true) & AGENT_FLAG_ALIVE) !== 0);
   }
 }
 
@@ -215,15 +193,15 @@ async function runBlastCase(gpu) {
   game.removeProjectilePass();
   game.projectiles.destroy();
   simulation.destroy();
-  if (blastStats === undefined || nextStats === undefined) return [[false, `(f) no stats for the blast step ${blastSequence} or the one after it`]];
+  if (blastStats === undefined || nextStats === undefined) return [[false, `(g) no stats for the blast step ${blastSequence} or the one after it`]];
   const killed = distances.filter((distance, slot) => !alive[slot]).length;
   return [
-    [game.state.armed === 'scatter', `(f) the pickup was collected (armed ${game.state.armed})`],
-    [inside > 0 && aliveInside === 0, `(f) alive agents inside the blast radius ${radius}: ${aliveInside} of ${inside} (need 0)`],
-    [deadOutside === 0, `(f) dead agents outside the blast radius ${deadOutside} (need 0)`],
-    [blastStats.killsUnscored === killed && blastStats.killsSinceLastRead === 0, `(f) blast step killsUnscored ${blastStats.killsUnscored} (need ${killed}), killsSinceLastRead ${blastStats.killsSinceLastRead} (need 0)`],
-    [nextStats.killsUnscored === 0 && nextStats.killsSinceLastRead === 0, `(f) next step kills ${nextStats.killsUnscored} unscored, ${nextStats.killsSinceLastRead} scored (need 0 and 0)`],
-    [score === 0, `(f) score after the blast ${score} (need 0)`],
+    [game.state.armed === 'scatter', `(g) the pickup was collected (armed ${game.state.armed})`],
+    [inside > 0 && aliveInside === 0, `(g) alive agents inside the blast radius ${radius}: ${aliveInside} of ${inside} (need 0)`],
+    [deadOutside === 0, `(g) dead agents outside the blast radius ${deadOutside} (need 0)`],
+    [blastStats.killsUnscored === killed && blastStats.killsSinceLastRead === 0, `(g) blast step killsUnscored ${blastStats.killsUnscored} (need ${killed}), killsSinceLastRead ${blastStats.killsSinceLastRead} (need 0)`],
+    [nextStats.killsUnscored === 0 && nextStats.killsSinceLastRead === 0, `(g) next step kills ${nextStats.killsUnscored} unscored, ${nextStats.killsSinceLastRead} scored (need 0 and 0)`],
+    [score === 0, `(g) score after the blast ${score} (need 0)`],
   ];
 }
 
@@ -234,87 +212,60 @@ async function runCheck() {
   device.lost.then((info) => { lostReason = info.message || info.reason || 'lost'; });
   device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
 
-  let simulation = await Simulation.create(gpu, { capacity: CAPACITY, shares: normalizeShares([1, 1, 1, 1, 1]) });
+  const still = defaultSpecies().map((row) => ({ ...row, maximumSpeed: 0 }));
+  let simulation = await Simulation.create(gpu, { capacity: CAPACITY, species: still, shares: normalizeShares([1, 1, 1, 1, 1]) });
   const harness = new Harness(device, simulation);
-  harness.seedRing();
+  harness.seedAgents();
   const verdicts = [];
+  const ships = {
+    0: { spot: 'slotZero', fresh: true },
+    37: { spot: 'slotThirtySeven', fresh: true },
+    5: { spot: 'slotFive', fresh: true },
+    200: { spot: 'slotTwoHundred', alive: false },
+  };
 
-  // (a) first contact.
-  let stats = await harness.step();
-  const aliveBefore = stats.aliveTotal;
-  let frames = 1;
-  while (stats.playerHitSequence === 0 && frames < HIT_FRAME_LIMIT) {
-    stats = await harness.step();
-    frames += 1;
-  }
-  const firstHit = stats.playerHitSequence;
-  verdicts.push([firstHit > 0, `(a) first hit at frame ${firstHit} after ${frames} frames (need within ${HIT_FRAME_LIMIT})`]);
-  verdicts.push([stats.frameSequence === firstHit && stats.killsUnscored === 1, `(a) hit frame ${stats.frameSequence} contact kills (killsUnscored) ${stats.killsUnscored} (need exactly 1)`]);
-  verdicts.push([stats.killsSinceLastRead === 0, `(a) hit frame scored kills ${stats.killsSinceLastRead} (need 0: contact never scores)`]);
-  verdicts.push([stats.aliveTotal <= aliveBefore - 1, `(a) alive ${aliveBefore} -> ${stats.aliveTotal} (need a drop of at least 1)`]);
-  if (!(firstHit > 0)) return { pass: false, detail: verdictLine(verdicts) };
+  // (a) hits on the fresh ships.
+  let stats = await harness.step(ships);
+  let alive = await harness.seededAlive();
+  verdicts.push([maskBits(stats.swarmHitMask).join(',') === '0,37', `(a) hit mask bits ${maskBits(stats.swarmHitMask).join(',')} (need 0,37)`]);
+  verdicts.push([stats.killsUnscored === 2 && stats.killsSinceLastRead === 0, `(a) contact kills ${stats.killsUnscored} unscored, ${stats.killsSinceLastRead} scored (need 2 and 0)`]);
+  verdicts.push([alive.join(',') === 'false,true,false,true,true' || alive.join(',') === 'true,false,false,true,true', `(a) seeded agents alive ${alive.join(',')} (need one of slot 0's two dead, slot 37's dead, the rest alive)`]);
 
-  // (b) the latch holds without an acknowledgement and a stale acknowledgement does not release it.
-  let latchHeld = true;
-  const overlapLatched = new OverlapTally(LATCH_FRAMES);
-  for (let frame = 0; frame < LATCH_FRAMES; frame += 1) {
-    harness.holdAgentOnPlayer();
-    stats = await harness.step();
-    if (stats.playerHitSequence !== firstHit || stats.hitLatch !== 1) latchHeld = false;
-    overlapLatched.record(await harness.overlapping());
-  }
-  verdicts.push([latchHeld, `(b) unacknowledged for ${LATCH_FRAMES} frames: hit sequence stayed ${firstHit} with the latch set (last ${stats.playerHitSequence}, latch ${stats.hitLatch})`]);
-  verdicts.push([overlapLatched.sufficient, `(b) frames with an agent overlapping the player while latched ${overlapLatched.overlapping} of ${LATCH_FRAMES} (need at least ${Math.ceil(overlapLatched.frames * MINIMUM_OVERLAP_FRACTION)})`]);
+  // (b) the bits persist and a hit ship stays hit.
+  const steady = { 0: { spot: 'slotZero' }, 37: { spot: 'slotThirtySeven' }, 5: { spot: 'slotFive' } };
+  stats = await harness.step(steady);
+  verdicts.push([maskBits(stats.swarmHitMask).join(',') === '0,37' && stats.killsUnscored === 0, `(b) next step bits ${maskBits(stats.swarmHitMask).join(',')}, kills ${stats.killsUnscored} (need 0,37 and 0)`]);
 
-  simulation.acknowledgeHit(firstHit - 1);
-  let staleHeld = true;
-  const overlapStale = new OverlapTally(STALE_ACKNOWLEDGE_FRAMES);
-  for (let frame = 0; frame < STALE_ACKNOWLEDGE_FRAMES; frame += 1) {
-    harness.holdAgentOnPlayer();
-    stats = await harness.step();
-    if (stats.playerHitSequence !== firstHit || stats.hitLatch !== 1) staleHeld = false;
-    overlapStale.record(await harness.overlapping());
-  }
-  verdicts.push([staleHeld, `(b) stale acknowledgement ${firstHit - 1} for ${STALE_ACKNOWLEDGE_FRAMES} frames: hit sequence stayed ${firstHit} with the latch set (last ${stats.playerHitSequence}, latch ${stats.hitLatch})`]);
-  verdicts.push([overlapStale.sufficient, `(b) frames with an agent overlapping the player during the stale acknowledgement ${overlapStale.overlapping} of ${STALE_ACKNOWLEDGE_FRAMES} (need at least ${Math.ceil(overlapStale.frames * MINIMUM_OVERLAP_FRACTION)})`]);
+  // (c) dead clears the bit; alive and fresh again hits the second agent.
+  stats = await harness.step({ 37: { spot: 'slotThirtySeven' }, 5: { spot: 'slotFive' } });
+  verdicts.push([maskBits(stats.swarmHitMask).join(',') === '37' && stats.killsUnscored === 0, `(c) slot 0 dead: bits ${maskBits(stats.swarmHitMask).join(',')}, kills ${stats.killsUnscored} (need 37 and 0)`]);
+  stats = await harness.step({ ...steady, 0: { spot: 'slotZero', fresh: true } });
+  alive = await harness.seededAlive();
+  verdicts.push([maskBits(stats.swarmHitMask).join(',') === '0,37' && stats.killsUnscored === 1 && !alive[0] && !alive[1], `(c) slot 0 fresh again: bits ${maskBits(stats.swarmHitMask).join(',')}, kills ${stats.killsUnscored}, slot 0 agents alive ${alive[0]},${alive[1]} (need 0,37, 1 and both dead)`]);
 
-  simulation.acknowledgeHit(firstHit);
-  const acknowledgedAt = simulation.frameSequence;
-  for (let frame = 0; frame < ACKNOWLEDGE_FRAMES; frame += 1) stats = await harness.step();
-  for (let frame = 0; frame < SECOND_HIT_FRAME_LIMIT && stats.playerHitSequence === firstHit; frame += 1) stats = await harness.step();
-  const secondHit = stats.playerHitSequence;
-  verdicts.push([secondHit > firstHit && secondHit > acknowledgedAt, `(b) second hit at frame ${secondHit} after acknowledging ${firstHit} at frame ${acknowledgedAt} (need later than both)`]);
-
-  // (c) invulnerable.
-  simulation.acknowledgeHit(secondHit);
+  // (d) disarmed: no bit, no kill.
   harness.invulnerable = true;
-  let hitWhileInvulnerable = false;
-  const overlapInvulnerable = new OverlapTally(INVULNERABLE_FRAMES);
-  for (let frame = 0; frame < INVULNERABLE_FRAMES; frame += 1) {
-    harness.holdAgentOnPlayer();
-    stats = await harness.step();
-    if (stats.playerHitSequence !== secondHit) hitWhileInvulnerable = true;
-    overlapInvulnerable.record(await harness.overlapping());
-  }
-  verdicts.push([!hitWhileInvulnerable && stats.hitLatch === 0, `(c) invulnerable ${INVULNERABLE_FRAMES} frames: hit sequence ${stats.playerHitSequence} (need ${secondHit}), latch ${stats.hitLatch} (need 0 after the acknowledgement)`]);
-  verdicts.push([overlapInvulnerable.sufficient, `(c) frames with an agent overlapping the invulnerable player ${overlapInvulnerable.overlapping} of ${INVULNERABLE_FRAMES} (need at least ${Math.ceil(overlapInvulnerable.frames * MINIMUM_OVERLAP_FRACTION)})`]);
+  stats = await harness.step({ ...steady, 9: { spot: 'disarmed', fresh: true } });
+  alive = await harness.seededAlive();
+  verdicts.push([!maskBits(stats.swarmHitMask).includes(9) && stats.killsUnscored === 0 && alive[4], `(d) disarmed: bits ${maskBits(stats.swarmHitMask).join(',')}, kills ${stats.killsUnscored}, agent alive ${alive[4]} (need no bit 9, 0 and true)`]);
+  harness.invulnerable = false;
 
-  // (d) kill-all, in a step that also spawns.
+  // (e) kill-all, in a step that also spawns.
   const aliveBeforeClear = stats.aliveTotal;
   simulation.requestKillAll();
-  stats = await harness.step(new Uint32Array(CLEAR_SPAWN));
-  verdicts.push([stats.aliveTotal === 0, `(d) alive after kill-all ${stats.aliveTotal} (need 0)`]);
-  verdicts.push([stats.killsUnscored > aliveBeforeClear, `(d) killsUnscored ${stats.killsUnscored} (need more than the ${aliveBeforeClear} alive before, spawned agents included)`]);
-  verdicts.push([stats.killsSinceLastRead === 0, `(d) killsSinceLastRead ${stats.killsSinceLastRead} (need 0)`]);
-  stats = await harness.step();
-  verdicts.push([stats.killsUnscored === 0 && stats.aliveTotal === 0, `(d) next frame killsUnscored ${stats.killsUnscored}, alive ${stats.aliveTotal} (need 0 and 0)`]);
-  verdicts.push([stats.playerHitSequence === secondHit, `(d) playerHitSequence ${stats.playerHitSequence} persists across the per-step clear (need ${secondHit})`]);
+  stats = await harness.step(steady, new Uint32Array(CLEAR_SPAWN));
+  verdicts.push([stats.aliveTotal === 0, `(e) alive after kill-all ${stats.aliveTotal} (need 0)`]);
+  verdicts.push([stats.killsUnscored > aliveBeforeClear, `(e) killsUnscored ${stats.killsUnscored} (need more than the ${aliveBeforeClear} alive before, spawned agents included)`]);
+  verdicts.push([stats.killsSinceLastRead === 0, `(e) killsSinceLastRead ${stats.killsSinceLastRead} (need 0)`]);
+  stats = await harness.step(steady);
+  verdicts.push([stats.killsUnscored === 0 && stats.aliveTotal === 0, `(e) next frame killsUnscored ${stats.killsUnscored}, alive ${stats.aliveTotal} (need 0 and 0)`]);
+  verdicts.push([maskBits(stats.swarmHitMask).join(',') === '0,37', `(e) hit mask ${maskBits(stats.swarmHitMask).join(',')} persists across the per-step clear (need 0,37)`]);
 
-  // (e) the persistent tail survives a capacity rebuild.
+  // (f) the persistent tail survives a capacity rebuild.
   simulation = await simulation.recreateWithCapacity(GROWN_CAPACITY);
   harness.simulation = simulation;
-  stats = await harness.step();
-  verdicts.push([stats.playerHitSequence === secondHit, `(e) playerHitSequence after recreateWithCapacity ${stats.playerHitSequence} (need ${secondHit})`]);
+  stats = await harness.step(steady);
+  verdicts.push([maskBits(stats.swarmHitMask).join(',') === '0,37', `(f) hit mask after recreateWithCapacity ${maskBits(stats.swarmHitMask).join(',')} (need 0,37)`]);
   if (lostReason !== null) verdicts.push([false, `device lost: ${lostReason}`]);
   simulation.destroy();
   verdicts.push(...await runBlastCase(gpu));
