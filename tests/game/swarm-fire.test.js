@@ -15,15 +15,17 @@ function volley(spawns, turretSpawns = [], beam = null) {
 
 const SHOT = { x: 8.1, y: 4.5, velocityX: 10, velocityY: 0, radius: 0.2, lifetime: 3, kind: 0, seed: 0.5, extra: 0 };
 
-test('a quarter of the ships fire half-size copies from their own positions, in rotation', () => {
+test('an eighth of the ships (at least one) fire 0.4-size copies from their own positions, in rotation', () => {
   const fire = new SwarmFire();
   const ships = shipsAround(12);
   const first = fire.distribute(volley([SHOT]), ships, ORIGIN, ORIGIN);
-  assert.equal(first.spawns.length, 3);
-  assert.deepEqual(first.spawns.map((spawn) => Math.round((spawn.x - 0.1 - 8) * 100)), [0, 1, 2]);
+  assert.equal(first.spawns.length, 2);
+  assert.deepEqual(first.spawns.map((spawn) => Math.round((spawn.x - 0.1 - 8) * 100)), [0, 1]);
   assert.ok(first.spawns.every((spawn) => spawn.radius === SHOT.radius * SWARM_PROJECTILE_RADIUS_SCALE && spawn.velocityX === 10));
   const second = fire.distribute(volley([SHOT]), ships, ORIGIN, ORIGIN);
-  assert.deepEqual(second.spawns.map((spawn) => Math.round((spawn.x - 0.1 - 8) * 100)), [3, 4, 5]);
+  assert.deepEqual(second.spawns.map((spawn) => Math.round((spawn.x - 0.1 - 8) * 100)), [2, 3]);
+  assert.equal(SWARM_PROJECTILE_RADIUS_SCALE, 0.4);
+  assert.equal(fire.distribute(volley([SHOT]), shipsAround(4), ORIGIN, ORIGIN).spawns.length, 1);
   assert.equal(fire.distribute(volley([SHOT]), shipsAround(1), ORIGIN, ORIGIN).spawns.length, 1);
 });
 

@@ -1,14 +1,16 @@
 // The player swarm (player-swarm spike): one instanced quad per white ship (at most
 // MAXIMUM_SWARM_SHIPS, read from a uniform array), plus one more instance for the controlled point's
 // marker (a faint ring with a dot) when markerShown is 1. Ships are small white darts with a bright
-// outline and a halo, nose along the shared facing, and a cockpit in the armed weapon's hue; a new
+// outline and a halo, nose along each ship's own heading (its velocity, so it banks through
+// curves), drawn at shipSize (SWARM_SHIP_SIZE) of the first spike's dart, and a cockpit in the armed weapon's hue; a new
 // ship flashes for its first SPAWN_FLASH_SECONDS. Max-blended (MAX_BLEND) after the particles.
 // Common and quad headers prepended (hsvToRgb, quadCorner, worldFeather).
 
 // Uniform layout, total 4160 bytes; SwarmRenderer in swarm.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
 //  28 header padding f32, 32 facing f32, 36 markerX f32, 40 markerY f32, 44 markerShown f32,
-//  48 hue f32, 52 count f32, 56 two padding f32, then MAXIMUM_SWARM_SHIPS vec4f (x, y, age, 0).
+//  48 hue f32, 52 count f32, 56 shipSize f32, 60 padding f32, then MAXIMUM_SWARM_SHIPS vec4f
+//  (x, y, age, heading). facing (the aim) is unused by the ships since they face their heading.
 struct SwarmView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
@@ -21,8 +23,8 @@ struct SwarmView {
   markerShown: f32,
   hue: f32,
   count: f32,
-  paddingOne: f32,
-  paddingTwo: f32,
+  shipSize: f32,
+  padding: f32,
   ships: array<vec4f, MAXIMUM_SWARM_SHIPS>,
 }
 
@@ -31,7 +33,7 @@ struct SwarmView {
 const SHIP_HALF_EXTENT: f32 = 0.16;
 const MARKER_HALF_EXTENT: f32 = 0.2;
 const MARKER_RADIUS: f32 = 0.12;
-// Local hull scale: the dart's nose is SHIP_SCALE * 0.3 ahead of its centre.
+// Local hull scale at shipSize 1: the dart's nose is SHIP_SCALE * 0.3 ahead of its centre.
 const SHIP_SCALE: f32 = 0.4;
 const SPAWN_FLASH_SECONDS: f32 = 0.4;
 
@@ -40,6 +42,7 @@ struct SwarmVaryings {
   @location(0) offset: vec2f,
   @location(1) @interpolate(flat) marker: f32,
   @location(2) @interpolate(flat) age: f32,
+  @location(3) @interpolate(flat) heading: f32,
 }
 
 @vertex
@@ -50,11 +53,13 @@ fn swarmVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
   var center = vec2f(view.markerX, view.markerY);
   var halfExtent = MARKER_HALF_EXTENT;
   output.age = 0.0;
+  output.heading = 0.0;
   if (!isMarker) {
     let ship = view.ships[min(instanceIndex, MAXIMUM_SWARM_SHIPS - 1u)];
     center = ship.xy;
-    halfExtent = SHIP_HALF_EXTENT;
+    halfExtent = SHIP_HALF_EXTENT * view.shipSize;
     output.age = ship.z;
+    output.heading = ship.w;
   }
   output.offset = corner * halfExtent;
   output.marker = select(0.0, 1.0, isMarker);
@@ -103,14 +108,15 @@ fn swarmFragment(input: SwarmVaryings) -> @location(0) vec4f {
     let centerDot = 1.0 - smoothstep(0.012, 0.012 + feather * 2.0, length(input.offset));
     return vec4f(vec3f(0.35) * ring + tint * 0.6 * centerDot, 0.0);
   }
-  let forward = vec2f(cos(view.facing), sin(view.facing));
+  let scale = SHIP_SCALE * view.shipSize;
+  let forward = vec2f(cos(input.heading), sin(input.heading));
   let side = vec2f(-forward.y, forward.x);
-  let local = vec2f(dot(input.offset, forward), dot(input.offset, side)) / SHIP_SCALE;
-  let distance = dartDistance(local) * SHIP_SCALE;
+  let local = vec2f(dot(input.offset, forward), dot(input.offset, side)) / scale;
+  let distance = dartDistance(local) * scale;
   let body = 1.0 - smoothstep(-feather, feather, distance);
-  let outline = 1.0 - smoothstep(0.006, 0.006 + feather * 2.0, abs(distance));
-  let halo = exp(-max(distance, 0.0) * 30.0) * 0.5;
-  let cockpit = (1.0 - smoothstep(0.0, 0.02 + feather, length(local - vec2f(0.07, 0.0)) * SHIP_SCALE)) * body;
+  let outline = 1.0 - smoothstep(0.006 * view.shipSize, 0.006 * view.shipSize + feather * 2.0, abs(distance));
+  let halo = exp(-max(distance, 0.0) * 30.0 / view.shipSize) * 0.5;
+  let cockpit = (1.0 - smoothstep(0.0, 0.02 * view.shipSize + feather, length(local - vec2f(0.07, 0.0)) * scale)) * body;
   let flash = 1.0 + 2.0 * clamp(1.0 - input.age / SPAWN_FLASH_SECONDS, 0.0, 1.0);
   let color = (vec3f(1.1) * body + vec3f(2.0) * outline + vec3f(0.8) * halo) * flash + tint * cockpit * 1.5;
   return vec4f(color, 0.0);

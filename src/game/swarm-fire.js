@@ -2,20 +2,19 @@
 // controlled point, into the swarm's shots. Pure: no GPU, DOM or clock.
 // - Armed weapon spawns: each firing update a rotating subset of the alive ships fires a copy of the
 //   volley from its own position along the same aim, with every projectile's radius times
-//   SWARM_PROJECTILE_RADIUS_SCALE. The subset is SWARM_FIRING_SHARE of the ships (at least one),
-//   capped at MAXIMUM_SWARM_SHOOTERS_PER_VOLLEY, taken in rotation so every ship takes turns. So
-//   firepower grows with the swarm and then saturates: the starting 12 ships put out 3 half-size
-//   copies (about 1.5 times the single ship's swept width), 64 or more put out 16 (about 8 times),
-//   and a 256-ship swarm shoots no more than a 64-ship one. The worst live load is scatter III, 16
-//   copies of 17 balls every 0.2 s for at most 3 s, about 4080 of the pool's 8192 slots; the
-//   per-update ceiling MAXIMUM_SWARM_SPAWNS_PER_UPDATE (16 by 17 = 272 fits under it) is only a
-//   backstop for a huge delta.
+//   SWARM_PROJECTILE_RADIUS_SCALE. The subset is SWARM_FIRING_SHARE of the ships (rounded, at least
+//   one), capped at MAXIMUM_SWARM_SHOOTERS_PER_VOLLEY, taken in rotation so every ship takes turns.
+//   So firepower grows with the swarm and then saturates: the starting 12 ships put out 2 copies at
+//   0.4 size (about 0.8 times the single ship's swept width), 64 or more put out 8 (about 3.2 times),
+//   and a 256-ship swarm shoots no more than a 64-ship one. The worst live load is scatter III, 8
+//   copies of 17 balls every 0.2 s for at most 3 s, about 2040 of the pool's 8192 slots; the
+//   per-update ceiling MAXIMUM_SWARM_SPAWNS_PER_UPDATE is only a backstop for a huge delta.
 // - Rail turrets: each turret volley fires from one ship in the same rotation, at full size (the
 //   turrets belong to the swarm as a whole, so their count does not multiply).
 // - Beam: one beam from the swarm centroid (the projectile system has one beam slot).
-export const SWARM_FIRING_SHARE = 0.25;
-export const SWARM_PROJECTILE_RADIUS_SCALE = 0.5;
-export const MAXIMUM_SWARM_SHOOTERS_PER_VOLLEY = 16;
+export const SWARM_FIRING_SHARE = 0.125;
+export const SWARM_PROJECTILE_RADIUS_SCALE = 0.4;
+export const MAXIMUM_SWARM_SHOOTERS_PER_VOLLEY = 8;
 export const MAXIMUM_SWARM_SPAWNS_PER_UPDATE = 512;
 
 export class SwarmFire {

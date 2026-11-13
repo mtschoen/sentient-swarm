@@ -5,17 +5,18 @@ import { MAXIMUM_PICKUPS, PICKUP_VIEW_BYTES, packPickupView } from '../../src/re
 import { PROJECTILE_KINDS, WEAPON_HUES, WEAPON_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { Viewport } from '../../src/render/viewport.js';
 import { SWARM_VIEW_BYTES, packSwarmView } from '../../src/render/swarm.js';
+import { SWARM_SHIP_SIZE } from '../../src/game/player-swarm.js';
 
 const viewport = new Viewport();
 viewport.setCanvasSize(1600, 900);
 
 test('packSwarmView writes the header and one vec4 per ship, capped at the swarm maximum', () => {
-  const ships = Array.from({ length: 300 }, (_, index) => ({ x: index, y: 1, age: 0.5 }));
+  const ships = Array.from({ length: 300 }, (_, index) => ({ x: index, y: 1, age: 0.5, heading: 0.75 }));
   const { floats, count } = packSwarmView({ viewport, time: 1, ships, facing: 0.25, pointX: 8, pointY: 4.5, pointShown: true, armed: 'pulse' });
   assert.equal(count, 256);
   assert.equal(floats.byteLength, SWARM_VIEW_BYTES);
-  assert.deepEqual(Array.from(floats.slice(8, 16)), [0.25, 8, 4.5, 1, Math.fround(WEAPON_HUES.pulse), 256, 0, 0]);
-  assert.deepEqual(Array.from(floats.slice(16 + 4 * 255, 16 + 4 * 256)), [255, 1, 0.5, 0]);
+  assert.deepEqual(Array.from(floats.slice(8, 16)), [0.25, 8, 4.5, 1, Math.fround(WEAPON_HUES.pulse), 256, Math.fround(SWARM_SHIP_SIZE), 0]);
+  assert.deepEqual(Array.from(floats.slice(16 + 4 * 255, 16 + 4 * 256)), [255, 1, 0.5, 0.75]);
 });
 
 test('every weapon has a distinct hue', () => {

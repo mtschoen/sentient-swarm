@@ -3,6 +3,7 @@
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { WEAPON_HUES } from '../game/weaponTypes.js';
 import { MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
+import { SWARM_SHIP_SIZE } from '../game/player-swarm.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
 import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
@@ -17,7 +18,7 @@ const VERTICES_PER_QUAD = 4;
 export function packSwarmView({ viewport, time, ships, facing, pointX, pointY, pointShown, armed }, floats = new Float32Array(VIEW_FLOATS)) {
   packWorldView(viewport, time, floats);
   const count = Math.min(ships.length, MAXIMUM_SWARM_SHIPS);
-  floats.set([facing, pointX, pointY, pointShown ? 1 : 0, WEAPON_HUES[armed] ?? WEAPON_HUES.base, count, 0, 0], WORLD_VIEW_FLOATS);
+  floats.set([facing, pointX, pointY, pointShown ? 1 : 0, WEAPON_HUES[armed] ?? WEAPON_HUES.base, count, SWARM_SHIP_SIZE, 0], WORLD_VIEW_FLOATS);
   const first = WORLD_VIEW_FLOATS + HEADER_FLOATS;
   for (let index = 0; index < count; index += 1) {
     const ship = ships[index];
@@ -25,7 +26,7 @@ export function packSwarmView({ viewport, time, ships, facing, pointX, pointY, p
     floats[offset] = ship.x;
     floats[offset + 1] = ship.y;
     floats[offset + 2] = ship.age;
-    floats[offset + 3] = 0;
+    floats[offset + 3] = ship.heading ?? 0;
   }
   return { floats, count };
 }
