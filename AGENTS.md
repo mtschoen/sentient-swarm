@@ -14,6 +14,13 @@
 - Species count is 5. Coarse field is 64 by 36 cells with 8 float channels (5 species densities, 1 threat, 2 padding). Shipped shares are 0.9 Chaser, 0.03 Orbiter, 0.02 Skittish, 0 Lattice, 0.05 Predator (`DEFAULT_SHARES`, owner ruling R38); the lab's `equalFive` mix restores equal shares.
 - Commit after every task with a message in the imperative.
 
+## Player swarm spike (branch `player-swarm`)
+
+This branch replaces the single ship with a player swarm; where the sections below describe the ship, its hit latch, lives or respawn, this wins.
+
+- The player-controlled point (`PlayerShip`) moves as the ship did and cannot be hit. `PlayerSwarm` (`src/game/player-swarm.js`, CPU) flies 12 white ships (`INITIAL_SWARM_SHIPS`, `?swarm=N` overrides) up to 256 (`MAXIMUM_SWARM_SHIPS` in `src/sim/layout.js`) around it, one more per 100 scored kills (`KILLS_PER_SWARM_SHIP`); award lives are dropped, bombs stay. `SwarmFire` (`src/game/swarm-fire.js`) spreads each volley over a rotating subset of ships at half size; turrets fire from one ship per volley and the beam from the centroid.
+- Contact: `Simulation.setSwarmShips` uploads one slot per ship to a uniform; `player_collide.wgsl` runs one workgroup per slot, walks the grid around its ship and sets the slot's bit in the persistent 8-word `swarmHitMask` stats words; `PlayerSwarm.applyHits` guards stale and reused slots by each ship's first uploaded step. The GPU hit latch and `playerHitSequence` are unused. Losing the last ship is the run's one death (`RunState` with one life): death clear, then game over. The HUD lives readout shows the swarm size; `src/render/swarm.js` draws the swarm. `tests/browser/swarm-spike.mjs` is the browser evidence run (not part of `check:gpu`); `tests/browser/player.mjs` still checks the retired latch and fails on this branch.
+
 ## Commands
 
 - `npm run dev`: dev server on 127.0.0.1:5174 (strictPort).
