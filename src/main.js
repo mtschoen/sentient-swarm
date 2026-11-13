@@ -144,6 +144,9 @@ async function boot() {
   if (pinnedCapacity === null) quality.start(initialPreset.name, { allowUp: initialPreset.allowUp });
   window.__murmuration.quality = quality;
   game.setArenaBounds(viewport.arenaBounds);
+  // Player swarm spike: ?swarm=N starts every run with N ships (1 to the cap), for trying a big swarm.
+  const swarmParameter = new URLSearchParams(location.search).get('swarm');
+  if (swarmParameter !== null) game.setInitialSwarmShips(Number(swarmParameter));
   window.__murmuration.game = game;
 
   // The settings panel applies every stored setting live: volumes, renderer effects, shake, trails,

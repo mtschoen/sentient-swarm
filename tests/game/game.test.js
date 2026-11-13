@@ -5,7 +5,8 @@ import { Game } from '../../src/game/game.js';
 import { RunPhase } from '../../src/game/run.js';
 import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND, PICKUP_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { InputState } from '../../src/input/input.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT, arenaBoundsForAspect } from '../../src/sim/layout.js';
+import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT, SWARM_HIT_MASK_WORDS, arenaBoundsForAspect } from '../../src/sim/layout.js';
+import { INITIAL_SWARM_SHIPS, KILLS_PER_SWARM_SHIP } from '../../src/game/player-swarm.js';
 import { SHIP_TURN_RATE, ShipRenderer } from '../../src/render/ship.js';
 
 globalThis.GPUBufferUsage ??= { UNIFORM: 64, COPY_DST: 8 };
@@ -47,6 +48,8 @@ function createFakeSimulation() {
     },
     setPlayer(x, y) { this.playerPositions.push({ x, y }); },
     setPlayerState(state) { this.playerStates.push(state); },
+    swarmUploads: [],
+    setSwarmShips(ships, radius) { this.swarmUploads.push({ ships: ships.map((ship) => ({ ...ship })), radius, sequence: this.frameSequence + 1 }); },
     setSeekScale(scale) { this.seekScales.push(scale); },
     setSpawnDistanceFraction(fraction) { this.spawnDistanceFractions.push(fraction); },
     arenaBoundsCalls: [],
@@ -139,6 +142,7 @@ function stats(fields) {
     killsUnscored: 0,
     playerHitSequence: 0,
     hitLatch: 0,
+    swarmHitMask: new Uint32Array(SWARM_HIT_MASK_WORDS),
     ringsThisFrame: 0,
     lastRingX: 0,
     lastRingY: 0,
@@ -151,11 +155,21 @@ function runFor(game, seconds) {
   for (let index = 0; index < steps; index += 1) game.update(STEP);
 }
 
-// Feeds a hit latched in the step this update runs, and runs that update.
+const SWARM_WIPE_MASK = new Uint32Array(SWARM_HIT_MASK_WORDS).fill(0xffffffff);
+
+// Feeds a stats frame from the step this update runs in which every swarm ship was hit (the run's
+// one death), and runs that update.
 function hitNow(game, simulation) {
   const sequence = simulation.frameSequence + 1;
-  simulation.scriptedStats.push(stats({ frameSequence: sequence, playerHitSequence: sequence, hitLatch: 1 }));
+  simulation.scriptedStats.push(stats({ frameSequence: sequence, swarmHitMask: SWARM_WIPE_MASK }));
   game.update(STEP);
+}
+
+// A hit mask with only these slots set.
+function maskFor(slots) {
+  const mask = new Uint32Array(SWARM_HIT_MASK_WORDS);
+  for (const slot of slots) mask[Math.floor(slot / 32)] |= (1 << (slot % 32)) >>> 0;
+  return mask;
 }
 
 test('registers the projectile pass with the simulation and starts in Ready without contact', async () => {
@@ -212,7 +226,7 @@ test('a stats frame read twice scores once, and kills read outside Playing score
   assert.equal(game.state.score, 50);
 });
 
-test('a current hit drops a life, drops the weapon to base, resets the multiplier and clears the arena', async () => {
+test('losing the last swarm ship drops the weapon to base, resets the multiplier, clears the arena and ends the run', async () => {
   const { game, simulation, projectiles } = await createGame();
   game.start();
   simulation.scriptedStats.push(stats({ frameSequence: 1, killsSinceLastRead: 60 }));
@@ -220,27 +234,23 @@ test('a current hit drops a life, drops the weapon to base, resets the multiplie
   assert.equal(game.state.multiplier, 2);
   game.weapons.collect('pulse');
   game.weapons.collect('rail');
-  assert.equal(game.state.armed, 'pulse');
-  assert.equal(game.state.railTurrets, 1);
   const killAllBefore = simulation.killAllRequests;
   hitNow(game, simulation);
-  const hitSequence = simulation.frameSequence;
-  assert.equal(game.state.lives, 2);
+  assert.equal(game.state.lives, 0);
   assert.equal(game.state.armed, 'base');
-  assert.equal(game.state.tier, 1);
   assert.deepEqual([game.state.railTurrets, game.state.railTier], [0, 1]);
   assert.equal(game.state.multiplier, 1);
   assert.equal(game.state.phase, RunPhase.Dying);
   assert.equal(simulation.killAllRequests, killAllBefore + 1);
-  assert.ok(simulation.acknowledged.includes(hitSequence));
   assert.ok(projectiles.clears >= 1);
-  // The hit's shockwave is handed to the renderer once.
+  // One small impulse per lost ship and the death shockwave, handed to the renderer once.
   game.render(0);
   game.render(0);
   const impulses = game.renderer.frames.flatMap((frame) => frame.impulses);
-  assert.equal(impulses.length, 1);
-  assert.equal(impulses[0].strength, 1);
-  assert.equal(impulses[0].bloomBoost, true);
+  assert.equal(impulses.length, INITIAL_SWARM_SHIPS + 1);
+  assert.deepEqual(impulses.filter((impulse) => impulse.strength === 1).map((impulse) => impulse.bloomBoost), [true]);
+  runFor(game, 1);
+  assert.equal(game.state.phase, RunPhase.GameOver);
 });
 
 test('a bomb queues a strength 1 impulse at the ship that boosts bloom, stamped with the game clock', async () => {
@@ -363,43 +373,39 @@ test('pickup placement samples the simulation density and polls its readback eve
   assert.equal(pickup.x, Math.min(...simulation.densitySamples.map(([x]) => x)));
 });
 
-test('a hit whose sequence predates the respawn is ignored but still acknowledged', async () => {
+test('a partial hit loses only those ships and keeps the run and the multiplier', async () => {
   const { game, simulation } = await createGame();
   game.start();
-  hitNow(game, simulation);
-  assert.equal(game.state.lives, 2);
-  // Dying 0.8 s and Respawning 0.6 s, then 2 s of invulnerability.
-  runFor(game, 1.4);
-  assert.equal(game.state.phase, RunPhase.Playing);
-  const respawnSequence = game.run.respawnSequence;
-  assert.ok(respawnSequence > 1);
-  runFor(game, 2.1);
-  assert.equal(game.run.invulnerable, false);
-  const stale = respawnSequence - 1;
-  simulation.scriptedStats.push(stats({ frameSequence: simulation.frameSequence, playerHitSequence: stale, hitLatch: 1 }));
+  simulation.scriptedStats.push(stats({ frameSequence: 1, killsSinceLastRead: 60 }));
   game.update(STEP);
-  assert.equal(game.state.lives, 2);
+  const sequence = simulation.frameSequence + 1;
+  simulation.scriptedStats.push(stats({ frameSequence: sequence, swarmHitMask: maskFor([0, 3, 40]) }));
+  game.update(STEP);
+  // Slot 40 was never alive: only two of the twelve die.
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS - 2);
   assert.equal(game.state.phase, RunPhase.Playing);
-  assert.ok(simulation.acknowledged.includes(stale));
-  hitNow(game, simulation);
-  assert.equal(game.state.lives, 1);
+  assert.equal(game.state.multiplier, 2);
+  // The same hits read again (a later frame before the slots were uploaded dead) kill nothing more.
+  simulation.scriptedStats.push(stats({ frameSequence: sequence + 1, swarmHitMask: maskFor([0, 3]) }));
+  game.update(STEP);
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS - 2);
 });
 
-test('respawn returns the player to the center and resets spawn pressure', async () => {
-  const { game, simulation, input } = await createGame();
+test('every hundred scored kills grows the swarm by one ship, uploaded fresh in its first step', async () => {
+  const { game, simulation } = await createGame();
   game.start();
-  input.state.move = { x: 1, y: 0 };
-  runFor(game, 0.5);
-  input.state.move = { x: 0, y: 0 };
-  assert.ok(game.player.position.x > 8.5);
-  runFor(game, 3);
-  hitNow(game, simulation);
-  runFor(game, 1.4);
-  assert.equal(game.state.phase, RunPhase.Playing);
-  assert.deepEqual(game.player.position, { x: 8, y: 4.5 });
-  assert.ok(game.spawnPressure.elapsed < 0.1);
-  const latest = simulation.playerStates[simulation.playerStates.length - 1];
-  assert.equal(latest.invulnerable, true);
+  game.update(STEP);
+  simulation.scriptedStats.push(stats({ frameSequence: simulation.frameSequence + 1, killsSinceLastRead: KILLS_PER_SWARM_SHIP * 2 + 50 }));
+  game.update(STEP);
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS + 2);
+  game.update(STEP);
+  const upload = simulation.swarmUploads.at(-1);
+  assert.equal(upload.ships.filter((ship) => ship.alive).length, INITIAL_SWARM_SHIPS + 2);
+  assert.equal(upload.ships.filter((ship) => ship.fresh).length, 2);
+  // A hit frame older than the new ships' first step cannot kill them.
+  simulation.scriptedStats.push(stats({ frameSequence: upload.sequence - 1, swarmHitMask: maskFor([INITIAL_SWARM_SHIPS, INITIAL_SWARM_SHIPS + 1]) }));
+  game.update(STEP);
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS + 2);
 });
 
 test('a bomb press kills everything before the step, once per press', async () => {
@@ -502,13 +508,10 @@ test('restart after game over resets every module and clears the arena once', as
   game.update(STEP);
   input.state.bomb = false;
   game.weapons.collect('scatter');
-  for (let life = 0; life < 3; life += 1) {
-    runFor(game, 2.1);
-    hitNow(game, simulation);
-    runFor(game, 1.4);
-  }
+  runFor(game, 0.5);
+  hitNow(game, simulation);
+  runFor(game, 1.4);
   assert.equal(game.state.phase, RunPhase.GameOver);
-  const lastHitSequence = Math.max(...simulation.acknowledged);
   game.pickups.spawn(8, 4.5);
   game.weapons.collect('rail');
   const killAllBefore = simulation.killAllRequests;
@@ -520,7 +523,7 @@ test('restart after game over resets every module and clears the arena once', as
   const state = game.state;
   assert.equal(state.score, 0);
   assert.equal(state.multiplier, 1);
-  assert.equal(state.lives, 3);
+  assert.equal(state.lives, INITIAL_SWARM_SHIPS);
   assert.equal(state.bombs, 3);
   assert.equal(state.armed, 'base');
   assert.equal(state.tier, 1);
@@ -528,33 +531,20 @@ test('restart after game over resets every module and clears the arena once', as
   assert.equal(state.phase, RunPhase.Playing);
   assert.equal(game.pickups.pickups.length, 0);
   assert.equal(game.spawnPressure.elapsed, 0);
-  // A stats frame from the last step before the restart, read only now, scores nothing.
-  simulation.scriptedStats.push(stats({ frameSequence: lastStepBeforeRestart, killsSinceLastRead: 50 }));
+  // A stats frame from the last step before the restart, read only now, scores nothing and its
+  // hits (still in the persistent mask) take no ship of the new swarm.
+  simulation.scriptedStats.push(stats({ frameSequence: lastStepBeforeRestart, killsSinceLastRead: 50, swarmHitMask: SWARM_WIPE_MASK }));
   game.update(STEP);
   assert.equal(game.state.score, 0);
-  // The previous run's last hit, still in the persistent stats tail, takes no life.
-  simulation.scriptedStats.push(stats({ frameSequence: simulation.frameSequence, playerHitSequence: lastHitSequence, hitLatch: 1 }));
-  game.update(STEP);
-  assert.equal(game.state.lives, 3);
-  // A hit latched in the last step before the restart, read only now, is stale too.
-  const beforeRestart = game.run.respawnSequence - 1;
-  assert.ok(beforeRestart > lastHitSequence);
-  simulation.scriptedStats.push(stats({ frameSequence: simulation.frameSequence, playerHitSequence: beforeRestart, hitLatch: 1 }));
-  game.update(STEP);
-  assert.equal(game.state.lives, 3);
-  assert.ok(simulation.acknowledged.includes(beforeRestart));
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS);
   assert.equal(simulation.killAllRequests, killAllBefore + 1);
 });
 
-// Plays the run with three current hits, each after the invulnerability window, and stops on the
-// update that enters GameOver.
+// Plays the run until a hit wipes the swarm, and stops on the update that enters GameOver.
 function reachGameOver(game, simulation) {
   game.start();
-  for (let life = 0; life < 3; life += 1) {
-    runFor(game, 2.1);
-    hitNow(game, simulation);
-    if (life < 2) runFor(game, 1.4);
-  }
+  runFor(game, 0.5);
+  hitNow(game, simulation);
   const MAXIMUM_STEPS = 120;
   for (let step = 0; step < MAXIMUM_STEPS && game.state.phase !== RunPhase.GameOver; step += 1) game.update(STEP);
   assert.equal(game.state.phase, RunPhase.GameOver);
@@ -575,7 +565,7 @@ test('after game over a fresh bomb press past the guard window restarts without 
   input.state.bomb = true;
   game.update(STEP);
   assert.equal(game.state.phase, RunPhase.Playing);
-  assert.equal(game.state.lives, 3);
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS);
   assert.equal(game.state.bombs, 3);
 });
 
@@ -611,17 +601,16 @@ test('a stationary touch (no stick displacement yet) starts the run from Ready',
   assert.equal(game.state.phase, RunPhase.Playing);
 });
 
-test('awards add a life and a bomb at their thresholds', async () => {
+test('kills grow the swarm in place of award lives; award bombs stay', async () => {
   const { game, simulation } = await createGame();
   game.start();
-  // 20 batches of 100 kills: 1000 + 2000 + 3000 + 3000 at multipliers 1, 2, 3, 3, then six at 4
-  // and ten at 5, 83000 in all: past the first life (75000) and bomb (40000) thresholds only.
+  // 20 batches of 100 kills: 83000 points, past the first life (75000) and bomb (40000) thresholds.
   for (let frame = 1; frame <= 20; frame += 1) {
     simulation.scriptedStats.push(stats({ frameSequence: frame, killsSinceLastRead: 100 }));
     game.update(STEP);
   }
   assert.equal(game.state.score, 83000);
-  assert.equal(game.state.lives, 4);
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS + 20);
   assert.equal(game.state.bombs, 4);
 });
 
@@ -648,18 +637,19 @@ test('debugInvulnerable keeps contact off while playing until it is turned off a
   assert.equal(simulation.playerStates.at(-1).invulnerable, false);
 });
 
-test('scene hides the ship from death until respawn and carries the armed weapon', async () => {
+test('scene draws the swarm with the armed weapon and hides it from death on', async () => {
   const { game } = await createGame();
   game.debugArm('pulse', 2);
-  game.weapons.collect('rail');
-  game.weapons.collect('rail');
   const scene = game.scene();
-  assert.equal(scene.ship.armed, 'pulse');
-  assert.equal(scene.ship.railTurrets, 2);
+  assert.equal(scene.ship, null);
+  assert.equal(scene.swarm.armed, 'pulse');
+  assert.equal(scene.swarm.ships.length, INITIAL_SWARM_SHIPS);
+  assert.equal(scene.swarm.pointShown, false, 'no point marker in Ready');
   assert.equal(scene.projectiles, game.projectiles);
   game.run.start();
+  assert.equal(game.scene().swarm.pointShown, true);
   game.run.playerHit(game.simulation.frameSequence + 1, game.player.position);
-  assert.equal(game.scene().ship, null);
+  assert.equal(game.scene().swarm, null);
 });
 
 test('an accepted bomb press and an accepted hit play the bomb and death effects', async () => {
@@ -981,16 +971,14 @@ test('a hit in flight at pause time is honored once after resume, exactly as wit
   game.start();
   game.update(STEP);
   const sequence = simulation.frameSequence + 1;
-  simulation.scriptedStats.push(stats({ frameSequence: sequence, playerHitSequence: sequence, hitLatch: 1 }));
+  simulation.scriptedStats.push(stats({ frameSequence: sequence, swarmHitMask: maskFor([1]) }));
   game.pause();
   runFor(game, 0.5);
-  assert.equal(game.run.lives, 3, 'not applied while paused');
-  assert.deepEqual(simulation.acknowledged, []);
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS, 'not applied while paused');
   game.resume();
   game.update(STEP);
-  assert.equal(game.run.lives, 2);
-  assert.equal(game.state.phase, RunPhase.Dying);
-  assert.deepEqual(simulation.acknowledged, [sequence]);
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS - 1);
+  assert.equal(game.state.phase, RunPhase.Playing);
 });
 
 test('a bomb held through the pause needs a fresh press after resume', async () => {
@@ -1026,7 +1014,7 @@ test('quitToTitle returns to Ready with a fresh score, and a restart works', asy
   assert.equal(game.state.score, 0);
   game.start();
   assert.equal(game.state.phase, RunPhase.Playing);
-  assert.equal(game.state.lives, 3);
+  assert.equal(game.state.lives, INITIAL_SWARM_SHIPS);
 });
 
 test('quitToTitle with the bomb held does not restart the run before the menu owns the start', async () => {
@@ -1256,7 +1244,7 @@ test('death ends the warp at once', async () => {
   runFor(game, 3);
   collectTimeWarp(game);
   hitNow(game, simulation);
-  assert.equal(game.state.lives, 2);
+  assert.equal(game.state.lives, 0);
   assert.equal(game.state.timeWarp, 0);
   assert.equal(game.timeWarp.scale, 1);
 });
@@ -1310,48 +1298,6 @@ test('a turret-only player still counts as on the base gun for the pickup direct
   assert.equal(armed.pickups.pickups.length, 0, 'an armed weapon with turrets gets no recovery pickup');
 });
 
-// Phases are driven through the RunState the way the game does; the ship is hidden from death
-// until respawn and at game over.
-test('scene carries the ship in Ready and Playing, hides it while dying, respawning and at game over', async () => {
-  const { game } = await createGame();
-  const expectedKeys = ['armed', 'charge', 'facing', 'invulnerable', 'railTurrets', 'velocityX', 'velocityY', 'x', 'y'];
-  const ready = game.scene();
-  assert.equal(game.run.phase, RunPhase.Ready);
-  assert.deepEqual(Object.keys(ready.ship).sort(), expectedKeys);
-  assert.deepEqual([ready.ship.armed, ready.ship.charge, ready.ship.railTurrets, ready.ship.invulnerable], ['base', 0, 0, false]);
-  assert.equal(ready.pickups, game.pickups.pickups);
-  assert.equal(ready.projectiles, game.projectiles);
-
-  game.start();
-  game.debugArm('scatter', 2);
-  const playing = game.scene();
-  assert.deepEqual([playing.ship.x, playing.ship.y], [game.player.position.x, game.player.position.y]);
-  assert.deepEqual([playing.ship.velocityX, playing.ship.velocityY, playing.ship.facing], [game.player.velocity.x, game.player.velocity.y, game.player.facing]);
-  assert.deepEqual([playing.ship.armed, playing.ship.charge], ['scatter', 1]);
-
-  game.run.playerHit(1, game.player.position);
-  assert.equal(game.run.phase, RunPhase.Dying);
-  assert.equal(game.scene().ship, null);
-  game.run.update(0.8);
-  assert.equal(game.run.phase, RunPhase.Respawning);
-  assert.equal(game.scene().ship, null);
-  game.run.update(0.6);
-  assert.equal(game.run.phase, RunPhase.Playing);
-  assert.equal(game.scene().ship.invulnerable, true);
-
-  for (let death = 0; death < 3; death += 1) {
-    game.run.update(2.1);
-    game.run.playerHit(1, game.player.position);
-    game.run.update(0.8);
-    if (death < 2) game.run.update(0.6);
-  }
-  assert.equal(game.run.phase, RunPhase.GameOver);
-  const over = game.scene();
-  assert.equal(over.ship, null);
-  assert.equal(over.pickups, game.pickups.pickups);
-  assert.equal(over.projectiles, game.projectiles);
-});
-
 // main.js hands the lab panel `(type, tier) => game.debugArm(type, tier)` as onArmWeapon (the
 // panel's selects call it with the weapon name and the tier number); this is that call, end to end
 // through the scene the renderer reads.
@@ -1362,14 +1308,14 @@ test('the lab arm-weapon wiring arms each weapon at each tier and the scene show
   for (const type of ['beam', 'scatter', 'pulse', 'sidewinders']) {
     for (const tier of [1, 2, 3]) {
       onArmWeapon(type, tier);
-      const { ship } = game.scene();
-      assert.deepEqual([ship.armed, ship.charge, ship.railTurrets, game.state.tier], [type, 1, 0, tier], `${type} tier ${tier}`);
+      const { swarm } = game.scene();
+      assert.deepEqual([swarm.armed, game.state.charge, game.state.railTurrets, game.state.tier], [type, 1, 0, tier], `${type} tier ${tier}`);
     }
   }
   onArmWeapon('rail', 3);
-  assert.deepEqual([game.scene().ship.armed, game.scene().ship.railTurrets], ['base', 3]);
+  assert.deepEqual([game.scene().swarm.armed, game.state.railTurrets], ['base', 3]);
   onArmWeapon('base', 1);
-  assert.deepEqual([game.scene().ship.armed, game.scene().ship.charge, game.scene().ship.railTurrets], ['base', 0, 0]);
+  assert.deepEqual([game.scene().swarm.armed, game.state.charge, game.state.railTurrets], ['base', 0, 0]);
   assert.throws(() => onArmWeapon('laser', 1), /Unknown weapon type/);
 });
 

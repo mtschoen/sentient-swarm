@@ -41,10 +41,14 @@
 //      timeWarp.scale while the projectile step gets the unscaled delta; the warp timer counts
 //      real time (every update not paused). Death, a new run and quit to title end the warp.
 //   7. every ready stats frame (readAllStats, oldest first): kills (killsSinceLastRead) score once
-//      per stats frame and only while Playing; awards add lives and bombs; a frame with pulse ring
-//      detonations queues one RING_IMPULSE_STRENGTH impulse at its reported ring position; every
-//      new playerHitSequence is acknowledged (accepted or not) and offered to run.playerHit, which
-//      on success drops the weapon and the turrets and resets the multiplier.
+//      per stats frame and only while Playing; kills grow the player swarm (one ship per
+//      KILLS_PER_SWARM_SHIP) and awards add bombs; a frame with pulse ring detonations queues one
+//      RING_IMPULSE_STRENGTH impulse at its reported ring position; while Playing its swarm hit
+//      mask kills the hit swarm ships (PlayerSwarm.applyHits), and losing the last one is the run's
+//      one death (run.playerHit, which drops the weapon and the turrets and resets the multiplier).
+// Player swarm spike: the ship is replaced by PlayerSwarm (white ships orbiting the controlled
+// point, which moves as the ship did and cannot be hit); SwarmFire spreads step 4's shots over the
+// ships, and step 6 uploads the swarm for the contact pass (Simulation.setSwarmShips).
 //   8. run.update drains this step's actions: clearArena requests the kill-all for the next step
 //      (with the death flood) and clears projectiles, shockwave (bomb and death) queues an impulse
 //      that also boosts bloom, respawn recenters the player, sets the respawn sequence to the next
@@ -64,18 +68,30 @@ import { Awards, ScoreKeeper } from './score.js';
 import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
 import { TimeWarp } from './time-warp.js';
+import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS, PlayerSwarm, SWARM_SHIP_RADIUS } from './player-swarm.js';
+import { SwarmFire } from './swarm-fire.js';
 import { SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../sim/spawner.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT } from '../sim/layout.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 const NO_AIM = Object.freeze({ x: 0, y: 0 });
+const NO_SWARM_HITS = Object.freeze([]);
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
 const RING_IMPULSE_STRENGTH = 0.3;
 const PICKUP_IMPULSE_STRENGTH = 0.15;
 const PICKUP_BLAST_IMPULSE_STRENGTH = 0.5;
 const TIME_WARP_IMPULSE_STRENGTH = 0.6;
 export const DEFAULT_PICKUP_BLAST_RADIUS = 1.5;
+// Player swarm spike: a lost ship ripples the warp grid; a swarm ship collects pickups this close;
+// the run has one life, lost when the last swarm ship dies (so the death clear and game over follow).
+const SWARM_SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
+export const SWARM_PICKUP_RADIUS = 0.2;
+const SWARM_RUN_LIVES = 1;
+
+function createRunState() {
+  return new RunState({ lives: SWARM_RUN_LIVES });
+}
 // Matches the HUD's touch restart guard, so the press that ended the run cannot restart it.
 export const RESTART_GUARD_SECONDS = 0.7;
 
@@ -136,13 +152,17 @@ export class Game {
     this.pickups = new PickupDirector({ random, bounds: this.arenaBounds });
     this.score = new ScoreKeeper({ capacity });
     this.awards = new Awards();
-    this.run = new RunState();
+    this.run = createRunState();
+    // The player swarm replaces the ship: the ship's position is the controlled point it seeks.
+    this.swarm = new PlayerSwarm({ random, bounds: this.arenaBounds });
+    this.initialSwarmShips = INITIAL_SWARM_SHIPS;
+    this.swarm.reset(this.player.position.x, this.player.position.y, this.initialSwarmShips);
+    this.swarmFire = new SwarmFire();
     this.latestStats = null;
     // This update's read-back stats (the newest frame, kills summed over every frame read), or null.
     this.freshStats = null;
     // Both only grow: stats frames and hit sequences are monotonic across respawns and restarts.
     this.lastScoredFrameSequence = 0;
-    this.lastHitSequenceRead = 0;
     this.bombHeld = false;
     this.firingHeld = false;
     this.paused = false;
@@ -191,7 +211,8 @@ export class Game {
     return {
       score: this.score.score,
       multiplier: this.score.multiplier,
-      lives: this.run.lives,
+      // The swarm size stands in for lives (the HUD's life icons).
+      lives: this.swarm.aliveCount,
       bombs: this.run.bombs,
       armed: this.weapons.armed,
       tier: this.weapons.tier,
@@ -231,7 +252,7 @@ export class Game {
   quitToTitle() {
     this.paused = false;
     this.resetModules();
-    this.run = new RunState();
+    this.run = createRunState();
     // The title menu takes over the start; the confirming press (Space, a face button) must not start the run.
     this.startsOnGesture = false;
   }
@@ -250,7 +271,7 @@ export class Game {
     if (previous === null) {
       this.paused = false;
       this.resetModules();
-      this.run = new RunState();
+      this.run = createRunState();
     }
     const next = new SpawnPressure({
       capacity: this.capacity, floorFraction: fraction, ceilingFraction: fraction, seekFloorFraction: 1,
@@ -276,6 +297,7 @@ export class Game {
   setArenaBounds(bounds) {
     this.arenaBounds = bounds;
     this.player.setBounds(bounds);
+    this.swarm.setBounds(bounds);
     this.pickups.setBounds(bounds);
     this.simulation.setArenaBounds(bounds);
     const fraction = this.areaFraction();
@@ -314,6 +336,8 @@ export class Game {
     this.weapons.dropAll();
     this.pickups.reset();
     this.player.respawn();
+    this.swarm.reset(this.player.position.x, this.player.position.y, this.initialSwarmShips);
+    this.swarmFire.reset();
     this.spawnPressure.reset();
     this.spawnDirector.reset();
     this.timeWarp.end();
@@ -370,6 +394,7 @@ export class Game {
     }
     else if (this.watching) this.moveWatchPoint(deltaSeconds, inputState, controls);
     const { x, y } = this.player.position;
+    this.swarm.update(deltaSeconds, x, y);
 
     this.pickups.update(deltaSeconds, {
       playerX: x,
@@ -380,7 +405,7 @@ export class Game {
       densityAt: this.densityAt,
     });
     if (playing) {
-      const collected = this.pickups.collect(x, y);
+      const collected = this.collectPickup(x, y);
       if (collected !== null) {
         const timeWarp = collected === 'timewarp';
         if (timeWarp) {
@@ -403,9 +428,10 @@ export class Game {
     const firedTier = this.weapons.tier;
     const fire = this.weapons.update(deltaSeconds, { firing: playing && controls.firing, aimX: aim.x, aimY: aim.y, x, y });
     const railTier = this.weapons.railTier;
-    fire.spawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
-    fire.turretSpawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
-    this.projectiles.setBeam(fire.expired ? null : fire.beam);
+    const swarmShots = this.swarmFire.distribute(fire, this.swarm.ships, { x, y }, this.swarm.centroid);
+    swarmShots.spawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
+    swarmShots.turretSpawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
+    this.projectiles.setBeam(fire.expired ? null : swarmShots.beam);
     if (fire.spawns.length > 0 || (fire.beam !== null && !fire.expired)) this.effects?.weaponFire?.(firedKind, firedTier);
     else if (fire.turretSpawns.length > 0) this.effects?.weaponFire?.('rail', railTier);
     if (fire.expired) this.effects?.expiry?.();
@@ -430,6 +456,7 @@ export class Game {
       const pressure = this.activeSpawnPressure;
       this.simulation.setSeekScale(pressure.seekScale);
       this.simulation.setSpawnDistanceFraction(pressure.spawnDistanceFraction);
+      this.simulation.setSwarmShips(this.swarm.contactShips(this.simulation.frameSequence + 1), SWARM_SHIP_RADIUS);
       this.stepSimulation(simulationSeconds, spawnPerSpecies, this.stepGates, projectileSeconds);
     }
     this.simulation.pollDensity();
@@ -515,23 +542,39 @@ export class Game {
       if (stats.ringsThisFrame > 0) this.queueImpulse(stats.lastRingX, stats.lastRingY, RING_IMPULSE_STRENGTH, false);
       if (this.run.phase === RunPhase.Playing) {
         this.score.recordKills(stats.killsSinceLastRead);
+        // Kills grow the swarm; award lives are superseded by it, bombs stay.
+        this.swarm.addKills(stats.killsSinceLastRead);
         const earned = this.awards.update(this.score.score);
-        for (let index = 0; index < earned.lives; index += 1) this.run.addLife();
         for (let index = 0; index < earned.bombs; index += 1) this.run.addBomb();
       }
     }
-    const hitSequence = stats.playerHitSequence;
-    if (hitSequence > this.lastHitSequenceRead) {
-      this.lastHitSequenceRead = hitSequence;
-      // Acknowledge accepted and rejected hits alike, or a rejected one keeps the GPU latch set.
-      this.simulation.acknowledgeHit(hitSequence);
-      if (this.run.playerHit(hitSequence, this.player.position)) {
-        this.weapons.dropAll();
-        this.timeWarp.end();
-        this.score.recordHit();
-        this.effects?.death();
-      }
+    if (this.run.phase === RunPhase.Playing) this.processSwarmHits(stats);
+  }
+
+  // Swarm ships the GPU reported hit die (a small shockwave each); losing the last one is the run's
+  // one death: the death clear, then game over. A lost ship does not reset the multiplier.
+  processSwarmHits(stats) {
+    const killed = this.swarm.applyHits(stats.swarmHitMask ?? NO_SWARM_HITS, stats.frameSequence);
+    killed.forEach((ship) => this.queueImpulse(ship.x, ship.y, SWARM_SHIP_LOSS_IMPULSE_STRENGTH, false));
+    if (killed.length === 0 || this.swarm.aliveCount > 0) return;
+    const last = killed[killed.length - 1];
+    if (this.run.playerHit(stats.frameSequence, last)) {
+      this.weapons.dropAll();
+      this.timeWarp.end();
+      this.score.recordHit();
+      this.effects?.death();
     }
+  }
+
+  // A pickup at the controlled point, else at the first swarm ship close enough; null for none.
+  collectPickup(x, y) {
+    const atPoint = this.pickups.collect(x, y);
+    if (atPoint !== null) return atPoint;
+    for (const ship of this.swarm.ships) {
+      const collected = this.pickups.collect(ship.x, ship.y, SWARM_PICKUP_RADIUS);
+      if (collected !== null) return collected;
+    }
+    return null;
   }
 
   handleAction(action) {
@@ -572,23 +615,22 @@ export class Game {
     return impulses;
   }
 
-  // What the renderer draws besides the swarm. The ship hides from death until respawn, and at
-  // game over.
+  // What the renderer draws besides the enemy swarm: the player swarm (white ships, the controlled
+  // point's marker while Playing) replaces the ship, so ship is always null. The player swarm hides
+  // from death on, and at game over.
   scene() {
     const hidden = [RunPhase.Dying, RunPhase.Respawning, RunPhase.GameOver].includes(this.run.phase);
     return {
       projectiles: this.projectiles,
       pickups: this.pickups.pickups,
-      ship: hidden ? null : {
-        x: this.player.position.x,
-        y: this.player.position.y,
-        velocityX: this.player.velocity.x,
-        velocityY: this.player.velocity.y,
+      ship: null,
+      swarm: hidden ? null : {
+        ships: this.swarm.ships,
         facing: this.player.facing,
-        charge: this.weapons.charge,
+        pointX: this.player.position.x,
+        pointY: this.player.position.y,
+        pointShown: this.run.phase === RunPhase.Playing,
         armed: this.weapons.armed,
-        railTurrets: this.weapons.railTurrets,
-        invulnerable: this.run.invulnerable,
       },
     };
   }
@@ -601,6 +643,13 @@ export class Game {
     if (type === 'base') return;
     this.weapons.collect(type);
     for (let upgrade = 1; upgrade < tier; upgrade += 1) this.weapons.collect(type);
+  }
+
+  // Ships every run starts with (the ?swarm= query parameter); the swarm resets to it now.
+  setInitialSwarmShips(count) {
+    if (!(Number.isInteger(count) && count >= 1 && count <= MAXIMUM_SWARM_SHIPS)) throw new RangeError(`initial swarm ships must be an integer in [1, ${MAXIMUM_SWARM_SHIPS}], got ${count}`);
+    this.initialSwarmShips = count;
+    this.swarm.reset(this.player.position.x, this.player.position.y, count);
   }
 
   // The pickup blast radius in world units (the lab sets it); 0 turns the blast off.

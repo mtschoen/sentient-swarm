@@ -29,6 +29,9 @@ const STAT_LAST_RING_X: u32 = __STAT_LAST_RING_X__u;
 const STAT_LAST_RING_Y: u32 = __STAT_LAST_RING_Y__u;
 const STAT_PLAYER_HIT_SEQUENCE: u32 = __STAT_PLAYER_HIT_SEQUENCE__u;
 const STAT_HIT_LATCH: u32 = __STAT_HIT_LATCH__u;
+// First of the two swarm hit mask words (low, then high).
+const STAT_SWARM_HIT_MASK: u32 = __STAT_SWARM_HIT_MASK__u;
+const MAXIMUM_SWARM_SHIPS: u32 = __MAXIMUM_SWARM_SHIPS__u;
 
 const FLAG_ALIVE: u32 = 1u;
 const SPAWN_FRAMES_SHIFT: u32 = 8u;

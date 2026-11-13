@@ -1,16 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { STATS_BYTES, STATS_INDICES, STATS_PERSISTENT_OFFSET_BYTES, decodeStats } from '../../src/sim/stats.js';
+import { SWARM_HIT_MASK_WORDS } from '../../src/sim/layout.js';
 
 test('the per-frame prefix comes before the persistent tail, both 4-byte aligned', () => {
   assert.equal(STATS_PERSISTENT_OFFSET_BYTES % 4, 0);
   assert.ok(STATS_PERSISTENT_OFFSET_BYTES < STATS_BYTES);
   const perFrame = ['aliveTotal', 'frameSequence', 'killsUnscored', 'ringsThisFrame', 'lastRingX', 'lastRingY'];
   for (const name of perFrame) assert.ok(STATS_INDICES[name] * 4 < STATS_PERSISTENT_OFFSET_BYTES, name);
-  for (const name of ['playerHitSequence', 'hitLatch', 'kills']) {
+  for (const name of ['playerHitSequence', 'hitLatch', 'kills', 'swarmHitMask']) {
     assert.ok(STATS_INDICES[name] * 4 >= STATS_PERSISTENT_OFFSET_BYTES, name);
     assert.ok(STATS_INDICES[name] * 4 < STATS_BYTES, name);
   }
+  // The swarm hit mask's last word still fits.
+  assert.ok((STATS_INDICES.swarmHitMask + SWARM_HIT_MASK_WORDS) * 4 <= STATS_BYTES);
 });
 
 test('decodeStats reads every field by index', () => {
@@ -23,6 +26,8 @@ test('decodeStats reads every field by index', () => {
   words[STATS_INDICES.playerHitSequence] = 40;
   words[STATS_INDICES.hitLatch] = 1;
   words[STATS_INDICES.ringsThisFrame] = 3;
+  words[STATS_INDICES.swarmHitMask] = 5;
+  words[STATS_INDICES.swarmHitMask + SWARM_HIT_MASK_WORDS - 1] = 0x80000000;
   const floats = new Float32Array(words.buffer);
   floats[STATS_INDICES.lastRingX] = 4.5;
   floats[STATS_INDICES.lastRingY] = 2.25;
@@ -37,5 +42,6 @@ test('decodeStats reads every field by index', () => {
     ringsThisFrame: 3,
     lastRingX: 4.5,
     lastRingY: 2.25,
+    swarmHitMask: new Uint32Array([5, 0, 0, 0, 0, 0, 0, 0x80000000]),
   });
 });

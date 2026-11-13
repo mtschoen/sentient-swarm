@@ -5,7 +5,7 @@
 // a frame whose readback is skipped loses no kill: readers take differences.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
-import { AGENT_STRIDE_BYTES, SHADER_CONSTANTS, SPECIES_COUNT, STATS_INDICES, STATS_PERSISTENT_WORD, STATS_WORD_COUNT, WORKGROUP_SIZE } from './layout.js';
+import { AGENT_STRIDE_BYTES, SHADER_CONSTANTS, SPECIES_COUNT, STATS_INDICES, STATS_PERSISTENT_WORD, STATS_WORD_COUNT, SWARM_HIT_MASK_WORDS, WORKGROUP_SIZE } from './layout.js';
 
 export { STATS_INDICES };
 const BYTES_PER_WORD = 4;
@@ -13,7 +13,8 @@ export const STATS_BYTES = STATS_WORD_COUNT * BYTES_PER_WORD;
 export const STATS_PERSISTENT_OFFSET_BYTES = STATS_PERSISTENT_WORD * BYTES_PER_WORD;
 
 // Decodes a read-back stats buffer; killsTotal is the cumulative scored kills counter.
-// hitLatch is 1 while a hit waits for its acknowledgement. lastRingX and lastRingY are f32 bits,
+// hitLatch is 1 while a hit waits for its acknowledgement (unused by the player swarm, whose
+// per-slot hits are swarmHitMask, SWARM_HIT_MASK_WORDS words with slot s at bit s % 32 of word s / 32). lastRingX and lastRingY are f32 bits,
 // meaningful only when ringsThisFrame is nonzero.
 export function decodeStats(bytes) {
   const values = new Uint32Array(bytes, 0, STATS_WORD_COUNT);
@@ -29,6 +30,7 @@ export function decodeStats(bytes) {
     ringsThisFrame: values[STATS_INDICES.ringsThisFrame],
     lastRingX: floats[STATS_INDICES.lastRingX],
     lastRingY: floats[STATS_INDICES.lastRingY],
+    swarmHitMask: values.slice(STATS_INDICES.swarmHitMask, STATS_INDICES.swarmHitMask + SWARM_HIT_MASK_WORDS),
   };
 }
 

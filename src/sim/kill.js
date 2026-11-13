@@ -12,13 +12,14 @@
 //   (countAlive binds only params, agents, particles and area).
 // Every kill asks for params.killBurstParticles particles from one budget per step: the slots
 // free after the last particle step (ParticlePool.encodeBeginStep zeroes the step's claims).
-// - PlayerContactPass (player_collide.wgsl, one workgroup): the hit latch and the one agent that
-//   touches the player, counted in killsUnscored. Storage buffers: agents, cellCounts,
-//   cellOffsets, sortedIndices, stats, particles, species table (7), plus the params uniform.
+// - PlayerContactPass (player_collide.wgsl, one workgroup per player swarm slot): the swarm hit
+//   mask and the one agent per hit ship, counted in killsUnscored. Storage buffers: agents,
+//   cellCounts, cellOffsets, sortedIndices, stats, particles, species table (7), plus the params
+//   and swarm uniforms.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
-import { AGENT_STRIDE_BYTES, SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
+import { AGENT_STRIDE_BYTES, MAXIMUM_SWARM_SHIPS, SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
 
 class ComputePass {
   constructor(gpu, { common, shaderName, label }) {
@@ -135,15 +136,49 @@ export class KillAllPass extends ComputePass {
   }
 }
 
+// Swarm in player_collide.wgsl: radius f32, armed u32, two padding words, then
+// MAXIMUM_SWARM_SHIPS slots of { position vec2f, state u32 (bit 0 alive, bit 1 fresh), padding }.
+const SWARM_HEADER_BYTES = 16;
+const SWARM_SHIP_BYTES = 16;
+export const SWARM_UNIFORM_BYTES = SWARM_HEADER_BYTES + MAXIMUM_SWARM_SHIPS * SWARM_SHIP_BYTES;
+const SHIP_ALIVE = 1;
+const SHIP_FRESH = 2;
+
+// The Swarm uniform: ships is up to MAXIMUM_SWARM_SHIPS slots of { x, y, alive, fresh } (index is
+// the slot; missing slots are dead); armed false keeps every slot from being hit. Fills bytes (a new
+// buffer by default, reused by Simulation every step) and returns it.
+export function packSwarmShips(ships, { radius, armed }, bytes = new ArrayBuffer(SWARM_UNIFORM_BYTES)) {
+  const view = new DataView(bytes);
+  view.setFloat32(0, radius, true);
+  view.setUint32(4, armed ? 1 : 0, true);
+  const count = Math.min(ships.length, MAXIMUM_SWARM_SHIPS);
+  for (let slot = 0; slot < count; slot += 1) {
+    const { x, y, alive, fresh } = ships[slot];
+    const offset = SWARM_HEADER_BYTES + slot * SWARM_SHIP_BYTES;
+    view.setFloat32(offset, x, true);
+    view.setFloat32(offset + 4, y, true);
+    view.setUint32(offset + 8, (alive ? SHIP_ALIVE : 0) | (fresh ? SHIP_FRESH : 0), true);
+  }
+  for (let slot = count; slot < MAXIMUM_SWARM_SHIPS; slot += 1) view.setUint32(SWARM_HEADER_BYTES + slot * SWARM_SHIP_BYTES + 8, 0, true);
+  return bytes;
+}
+
 export class PlayerContactPass extends ComputePass {
   constructor(gpu, { common }) {
     super(gpu, { common, shaderName: 'player_collide', label: 'player-collide' });
+    this.swarmBuffer = createUniformBuffer(this.device, SWARM_UNIFORM_BYTES, 'player-swarm');
   }
 
-  encode(encoder, { agentsBuffer, gridBuffers, statsBuffer, particleBuffers, speciesTableBuffer, paramsBuffer }) {
+  // swarmBytes: packSwarmShips for this step, written with queue.writeBuffer (one step per submission).
+  encode(encoder, { agentsBuffer, gridBuffers, statsBuffer, particleBuffers, speciesTableBuffer, paramsBuffer }, swarmBytes) {
+    this.device.queue.writeBuffer(this.swarmBuffer, 0, swarmBytes);
     this.dispatch(encoder, [
       paramsBuffer, agentsBuffer, gridBuffers.cellCounts, gridBuffers.cellOffsets, gridBuffers.sortedIndices,
-      statsBuffer, particleBuffers.particles, speciesTableBuffer,
-    ], 1);
+      statsBuffer, particleBuffers.particles, speciesTableBuffer, this.swarmBuffer,
+    ], MAXIMUM_SWARM_SHIPS);
+  }
+
+  destroy() {
+    this.swarmBuffer.destroy();
   }
 }

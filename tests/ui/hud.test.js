@@ -47,7 +47,7 @@ test('update renders score, multiplier, weapon and icon rows', () => {
   assert.equal(find(root, 'hud-score').textContent, '123,456');
   assert.equal(find(root, 'hud-multiplier').textContent, 'x4');
   assert.equal(find(root, 'hud-weapon').textContent, 'RAIL III');
-  assert.equal(find(root, 'hud-lives').textContent.length, 2);
+  assert.equal(find(root, 'hud-lives').textContent, '▲ 2');
   assert.equal(find(root, 'hud-bombs').textContent.length, 1);
   assert.match(find(root, 'hud-offer').textContent, /BEAM/);
 });

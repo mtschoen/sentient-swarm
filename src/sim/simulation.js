@@ -41,7 +41,7 @@ import { AgentCompaction } from './compact.js';
 import { CoarseField } from './field.js';
 import { DensityReadback } from './density-readback.js';
 import { SpatialGrid } from './grid.js';
-import { DebugKillPass, KillAllPass, PlayerContactPass } from './kill.js';
+import { DebugKillPass, KillAllPass, PlayerContactPass, SWARM_UNIFORM_BYTES, packSwarmShips } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
 import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
 import {
@@ -133,6 +133,10 @@ export class Simulation {
     // Contact is off until the first setPlayerState, so the Plan A demo's pointer never hits.
     this.playerContact = null;
     this.acknowledgedHitSequence = 0;
+    // Player swarm slots for contact ({ x, y, alive, fresh } per slot, setSwarmShips) and their radius.
+    this.swarmShips = [];
+    this.swarmShipRadius = DEFAULT_PLAYER_RADIUS;
+    this.swarmBytes = new ArrayBuffer(SWARM_UNIFORM_BYTES);
     this.killAllRequested = false;
     // { x, y, radius } for the next step's radial kill (the pickup blast), or null.
     this.radialKill = null;
@@ -195,6 +199,14 @@ export class Simulation {
   setPlayerState({ x, y, radius = DEFAULT_PLAYER_RADIUS, invulnerable = false }) {
     this.playerPosition = [x, y];
     this.playerContact = { radius, invulnerable: Boolean(invulnerable) };
+  }
+
+  // The player swarm for the next step's contact pass: ships is one { x, y, alive, fresh } per slot
+  // (packSwarmShips in kill.js), radius the contact radius. Contact still needs setPlayerState, whose
+  // invulnerable flag disarms every slot.
+  setSwarmShips(ships, radius) {
+    this.swarmShips = ships;
+    this.swarmShipRadius = radius;
   }
 
   // Releases the hit latch once the GPU's playerHitSequence is at or below frameSequence. Never
@@ -371,7 +383,10 @@ export class Simulation {
       };
       this.registeredPasses.forEach((encodeFunction) => encodeFunction(encoder, context));
     }
-    if (this.playerContact !== null) this.playerContactPass.encode(encoder, { ...killBuffers, gridBuffers: this.grid.buffers });
+    if (this.playerContact !== null) {
+      const swarmBytes = packSwarmShips(this.swarmShips, { radius: this.swarmShipRadius, armed: !this.playerContact.invulnerable }, this.swarmBytes);
+      this.playerContactPass.encode(encoder, { ...killBuffers, gridBuffers: this.grid.buffers }, swarmBytes);
+    }
     if (killRadius > 0) this.killPass.encode(encoder, killBuffers);
     this.particlePoolValue.encodeStep(encoder, params);
     this.statsPass.encode(encoder, agentsOut, this.statsBufferValue, params);
@@ -554,6 +569,7 @@ export class Simulation {
     next.setPlayer(...this.playerPosition);
     next.playerContact = this.playerContact === null ? null : { ...this.playerContact };
     next.acknowledgedHitSequence = this.acknowledgedHitSequence;
+    next.setSwarmShips(this.swarmShips, this.swarmShipRadius);
     // The kills counter came over with the tail, so differences continue from the last read.
     next.lastKillsTotal = this.lastKillsTotal;
     next.killAllRequested = this.killAllRequested;
@@ -584,6 +600,7 @@ export class Simulation {
     this.stagingRing.destroy();
     this.spawner.destroy();
     this.killAllPass.destroy();
+    this.playerContactPass.destroy();
     this.particlePoolValue.destroy();
     this.grid.destroy();
     this.field.destroy();

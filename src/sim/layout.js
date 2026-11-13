@@ -74,9 +74,16 @@ export const STATS_INDICES = {
   playerHitSequence: 16,
   hitLatch: 17,
   kills: 18,
+  // Player swarm contact (player_collide.wgsl): bit s % 32 of word swarmHitMask + s / 32 (8 words,
+  // MAXIMUM_SWARM_SHIPS bits) is set when an agent touched swarm ship slot s; the pass clears a
+  // slot's bit while the slot is dead or in its first uploaded step.
+  swarmHitMask: 24,
 };
 export const STATS_PERSISTENT_WORD = 16;
-export const STATS_WORD_COUNT = 24;
+export const STATS_WORD_COUNT = 32;
+// Player swarm slots (src/game/player-swarm.js): the contact uniform and the hit mask hold this many.
+export const MAXIMUM_SWARM_SHIPS = 256;
+export const SWARM_HIT_MASK_WORDS = MAXIMUM_SWARM_SHIPS / 32;
 
 // Token values for substituteConstants on common.wgsl and every compute shader.
 export const SHADER_CONSTANTS = {
@@ -97,6 +104,8 @@ export const SHADER_CONSTANTS = {
   STAT_LAST_RING_Y: STATS_INDICES.lastRingY,
   STAT_PLAYER_HIT_SEQUENCE: STATS_INDICES.playerHitSequence,
   STAT_HIT_LATCH: STATS_INDICES.hitLatch,
+  STAT_SWARM_HIT_MASK: STATS_INDICES.swarmHitMask,
+  MAXIMUM_SWARM_SHIPS,
   PROJECTILE_KIND_BULLET: PROJECTILE_KINDS.bullet,
   PROJECTILE_KIND_SCATTER: PROJECTILE_KINDS.scatter,
   PROJECTILE_KIND_RAIL: PROJECTILE_KINDS.rail,

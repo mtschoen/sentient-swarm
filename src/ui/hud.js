@@ -159,7 +159,8 @@ export function createHud(rootElement, {
       const warpLeft = Math.min(1, Math.max(0, state.timeWarp ?? 0));
       warp.style.visibility = warpLeft > 0 ? 'visible' : 'hidden';
       warpFill.style.width = `${Math.round(warpLeft * 100)}%`;
-      setText(lives, LIFE_ICON.repeat(Math.max(0, state.lives ?? 0)));
+      // Player swarm spike: lives is the swarm size (up to 256), shown as one icon and the count.
+      setText(lives, `${LIFE_ICON} ${Math.max(0, state.lives ?? 0)}`);
       setText(bombs, BOMB_ICON.repeat(Math.max(0, state.bombs ?? 0)));
       const offered = state.offeredType;
       setText(offer, offered ? `NEXT ${OFFER_LABELS[offered] ?? String(offered).toUpperCase()}` : '');

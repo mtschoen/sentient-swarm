@@ -27,6 +27,7 @@ import { ParticleRenderer } from './particles.js';
 import { PickupRenderer } from './pickups.js';
 import { ProjectileRenderer } from './projectiles.js';
 import { ShipRenderer } from './ship.js';
+import { SwarmRenderer } from './swarm.js';
 import { SCENE_FORMAT, loadFullscreenHeader } from './render-shaders.js';
 import { TrailDecayPass, trailFrameFactors } from './trails.js';
 import { WarpGrid } from './warpgrid.js';
@@ -62,6 +63,7 @@ export class Renderer {
       renderer.projectileRenderer.initialize(),
       renderer.pickupRenderer.initialize(),
       renderer.ship.initialize(),
+      renderer.swarm.initialize(),
       renderer.bloom.initialize(),
       renderer.composite.initialize(),
     ], onProgress);
@@ -84,6 +86,7 @@ export class Renderer {
     this.projectileRenderer = new ProjectileRenderer(gpu, { viewport, common });
     this.pickupRenderer = new PickupRenderer(gpu, { viewport, common });
     this.ship = new ShipRenderer(gpu, { viewport, common });
+    this.swarm = new SwarmRenderer(gpu, { viewport, common });
     this.bloom = new BloomPass(gpu, { fullscreenHeader });
     this.composite = new CompositePass(gpu, { fullscreenHeader });
     this.frameCapture = new FrameCapture(this.device, gpu.format);
@@ -169,6 +172,7 @@ export class Renderer {
     if (scene?.pickups) this.pickupRenderer.encode(scenePass, scene.pickups, sceneTime);
     this.particles.encode(scenePass, simulation.particlePool, emissionScale);
     if (scene?.ship) this.ship.encode(scenePass, { ...scene.ship, time: sceneTime });
+    if (scene?.swarm) this.swarm.encode(scenePass, scene.swarm, sceneTime);
     scenePass.end();
     this.bloom.encode(encoder, currentIndex);
     const swapchainTexture = this.gpu.context.getCurrentTexture();
@@ -212,7 +216,7 @@ export class Renderer {
   destroy() {
     this.destroySceneTextures();
     [this.glyphs, this.particles, this.warpGrid, this.projectileRenderer].forEach((pass) => pass.bindGroupCache.clear());
-    [this.warpGrid, this.trails, this.gates, this.glyphs, this.particles, this.projectileRenderer, this.pickupRenderer, this.ship, this.bloom, this.composite].forEach((pass) => pass.destroy());
+    [this.warpGrid, this.trails, this.gates, this.glyphs, this.particles, this.projectileRenderer, this.pickupRenderer, this.ship, this.swarm, this.bloom, this.composite].forEach((pass) => pass.destroy());
     this.frameCapture.destroy();
   }
 }
