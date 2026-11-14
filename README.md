@@ -38,6 +38,16 @@ You are a one-hit ship in an arena full of flocking enemies. One touch kills you
 - On a gamepad, rumble plays on a bomb, a death, a pickup and an extra life (a trigger rumble where the pad supports it, else the dual motors); a phone buzzes briefly on a bomb and a death where the platform allows it.
 - Keys: M mutes or resumes all sound, O opens the settings panel (so does the Settings button at the bottom left), backquote opens the Lab.
 
+### Two players
+
+Two people can play on one screen. On the title screen, press a button on a second controller to join as player 2 (a green swarm; the title shows the prompt). With one controller and the keyboard, a shoulder or trigger button on the controller joins instead, since its face buttons start a solo run; a shoulder or trigger press on player 2's controller leaves again. Then start as usual. Joining is only possible at the title, and the Lab is single-player.
+
+- Player 1 plays with the keyboard, mouse, touch or the first controller; player 2 plays with their own controller (the gamepad controls above). Either player's first press starts the run.
+- The score, bombs and kill streak are shared, and every kill grows both swarms. Either player's bomb spends the shared pool; a player who is down cannot bomb.
+- A player whose swarm is wiped while the other still flies is down: they lose their weapons and sit out until the survivor scores 100 more kills, then return with 12 ships beside the survivor and 2 seconds of immunity. The run ends when both swarms are wiped.
+- The camera centers between the swarms and zooms out as they separate, down to the whole arena.
+- If player 2's controller disconnects mid-run the game pauses; reconnecting it gives the seat back.
+
 ### Weapons and pickups
 
 You start on the base gun: three energy balls in a spread with unlimited ammo. They are big and slow enough to read, live until they cross the arena, and pierce everything they hit, so each volley carves a tunnel the swarm cannot close at once. A pickup arms one of four upgrades with three tiers each, adds a rail turret, or starts a time warp:

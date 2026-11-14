@@ -1,6 +1,6 @@
 // One player's seat: the controlled point (PlayerShip), its swarm (PlayerSwarm), the swarm's fire
 // (SwarmFire), the armed weapon (WeaponState) and the held-button state that turns a level into a
-// press. Game owns a list of seats and loops over it; stage 1 of co-op adds the second.
+// press. Game owns a list of one or two seats (solo, co-op) and loops over it.
 import { PlayerShip } from './player.js';
 import { PlayerSwarm } from './player-swarm.js';
 import { SwarmFire } from './swarm-fire.js';

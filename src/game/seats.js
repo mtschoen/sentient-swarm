@@ -1,6 +1,9 @@
-// Pure helpers over the game's list of player seats (one in solo, two in co-op): which seats are
-// live, where the neutral swarm seeks, where pickups gather, who the spawn director keeps clear of,
-// and where each seat starts a run. A seat is live while it is not down and still has ships.
+// Seat-list logic for the game's one or two player seats. The first half is pure helpers over the
+// list: which seats are live, where the neutral swarm seeks, where pickups gather, who the spawn
+// director keeps clear of, what the camera frames and where each seat starts a run. A seat is live
+// while it is not down and still has ships. The second half is the game-side seat work that takes
+// the Game as context (swarm upload, firing, hits, down and revive), kept here so game.js stays the
+// frame order.
 
 import { SWARM_SHIP_RADIUS } from './player-swarm.js';
 import { REVIVE_SHIPS, revivePoint } from './seat-revival.js';
@@ -62,7 +65,7 @@ export function framedFocuses(seats) {
   return live.length === 0 ? [seats[0].cameraFocus] : live.map((seat) => seat.cameraFocus);
 }
 
-// Game-side seat work, kept here so game.js stays the frame order. Each takes the game as context.
+// Game-side seat work: each function takes the game as context.
 
 // A lost swarm ship ripples the warp grid this hard.
 const SWARM_SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
