@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BEAM_SLOT, BeamTracker, PROJECTILE_STRIDE_BYTES, ProjectileSlots, Projectiles, beamReachScale, beamSpawn, contiguousRuns, packProjectile,
+  BEAM_SLOT, BeamTracker, MAXIMUM_BEAM_SLOTS, PROJECTILE_STRIDE_BYTES, ProjectileSlots, Projectiles, beamReachScale, beamSpawn, contiguousRuns, packProjectile,
   validatedBaseKillBudget, validatedBeamSweepThreshold, withKillBudget,
 } from '../../src/game/projectiles.js';
 import { BindGroupCache } from '../../src/gpu/bind-group-cache.js';
@@ -182,4 +182,91 @@ test('clearBindGroupCaches empties both bind group caches so a replaced simulati
   assert.equal(projectiles.collideBindGroupCache.entries.size, 0);
   projectiles.stepBindGroupCache.get([buffer]);
   assert.equal(projectiles.stepBindGroupCache.creationCount, 2);
+});
+
+globalThis.GPUBufferUsage ??= { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, UNIFORM: 64, STORAGE: 128 };
+
+// A Projectiles over a fake device that records every writeBuffer and every dispatch.
+function fakeProjectiles(capacity = 16) {
+  const writes = [];
+  const dispatches = [];
+  let current = null;
+  const buffer = (size) => ({ size, destroy() {} });
+  const device = {
+    createBuffer: ({ size }) => buffer(size),
+    queue: { writeBuffer: (target, offset, data) => writes.push({ offset, bytes: new Uint8Array(data.buffer ?? data, data.byteOffset ?? 0, data.byteLength) }) },
+  };
+  const projectiles = new Projectiles({ device }, { capacity, common: '' });
+  projectiles.pipelines = { step: 'step', collide: 'collide', rings: 'rings', beam: 'beam' };
+  projectiles.stepBindGroupCache = { get: () => ({}), clear() {} };
+  projectiles.collideBindGroupCache = { get: () => ({}), clear() {} };
+  const pass = {
+    setPipeline: (pipeline) => { current = pipeline; },
+    setBindGroup() {},
+    dispatchWorkgroups: (count) => dispatches.push({ pipeline: current, count }),
+    end() {},
+  };
+  const encoder = { copyBufferToBuffer() {}, beginComputePass: () => pass };
+  const context = {
+    agentsBuffer: {}, gridBuffers: {}, fieldBuffers: { blurred: {}, threatAccumulator: {} },
+    particlePool: { registerBindGroupCache() {}, buffers: { particles: {} } }, statsBuffer: {}, paramsBuffer: {}, speciesTableBuffer: {},
+  };
+  return { projectiles, writes, dispatches, encode: () => projectiles.encode(encoder, context) };
+}
+
+const BEAM_REQUEST = { x: 1, y: 2, directionX: 1, directionY: 0, halfWidth: 0.1 };
+
+test('with two beam slots the cursor never hands out slots 0 or 1', () => {
+  const slots = new ProjectileSlots(6, MAXIMUM_BEAM_SLOTS);
+  const handed = Array.from({ length: 20 }, () => slots.next());
+  assert.ok(handed.every((slot) => slot >= 2));
+  assert.deepEqual(handed.slice(0, 5), [2, 3, 4, 5, 2]);
+  slots.setReservedSlots(1);
+  assert.ok(Array.from({ length: 12 }, () => slots.next()).includes(1));
+});
+
+test('setBeam(beam, 1) writes slot 1 and setBeamSlotCount(1) writes it dead once', () => {
+  const { projectiles, writes, encode } = fakeProjectiles();
+  projectiles.setBeamSlotCount(2);
+  projectiles.setBeam(BEAM_REQUEST, 1);
+  encode();
+  assert.deepEqual(writes.map((write) => write.offset), [PROJECTILE_STRIDE_BYTES]);
+  assert.ok(writes[0].bytes.some((byte) => byte !== 0));
+  projectiles.setBeamSlotCount(1);
+  encode();
+  assert.deepEqual(writes.map((write) => write.offset), [PROJECTILE_STRIDE_BYTES, PROJECTILE_STRIDE_BYTES]);
+  assert.ok(writes[1].bytes.every((byte) => byte === 0));
+  encode();
+  assert.equal(writes.length, 2);
+});
+
+test('setBeam for a seat past the slot count and setBeamSlotCount(3) throw RangeError', () => {
+  const { projectiles } = fakeProjectiles();
+  assert.throws(() => projectiles.setBeam(BEAM_REQUEST, 1), RangeError);
+  assert.throws(() => projectiles.setBeamSlotCount(3), RangeError);
+  assert.throws(() => projectiles.setBeamSlotCount(0), RangeError);
+  projectiles.setBeamSlotCount(2);
+  projectiles.setBeam(BEAM_REQUEST, 1);
+  assert.throws(() => projectiles.setBeam(BEAM_REQUEST, 2), RangeError);
+});
+
+test('encode dispatches one beam workgroup per beam slot', () => {
+  const { projectiles, dispatches, encode } = fakeProjectiles();
+  encode();
+  projectiles.setBeamSlotCount(2);
+  encode();
+  const beamCounts = dispatches.filter((dispatch) => dispatch.pipeline === 'beam').map((dispatch) => dispatch.count);
+  assert.deepEqual(beamCounts, [1, 2]);
+});
+
+test('setBeamSweepThreshold sets both trackers and clear clears both', () => {
+  const { projectiles } = fakeProjectiles();
+  projectiles.setBeamSlotCount(2);
+  projectiles.setBeamSweepThreshold(30);
+  assert.deepEqual(projectiles.beamTrackers.map((tracker) => tracker.sweepThresholdDegrees), [30, 30]);
+  assert.equal(projectiles.beamTracker, projectiles.beamTrackers[0]);
+  projectiles.setBeam(BEAM_REQUEST, 0);
+  projectiles.setBeam(BEAM_REQUEST, 1);
+  projectiles.clear();
+  assert.deepEqual(projectiles.beamTrackers.map((tracker) => tracker.beam), [null, null]);
 });

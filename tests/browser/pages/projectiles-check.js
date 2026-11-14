@@ -57,6 +57,8 @@
 //     kills exactly that one, then its slot becomes a full pulse ring (no missile flag) there,
 //     counted once in stats ringsThisFrame; the ring kills an agent 2 away (beyond a missile
 //     ring's reach) and spares one 4.5 away.
+// (q) second beam slot: with setBeamSlotCount(2) a beam in slot 1 kills the wall block while slot 0 is
+//     idle, and the frame after it clears kills nothing.
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
@@ -326,6 +328,30 @@ async function runBeamCase(harness, isDeviceLost) {
     [dropped === kills, `(c) alive drop ${dropped} equals kills`],
     [inTrench === 0, `(c) alive agents within 0.09 of the ray ${inTrench} (need 0)`],
     [after === 0, `(c) kills the frame after the beam cleared ${after} (need 0)`],
+  ]);
+}
+
+// (q) second beam slot: with two beam slots a beam in slot 1 kills the block against the right wall
+// while slot 0 is idle, and going back to one slot leaves slot 1 dead (a repeat kills nothing).
+async function runSecondBeamSlotCase(harness) {
+  const positions = harness.seedBlock(WALL_CENTER);
+  const length = Math.hypot(BEAM_TARGET[0] - BEAM_ORIGIN[0], BEAM_TARGET[1] - BEAM_ORIGIN[1]);
+  const direction = [(BEAM_TARGET[0] - BEAM_ORIGIN[0]) / length, (BEAM_TARGET[1] - BEAM_ORIGIN[1]) / length];
+  harness.projectiles.setBeamSlotCount(2);
+  harness.projectiles.setBeam({ x: BEAM_ORIGIN[0], y: BEAM_ORIGIN[1], directionX: direction[0], directionY: direction[1], halfWidth: BEAM_HALF_WIDTH }, 1);
+  const kills = await harness.step();
+  harness.projectiles.setBeam(null, 1);
+  const alive = await harness.aliveFlags();
+  const after = await harness.step();
+  harness.projectiles.setBeamSlotCount(1);
+  const rayEnd = [BEAM_ORIGIN[0] + direction[0] * 100, BEAM_ORIGIN[1] + direction[1] * 100];
+  const inTrench = positions.filter((position, index) => alive[index] && distanceToSegment(position, BEAM_ORIGIN, rayEnd) <= 0.09).length;
+  const dropped = alive.filter((flag) => !flag).length;
+  return verdictLine([
+    [kills > 0, `(q) slot 1 beam kills ${kills} with slot 0 idle (need > 0)`],
+    [dropped === kills, `(q) alive drop ${dropped} equals kills`],
+    [inTrench === 0, `(q) alive agents within 0.09 of the ray ${inTrench} (need 0)`],
+    [after === 0, `(q) kills the frame after slot 1's beam cleared ${after} (need 0)`],
   ]);
 }
 
@@ -712,7 +738,7 @@ async function runCheck() {
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const harness = new Harness(device, simulation, projectiles);
   const entries = [];
-  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runMissileBlastCase, runOrbFirstHitCase, runMissileMissCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase, runBeamReversalCase, runMixedBulletsCase]) {
+  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runMissileBlastCase, runOrbFirstHitCase, runMissileMissCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase, runBeamReversalCase, runMixedBulletsCase, runSecondBeamSlotCase]) {
     entries.push(await run(harness));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${entries.map((entry) => entry.detail).join('; ')}` };
   }

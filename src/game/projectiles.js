@@ -1,9 +1,10 @@
 // GPU projectiles: a ring of 48-byte Projectile slots (common.wgsl) stepped and collided on the
 // GPU each Simulation step. Register with simulation.registerPass so encode runs after integrate:
 //   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
-// The CPU only writes: queueSpawn assigns slots round-robin (slot 0 is reserved for the beam)
-// and encode writes the queued spawns with one queue.writeBuffer per contiguous run of slots (a
-// second run only when the cursor wraps in that frame); setBeam keeps slot 0 rewritten every
+// The CPU only writes: queueSpawn assigns slots round-robin (slots 0 .. beamSlotCount - 1 are
+// reserved for the beams: seat k's beam is slot BEAM_SLOT + k, one slot by default) and encode
+// writes the queued spawns with one queue.writeBuffer per contiguous run of slots (a
+// second run only when the cursor wraps in that frame); setBeam keeps its seat's slot rewritten every
 // frame while firing and clears it once afterwards; it also carries the previous step's aim, so the
 // beam kills and draws the whole sector swept between two steps. The GPU clears a slot's alive bit when its
 // lifetime expires or it leaves the arena (projectiles_step.wgsl) and kills agents through the
@@ -12,7 +13,7 @@
 // A spawn that lands on a still-alive slot replaces it.
 // Lab knobs (task C6b, both off by default): setBaseKillBudget writes a kill budget into every
 // base bullet's extra (the collide pass spends it and kills the bullet at 0); setBeamSweepThreshold
-// shrinks the beam's kill reach on fast turns through the beam slot's lifetime (its reach scale,
+// shrinks the beam's kill reach on fast turns through each beam slot's lifetime (its reach scale,
 // 1 = to the arena edge; nothing else reads a beam's lifetime).
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
@@ -27,6 +28,7 @@ import {
 export const PROJECTILE_STRIDE_BYTES = 48;
 export const DEFAULT_PROJECTILE_CAPACITY = 8192;
 export const BEAM_SLOT = 0;
+export const MAXIMUM_BEAM_SLOTS = 2;
 // The beam's lifetime is its kill reach scale (the step pass leaves the beam slot alone): 1 is full.
 const FULL_BEAM_REACH = 1;
 const DEGREES_PER_RADIAN = 180 / Math.PI;
@@ -51,18 +53,24 @@ export function packProjectile(view, byteOffset, { x, y, velocityX, velocityY, r
   view.setFloat32(byteOffset + 44, extra, true);
 }
 
-// Round-robin slot cursor over 1 .. capacity - 1 (cursor = (cursor + 1) % capacity, skipping the
-// beam slot).
+// Round-robin slot cursor over reservedSlots .. capacity - 1 (cursor = (cursor + 1) % capacity,
+// skipping the reserved beam slots).
 export class ProjectileSlots {
-  constructor(capacity) {
-    if (capacity < 2) throw new Error(`Projectiles need at least 2 slots (slot ${BEAM_SLOT} is the beam); got ${capacity}`);
+  constructor(capacity, reservedSlots = 1) {
+    if (capacity < reservedSlots + 1) throw new Error(`Projectiles need at least ${reservedSlots + 1} slots (slots ${BEAM_SLOT} to ${reservedSlots - 1} are beams); got ${capacity}`);
     this.capacity = capacity;
+    this.reservedSlots = reservedSlots;
     this.cursor = BEAM_SLOT;
+  }
+
+  setReservedSlots(count) {
+    if (this.capacity < count + 1) throw new RangeError(`Projectiles need at least ${count + 1} slots for ${count} beams; got ${this.capacity}`);
+    this.reservedSlots = count;
   }
 
   next() {
     this.cursor = (this.cursor + 1) % this.capacity;
-    if (this.cursor === BEAM_SLOT) this.cursor = (this.cursor + 1) % this.capacity;
+    if (this.cursor < this.reservedSlots) this.cursor = this.reservedSlots;
     return this.cursor;
   }
 }
@@ -181,8 +189,9 @@ export class Projectiles {
     this.common = common;
     this.slots = new ProjectileSlots(capacity);
     this.pending = [];
-    this.beamTracker = new BeamTracker();
-    this.beamWritten = false;
+    this.beamTrackers = Array.from({ length: MAXIMUM_BEAM_SLOTS }, () => new BeamTracker());
+    this.beamWritten = new Array(MAXIMUM_BEAM_SLOTS).fill(false);
+    this.beamSlotCountValue = 1;
     this.baseKillBudgetValue = DEFAULT_BASE_KILL_BUDGET;
     // New buffers are zero-filled, so every slot starts dead.
     this.bufferValue = createStorageBuffer(this.device, capacity * PROJECTILE_STRIDE_BYTES, 'projectiles');
@@ -203,7 +212,9 @@ export class Projectiles {
   get buffer() { return this.bufferValue; }
   get capacity() { return this.capacityValue; }
   get baseKillBudget() { return this.baseKillBudgetValue; }
-  get beamSweepThresholdDegrees() { return this.beamTracker.sweepThresholdDegrees; }
+  get beamSweepThresholdDegrees() { return this.beamTrackers[0].sweepThresholdDegrees; }
+  get beamTracker() { return this.beamTrackers[0]; }
+  get beamSlotCount() { return this.beamSlotCountValue; }
 
   // Lab: kills per base bullet (0 unlimited), for spawns queued from now on. Throws RangeError.
   setBaseKillBudget(count) {
@@ -212,7 +223,17 @@ export class Projectiles {
 
   // Lab: the beam sweep budget in degrees per step (0 off). Throws RangeError.
   setBeamSweepThreshold(degrees) {
-    this.beamTracker.sweepThresholdDegrees = validatedBeamSweepThreshold(degrees);
+    const validated = validatedBeamSweepThreshold(degrees);
+    for (const tracker of this.beamTrackers) tracker.sweepThresholdDegrees = validated;
+  }
+
+  // 1 (the default) or 2 beam slots, one per seat. Going down to 1 stops seat 2's beam and writes
+  // its slot dead at the next encode. Throws RangeError.
+  setBeamSlotCount(count) {
+    if (!(count === 1 || count === MAXIMUM_BEAM_SLOTS)) throw new RangeError(`beam slot count must be 1 or ${MAXIMUM_BEAM_SLOTS}, got ${count}`);
+    this.slots.setReservedSlots(count);
+    for (let seat = count; seat < MAXIMUM_BEAM_SLOTS; seat += 1) this.beamTrackers[seat].clear();
+    this.beamSlotCountValue = count;
   }
 
   async initialize() {
@@ -252,8 +273,9 @@ export class Projectiles {
 
   // { x, y, directionX, directionY, halfWidth } fires the beam from the next encode on; null stops it
   // and resets the swept direction (BeamTracker).
-  setBeam(beam) {
-    this.beamTracker.set(beam);
+  setBeam(beam, seat = 0) {
+    if (!(seat >= 0 && seat < this.beamSlotCountValue)) throw new RangeError(`beam seat must lie in [0, ${this.beamSlotCountValue}), got ${seat}`);
+    this.beamTrackers[seat].set(beam);
   }
 
   // Kills every projectile now (queue.writeBuffer, ahead of any later submit) and drops queued
@@ -261,8 +283,8 @@ export class Projectiles {
   clear() {
     this.device.queue.writeBuffer(this.bufferValue, 0, new Uint8Array(this.bufferValue.size));
     this.pending = [];
-    this.beamTracker.clear();
-    this.beamWritten = false;
+    for (const tracker of this.beamTrackers) tracker.clear();
+    this.beamWritten.fill(false);
   }
 
   // Drops every cached bind group; a capacity swap installs a new Simulation whose buffers differ, and
@@ -273,6 +295,15 @@ export class Projectiles {
   }
 
   writePending() {
+    // Beam slots first, so a dead write of a released slot cannot overwrite a spawn queued into it.
+    this.beamTrackers.forEach((tracker, seat) => {
+      const beam = tracker.next();
+      if (beam === null && !this.beamWritten[seat]) return;
+      const bytes = new ArrayBuffer(PROJECTILE_STRIDE_BYTES);
+      if (beam !== null) packProjectile(new DataView(bytes), 0, beam);
+      this.device.queue.writeBuffer(this.bufferValue, (BEAM_SLOT + seat) * PROJECTILE_STRIDE_BYTES, bytes);
+      this.beamWritten[seat] = beam !== null;
+    });
     const runs = contiguousRuns(this.pending.map((entry) => entry.slot));
     for (const run of runs) {
       const bytes = new ArrayBuffer(run.count * PROJECTILE_STRIDE_BYTES);
@@ -283,12 +314,6 @@ export class Projectiles {
       this.device.queue.writeBuffer(this.bufferValue, run.firstSlot * PROJECTILE_STRIDE_BYTES, bytes);
     }
     this.pending = [];
-    const beam = this.beamTracker.next();
-    if (beam === null && !this.beamWritten) return;
-    const bytes = new ArrayBuffer(PROJECTILE_STRIDE_BYTES);
-    if (beam !== null) packProjectile(new DataView(bytes), 0, beam);
-    this.device.queue.writeBuffer(this.bufferValue, BEAM_SLOT * PROJECTILE_STRIDE_BYTES, bytes);
-    this.beamWritten = beam !== null;
   }
 
   // Runs inside Simulation.step through registerPass (context as documented in simulation.js).
@@ -314,7 +339,7 @@ export class Projectiles {
     pass.setPipeline(this.pipelines.rings);
     pass.dispatchWorkgroups(RING_WORKGROUP_COUNT);
     pass.setPipeline(this.pipelines.beam);
-    pass.dispatchWorkgroups(1);
+    pass.dispatchWorkgroups(this.beamSlotCountValue);
     pass.end();
   }
 
