@@ -439,7 +439,7 @@ export class Game {
         // The bomb clears around the swarm out past the view's corners (bombRadiusForView), not the whole world.
         const center = seat.aliveCount > 0 ? seat.centroid : seat.point;
         this.simulation.requestRadialKill(center.x, center.y, bombRadiusForView(this.viewSize.width, this.viewSize.height));
-        this.effects?.bomb();
+        this.effects?.bomb(...(seats.length > 1 ? [seat.index] : []));
       }
     });
 

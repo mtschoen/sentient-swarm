@@ -123,3 +123,11 @@ test('rumble with a pad index plays only on that pad; null plays nothing', () =>
   rumble.bomb();
   assert.equal(first.calls.length, 2, 'undefined still plays on the first pad with an actuator');
 });
+
+test('the life watcher rumbles extra lives on the pad it is given for seat 1', () => {
+  const calls = [];
+  const watcher = createLifeWatcher({ extraLife: (padIndex) => calls.push(padIndex) }, () => 3);
+  watcher.update({ phase: 'playing', lives: 1 });
+  watcher.update({ phase: 'playing', lives: 2 });
+  assert.deepEqual(calls, [3]);
+});

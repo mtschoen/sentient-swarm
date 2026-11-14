@@ -454,3 +454,45 @@ test('a solo camera keeps zoom exactly 1 and the spawn director gets the unzoome
   assert.ok(views.length > 0);
   assert.ok(views.every((view) => view.width === game.viewSize.width && view.height === game.viewSize.height));
 });
+
+// Plays a two-seat run (seat 2 down first, when asked) to game over and past the restart guard.
+function reachTwoSeatGameOver({ game, simulation }, { seatTwoDown }) {
+  if (seatTwoDown) updateWithStats(game, simulation, SECOND_WIPE);
+  updateWithStats(game, simulation, { swarmHitMask: SWARM_WIPE_MASK, ...(seatTwoDown ? {} : SECOND_WIPE) });
+  for (let step = 0; step < 240 && game.state.phase !== 'gameOver'; step += 1) game.update(STEP);
+  assert.equal(game.state.phase, 'gameOver');
+  runFor(game, 1);
+}
+
+test('a game-over restart of a two-seat run keeps two seats and resets a down seat 2', async () => {
+  const harness = await startTwoSeats();
+  const { game, input } = harness;
+  game.seats[1].weapons.collect('scatter');
+  reachTwoSeatGameOver(harness, { seatTwoDown: true });
+  assert.equal(game.seats[1].down, true);
+  input.state.bomb = true;
+  game.update(STEP);
+  assert.equal(game.state.phase, 'playing');
+  assert.equal(game.playerCount, 2);
+  const second = game.seats[1];
+  assert.equal(second.down, false);
+  assert.equal(second.aliveCount, 12);
+  assert.equal(second.weapons.armed, 'base');
+  assert.equal(game.state.seats[1].down, false);
+  assert.equal(game.state.seats[1].reviveKills, 0);
+});
+
+test('a stats frame issued before a co-op restart kills none of the fresh ships', async () => {
+  const harness = await startTwoSeats();
+  const { game, simulation, input } = harness;
+  reachTwoSeatGameOver(harness, { seatTwoDown: false });
+  const staleSequence = simulation.frameSequence;
+  input.state.bomb = true;
+  game.update(STEP);
+  assert.equal(game.state.phase, 'playing');
+  simulation.scriptedStats.push(stats({ frameSequence: staleSequence, swarmHitMask: SWARM_WIPE_MASK, ...SECOND_WIPE }));
+  game.update(STEP);
+  assert.equal(game.state.phase, 'playing');
+  assert.deepEqual(game.seats.map((seat) => seat.aliveCount), [12, 12]);
+  assert.deepEqual(game.seats.map((seat) => seat.down), [false, false]);
+});

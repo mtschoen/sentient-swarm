@@ -150,6 +150,17 @@ async function runA(browser, server) {
   expect(await page.evaluate(() => window.__murmuration.coop.playerCount) === 2, 'A: the shoulder button did not join seat 2');
   const banner = await page.evaluate(() => document.querySelector('.join-banner').textContent);
   expect(banner.startsWith('PLAYER 2 JOINED'), `A: the banner reads "${banner}"`);
+  // Seat 2's pad leaving while the title is open unseats seat 2 without a pause or a toast.
+  await removePad(page, 0);
+  await dispatchPadEvent(page, 'gamepaddisconnected', 0);
+  await waitFrames(page, HOLD_FRAMES);
+  expect(await page.evaluate(() => window.__murmuration.coop.playerCount) === 1, 'A: a title disconnect left seat 2 joined');
+  expect(await phaseOf(page) === 'ready', 'A: a title disconnect paused or started the run');
+  expect(await toastOf(page) !== TOAST_DISCONNECTED, 'A: a title disconnect toasted "disconnected"');
+  await addPad(page, 0);
+  await waitFrames(page, SEARCH_FRAMES);
+  await tap(page, 0, SHOULDER_BUTTON);
+  expect(await page.evaluate(() => window.__murmuration.coop.playerCount) === 2, 'A: the shoulder button did not rejoin seat 2');
   await page.keyboard.press('Enter');
   await waitFrames(page, HOLD_FRAMES);
   expect(await phaseOf(page) === 'playing', 'A: Enter did not start the run');

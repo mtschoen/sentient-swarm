@@ -22,10 +22,17 @@ export function withHaptics(effects, navigatorObject = typeof navigator === 'und
       }
       const value = target[property];
       if (typeof value !== 'function') return value;
-      if (property === 'bomb' || property === 'death') {
+      if (property === 'bomb') {
         return (...args) => {
           buzz();
-          rumble?.[property]();
+          rumble?.bomb(padForSeat ? padForSeat(args[0] ?? 0) : undefined);
+          return value.apply(target, args);
+        };
+      }
+      if (property === 'death') {
+        return (...args) => {
+          buzz();
+          rumble?.death();
           return value.apply(target, args);
         };
       }

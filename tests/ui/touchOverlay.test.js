@@ -83,3 +83,17 @@ test('withHaptics routes pickup and seatDown to the seat pad and seatDown works 
   solo.seatDown(0);
   assert.deepEqual(calls, ['death 2', 'pickup undefined', 'death undefined']);
 });
+
+test('withHaptics rumbles the bomb on the pad of the seat that bombed, and on no pad in solo', () => {
+  const calls = [];
+  const rumble = { bomb: (padIndex) => calls.push(`bomb ${padIndex}`) };
+  const padForSeat = (seat) => (seat === 1 ? 4 : 2);
+  const wrapped = withHaptics({ bomb: (...args) => calls.push(`effect ${args.length}`) }, {}, rumble, { padForSeat });
+  wrapped.bomb(1);
+  wrapped.bomb(0);
+  assert.deepEqual(calls, ['bomb 4', 'effect 1', 'bomb 2', 'effect 1']);
+  calls.length = 0;
+  const solo = withHaptics({ bomb: (...args) => calls.push(`effect ${args.length}`) }, {}, rumble, { padForSeat: () => undefined });
+  solo.bomb();
+  assert.deepEqual(calls, ['bomb undefined', 'effect 0']);
+});

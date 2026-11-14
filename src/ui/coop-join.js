@@ -6,6 +6,7 @@ import { createJoinBanner } from './join-banner.js';
 export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorObject = navigator, documentObject = document }) {
   const seatJoin = new SeatJoin();
   const banner = createJoinBanner(menuElement, { documentObject });
+  let titleWasOpen = false;
   const gamepads = () => Array.from(navigatorObject.getGamepads?.() ?? []);
 
   function seatPad(padIndex) {
@@ -15,6 +16,7 @@ export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorOb
 
   return {
     update({ titleOpen }) {
+      titleWasOpen = titleOpen;
       const outcome = seatJoin.poll(gamepads(), { open: titleOpen });
       if (outcome === 'joined') {
         seatPad(seatJoin.seatTwoPad);
@@ -37,13 +39,21 @@ export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorOb
       if (seat === 1) return seatJoin.seatTwoPad ?? undefined;
       return seatJoin.joined ? input.seatOnePadIndex() : undefined;
     },
+    // True when seat 2's pad left mid-run (the page pauses and toasts). At the title it unseats seat 2 instead.
     handleDisconnect(padIndex) {
-      return seatJoin.joined && padIndex === seatJoin.seatTwoPad;
+      if (!(seatJoin.joined && padIndex === seatJoin.seatTwoPad)) return false;
+      if (!titleWasOpen) return true;
+      seatJoin.reset();
+      seatPad(null);
+      banner.update({ joined: false, visible: true });
+      return false;
     },
     handleConnect(padIndex) {
       const reconnected = seatJoin.reconnect(padIndex, gamepads());
-      if (reconnected) seatPad(padIndex);
-      return reconnected || (seatJoin.joined && padIndex === seatJoin.seatTwoPad);
+      const sameIndex = seatJoin.joined && padIndex === seatJoin.seatTwoPad;
+      // Seating primes the menu input, so a pad that wakes with a button down never confirms.
+      if (reconnected || sameIndex) seatPad(padIndex);
+      return reconnected || sameIndex;
     },
   };
 }

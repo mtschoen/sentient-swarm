@@ -74,6 +74,7 @@ test('a disconnect of seat 2 pad is reported and the returning pad reclaims the 
   state.gamepads = [pad(0), pad(1, [0])];
   join.update({ titleOpen: true });
   assert.equal(join.handleDisconnect(0), false);
+  join.update({ titleOpen: false });
   state.gamepads = [pad(0), null];
   assert.equal(join.handleDisconnect(1), true);
   state.gamepads = [pad(0), null, pad(2)];

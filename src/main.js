@@ -137,7 +137,7 @@ async function boot() {
   // on the game state rumbles them.
   let liveSettings = settings;
   const rumble = createRumble({ isEnabled: () => liveSettings.rumble });
-  const lifeWatcher = createLifeWatcher(rumble);
+  const lifeWatcher = createLifeWatcher(rumble, () => coopJoin?.padForSeat(0));
   // Press-to-join state; seat 2's pad also picks the rumble target (coopJoin is created with the menus).
   let coopJoin = null;
   game = await Game.create({

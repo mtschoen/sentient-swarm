@@ -58,11 +58,11 @@ export function createRumble({ navigatorObject = typeof navigator === 'undefined
 
 // The game has no extra-life cue, so a rise in lives while playing (not a restart, which resets
 // them from a different phase) is detected from the game state each rendered frame.
-export function createLifeWatcher(rumble) {
+export function createLifeWatcher(rumble, padForSeatOne = () => undefined) {
   let previous = null;
   return {
     update({ phase, lives }) {
-      if (phase === 'playing' && previous?.phase === 'playing' && lives > previous.lives) rumble.extraLife();
+      if (phase === 'playing' && previous?.phase === 'playing' && lives > previous.lives) rumble.extraLife(padForSeatOne());
       previous = { phase, lives };
     },
   };
