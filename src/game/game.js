@@ -65,24 +65,21 @@
 // holds the alive target at fraction of capacity in place of the play ramp. setWatch(null) leaves
 // it; start() (the lab's Play) leaves it too.
 import { Projectiles } from './projectiles.js';
-import { PlayerShip } from './player.js';
+import { PlayerSeat, SWARM_PICKUP_RADIUS } from './player-seat.js';
 import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND } from './weaponTypes.js';
-import { WeaponState } from './weapons.js';
 import { PickupDirector } from './pickups.js';
 import { Awards, ScoreKeeper } from './score.js';
 import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
 import { TimeWarp } from './time-warp.js';
-import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS, PlayerSwarm, SWARM_SHIP_RADIUS } from './player-swarm.js';
+import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS, SWARM_SHIP_RADIUS } from './player-swarm.js';
 import { blendedPoint } from './swarm-blend.js';
-import { SwarmFire } from './swarm-fire.js';
 import { SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../sim/spawner.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
 import { SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
 import { Camera, bombRadiusForView, cameraFocus } from './camera.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
-const NO_AIM = Object.freeze({ x: 0, y: 0 });
 const NO_SWARM_HITS = Object.freeze([]);
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
 const RING_IMPULSE_STRENGTH = 0.3;
@@ -93,7 +90,7 @@ export const DEFAULT_PICKUP_BLAST_RADIUS = 1.5;
 // Player swarm spike: a lost ship ripples the warp grid; a swarm ship collects pickups this close;
 // the run has one life, lost when the last swarm ship dies (so the death clear and game over follow).
 const SWARM_SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
-export const SWARM_PICKUP_RADIUS = 0.2;
+export { SWARM_PICKUP_RADIUS };
 const SWARM_RUN_LIVES = 1;
 
 function createRunState() {
@@ -159,27 +156,21 @@ export class Game {
     // The renderer draws around this camera (Viewport.setCamera with camera.sample); followCamera
     // moves it every update.
     this.camera = new Camera({ centerX: WORLD_WIDTH / 2, centerY: WORLD_HEIGHT / 2 });
-    this.player = new PlayerShip({ bounds: this.worldBounds });
-    this.weapons = new WeaponState({ random });
+    // One seat per player; the first is the solo player.
+    this.seats = [new PlayerSeat({ index: 0, random, bounds: this.worldBounds })];
     this.pickups = new PickupDirector({ random, bounds: this.worldBounds });
     this.score = new ScoreKeeper({ capacity });
     this.awards = new Awards();
     this.run = createRunState();
     // The player swarm replaces the ship: the ship's position is the controlled point it seeks.
-    this.swarm = new PlayerSwarm({ random, bounds: this.worldBounds });
     this.initialSwarmShips = INITIAL_SWARM_SHIPS;
-    this.swarm.reset(this.player.position.x, this.player.position.y, this.initialSwarmShips);
-    this.swarmFire = new SwarmFire();
+    this.seats[0].reset(this.initialSwarmShips);
     this.fireLog = null;
-    // Reused each update: the swarm's attack-run controls (firing, unit aim).
-    this.swarmControls = { firing: false, aimX: 0, aimY: 0 };
     this.latestStats = null;
     // This update's read-back stats (the newest frame, kills summed over every frame read), or null.
     this.freshStats = null;
     // Both only grow: stats frames and hit sequences are monotonic across respawns and restarts.
     this.lastScoredFrameSequence = 0;
-    this.bombHeld = false;
-    this.firingHeld = false;
     this.paused = false;
     this.startsOnGesture = true;
     // Set by LabMode while the lab is open (Watch or Play); lab mixes are not real play.
@@ -221,6 +212,17 @@ export class Game {
     });
     this.removeProjectilePass = simulation.registerPass((encoder, context) => this.projectiles.encode(encoder, context));
   }
+
+  // The first seat's modules: the solo player (browser checks and the lab read these names).
+  get player() { return this.seats[0].player; }
+  get swarm() { return this.seats[0].swarm; }
+  get swarmFire() { return this.seats[0].swarmFire; }
+  get weapons() { return this.seats[0].weapons; }
+  get swarmControls() { return this.seats[0].swarmControls; }
+  get firingHeld() { return this.seats[0].firingHeld; }
+  set firingHeld(held) { this.seats[0].firingHeld = held; }
+  get bombHeld() { return this.seats[0].bombHeld; }
+  set bombHeld(held) { this.seats[0].bombHeld = held; }
 
   get state() {
     return {
@@ -345,19 +347,18 @@ export class Game {
   resume() {
     if (!this.paused) return;
     this.paused = false;
-    this.bombHeld = true;
-    this.firingHeld = true;
+    for (const seat of this.seats) {
+      seat.bombHeld = true;
+      seat.firingHeld = true;
+    }
   }
 
   resetModules() {
     this.score.reset();
     this.awards = new Awards();
-    this.weapons.dropAll();
     this.pickups.reset();
-    this.player.respawn();
-    this.swarm.reset(this.player.position.x, this.player.position.y, this.initialSwarmShips);
+    this.seats.forEach((seat) => seat.reset(this.initialSwarmShips));
     this.followCamera(0, { cut: true });
-    this.swarmFire.reset();
     this.spawnPressure.reset();
     this.spawnDirector.reset();
     this.timeWarp.end();
@@ -408,21 +409,16 @@ export class Game {
     }
 
     const playing = this.run.phase === RunPhase.Playing;
-    const controls = this.controlsFrom(inputState);
+    const seat = this.seats[0];
+    const controls = seat.controlsFrom(inputState);
     if (playing) {
-      const limited = this.weapons.armed === 'beam' && this.beamTurnRevolutionsPerSecondValue > 0;
-      const maximumTurnRadians = limited ? this.beamTurnRevolutionsPerSecondValue * 2 * Math.PI * deltaSeconds : Infinity;
-      this.player.update(deltaSeconds, controls, { maximumTurnRadians });
+      seat.steer(deltaSeconds, controls, { beamTurnRevolutionsPerSecond: this.beamTurnRevolutionsPerSecondValue });
     }
     else if (this.watching) this.moveWatchPoint(deltaSeconds, inputState, controls);
     const { x, y } = this.player.position;
     const swarmFiring = playing && controls.firing;
-    const aimLength = Math.hypot(this.player.aim.x, this.player.aim.y);
-    const swarmControls = this.swarmControls;
-    swarmControls.firing = swarmFiring;
-    swarmControls.aimX = aimLength > 0 ? this.player.aim.x / aimLength : 0;
-    swarmControls.aimY = aimLength > 0 ? this.player.aim.y / aimLength : 0;
-    this.swarm.update(deltaSeconds, x, y, swarmControls);
+    const swarmControls = seat.swarmControls;
+    seat.flock(deltaSeconds, swarmFiring);
     this.followCamera(deltaSeconds);
 
     this.pickups.update(deltaSeconds, {
@@ -434,7 +430,7 @@ export class Game {
       densityAt: this.densityAt,
     });
     if (playing) {
-      const collected = this.collectPickup(x, y);
+      const collected = seat.collectPickup(this.pickups);
       if (collected !== null) {
         const timeWarp = collected === 'timewarp';
         if (timeWarp) {
@@ -451,23 +447,11 @@ export class Game {
       }
     }
 
-    const aim = this.player.aim;
     // The kind and tier this frame fires at; the update itself drops to base on expiry.
-    const firedKind = this.weapons.armed;
-    const firedTier = this.weapons.tier;
-    const fire = this.weapons.update(deltaSeconds, { firing: playing && controls.firing, aimX: aim.x, aimY: aim.y, x, y });
-    const railTier = this.weapons.railTier;
-    const swarmShots = this.swarmFire.distribute(fire, this.swarm.ships, { x, y }, this.swarm.centroid, {
-      firing: swarmFiring,
-      aimX: swarmControls.aimX,
-      aimY: swarmControls.aimY,
-      deltaSeconds,
-      kind: firedKind,
-      tier: firedTier,
-    });
+    const { fire, shots: swarmShots, kind: firedKind, tier: firedTier, railTier } = seat.fire(deltaSeconds, { playing, firing: controls.firing });
     // The fire log (?debug=fire, main.js): why the swarm is silent while fire is held.
     this.fireLog?.sample(deltaSeconds, {
-      phase: this.run.phase, inputFiring: controls.firing, armed: firedKind, report: this.swarmFire.report,
+      phase: this.run.phase, inputFiring: controls.firing, armed: firedKind, report: seat.swarmFire.report,
       aimX: swarmControls.aimX, aimY: swarmControls.aimY, moveX: inputState.move.x, moveY: inputState.move.y,
     });
     swarmShots.spawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
@@ -526,19 +510,6 @@ export class Game {
     const { radius, bounds } = this.player;
     this.player.positionX = clamp(pointer.x, bounds.minX + radius, bounds.maxX - radius);
     this.player.positionY = clamp(pointer.y, bounds.minY + radius, bounds.maxY - radius);
-  }
-
-  // Stick or touch aim wins while it is pushed; otherwise the mouse aims from the ship to the
-  // pointer. A pointer on top of the ship gives no aim, so the ship keeps its last one.
-  controlsFrom(inputState) {
-    let aim = inputState.aim;
-    if (aim.x === 0 && aim.y === 0 && inputState.pointerWorld) {
-      const offsetX = inputState.pointerWorld.x - this.player.position.x;
-      const offsetY = inputState.pointerWorld.y - this.player.position.y;
-      const length = Math.hypot(offsetX, offsetY);
-      aim = length > this.player.radius ? { x: offsetX / length, y: offsetY / length } : NO_AIM;
-    }
-    return { move: inputState.move, aim, firing: inputState.firing || inputState.pointerPrimaryDown };
   }
 
   // No spawns and no gates between death and respawn: the arena stays clear for the pause.
@@ -607,17 +578,6 @@ export class Game {
       this.score.recordHit();
       this.effects?.death();
     }
-  }
-
-  // A pickup at the controlled point, else at the first swarm ship close enough; null for none.
-  collectPickup(x, y) {
-    const atPoint = this.pickups.collect(x, y);
-    if (atPoint !== null) return atPoint;
-    for (const ship of this.swarm.ships) {
-      const collected = this.pickups.collect(ship.x, ship.y, SWARM_PICKUP_RADIUS);
-      if (collected !== null) return collected;
-    }
-    return null;
   }
 
   handleAction(action) {
