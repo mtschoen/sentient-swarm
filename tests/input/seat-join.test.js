@@ -108,3 +108,37 @@ test('reset empties the seat and primes again', () => {
   assert.equal(join.joined, false);
   assert.equal(join.poll([pad(0), pad(1, [0])], { open: true }), null, 'primes on the first call after a reset');
 });
+
+test('a pad that first appears with A down joins on that poll', () => {
+  const join = primed([pad(0)]);
+  assert.equal(join.poll([pad(0), pad(1, [0])], { open: true }), 'joined');
+  assert.equal(join.seatTwoPad, 1);
+});
+
+test("seat 2's pad returning with R1 held does not leave", () => {
+  const join = primed([pad(0), pad(1)]);
+  join.poll([pad(0), pad(1, [0])], { open: true });
+  assert.equal(join.poll([pad(0), null], { open: true }), null);
+  assert.equal(join.poll([pad(0), pad(1, [5])], { open: true }), null);
+  assert.equal(join.joined, true);
+  assert.equal(join.poll([pad(0), pad(1)], { open: true }), null);
+  assert.equal(join.poll([pad(0), pad(1, [5])], { open: true }), 'left');
+});
+
+test('a pad seated by reconnect with R1 held does not leave on the next poll', () => {
+  const join = primed([pad(0), pad(1)]);
+  join.poll([pad(0), pad(1, [0])], { open: true });
+  join.poll([pad(0), null], { open: true });
+  const returned = [pad(0), null, pad(2, [5])];
+  assert.equal(join.reconnect(2, returned), true);
+  assert.equal(join.poll(returned, { open: true }), null);
+  assert.equal(join.seatTwoPad, 2);
+  assert.equal(join.poll(returned, { open: true }), null);
+});
+
+test('a pad that appears while the title is closed is primed when it reopens', () => {
+  const join = primed([pad(0)]);
+  assert.equal(join.poll([pad(0), pad(1, [5])], { open: false }), null);
+  assert.equal(join.poll([pad(0), pad(1, [5])], { open: true }), null);
+  assert.equal(join.joined, false);
+});

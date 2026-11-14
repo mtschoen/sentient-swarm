@@ -82,3 +82,16 @@ test('a disconnect of seat 2 pad is reported and the returning pad reclaims the 
   assert.equal(join.padForSeat(1), 2);
   assert.equal(join.handleConnect(3), false, 'seat 2 pad is connected again');
 });
+
+test('handleConnect is true for seat 2 pad under a new or the same index, false for any other pad', () => {
+  const { join, state } = setup();
+  assert.equal(join.handleConnect(1), false, 'nobody joined');
+  state.gamepads = [pad(0), pad(1, [0])];
+  join.update({ titleOpen: true });
+  state.gamepads = [pad(0), pad(1)];
+  assert.equal(join.handleConnect(1), true, 'the same index returns');
+  assert.equal(join.handleConnect(0), false);
+  state.gamepads = [pad(0), null, pad(2)];
+  assert.equal(join.handleConnect(2), true, 'a new index takes the seat');
+  assert.equal(join.handleConnect(0), false);
+});

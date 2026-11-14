@@ -43,7 +43,7 @@ export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorOb
     handleConnect(padIndex) {
       const reconnected = seatJoin.reconnect(padIndex, gamepads());
       if (reconnected) seatPad(padIndex);
-      return reconnected;
+      return reconnected || (seatJoin.joined && padIndex === seatJoin.seatTwoPad);
     },
   };
 }

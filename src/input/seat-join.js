@@ -37,10 +37,13 @@ export class SeatJoin {
     for (const gamepad of gamepads) {
       if (!gamepad) continue;
       const held = now.get(gamepad.index);
+      // A pad shows in the list only after its first press, so an unseated pad that appears with a join
+      // button down joins at once. Seat 2's own pad appearing (a return) is primed instead: no leave press.
+      const appeared = !previous.has(gamepad.index);
       const before = previous.get(gamepad.index) ?? new Set();
       const fresh = (indices) => indices.some((index) => held.has(index) && !before.has(index));
       if (this.joined) {
-        if (gamepad.index === this.seatTwoPad && fresh(JOIN_BUTTON_INDICES)) {
+        if (gamepad.index === this.seatTwoPad && !appeared && fresh(JOIN_BUTTON_INDICES)) {
           this.seatTwoPad = null;
           return 'left';
         }
