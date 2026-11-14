@@ -1,8 +1,8 @@
 // Over 500 lines: the capsule, ring and beam entry points share the kill and grid walk helpers here.
 // Projectile collision against the spatial grid, run after projectiles_step.wgsl on the freshly
 // integrated agents. The grid was built from the step's input agents, so cell membership is one
-// step stale while distances use current positions. Every kind pierces except the sidewinder, which
-// detonates on its first kill (below); a base bullet (kind bullet) with extra of 1 or more (the
+// step stale while distances use current positions. Every kind pierces except the sidewinder and the
+// pulse orb, which detonate on their first kill (below); a base bullet (kind bullet) with extra of 1 or more (the
 // lab's base gun kill budget, task C6b; 0 is unlimited, the default) stops killing once it has
 // spent extra kills, writes the rest back into extra and dies at 0. Its thread is the only one
 // walking it, so a private counter is exact.
@@ -21,6 +21,10 @@
 //   pulse ring (flag PROJECTILE_FLAG_MISSILE_RING, lifetime MISSILE_RING_LIFETIME, so it grows to
 //   half a pulse ring) at its position clamped to the arena bounds, counted in stats ringsThisFrame and
 //   lastRingX/Y as an orb's detonation is; the rings entry then collides it. A miss flies on.
+// - pulseOrb: walked with a kill budget of 1 too. If it killed, its slot is rewritten in place as
+//   a full pulse ring (RING_LIFETIME, no missile flag) the same way, so the ring opens where the
+//   orb met the swarm; an orb that passed through bursts only at the end of its flight, far from
+//   where it was aimed. A miss flies on to projectiles_step.wgsl's detonations.
 // - pulseRing: skipped here, see rings.
 // Entry rings, a few workgroups (RING_WORKGROUP_COUNT in projectiles.js): every workgroup scans the
 // slots for alive pulse rings (at most MAXIMUM_LISTED_RINGS), then all the dispatch's threads walk
@@ -315,7 +319,8 @@ fn main(
       if (budgeted) {
         killBudget = u32(projectile.extra);
       }
-      let detonates = projectile.kind == PROJECTILE_KIND_SIDEWINDER;
+      let missile = projectile.kind == PROJECTILE_KIND_SIDEWINDER;
+      let detonates = missile || projectile.kind == PROJECTILE_KIND_PULSE_ORB;
       if (detonates) {
         killBudget = 1u;
       }
@@ -327,9 +332,9 @@ fn main(
         ring.previousPosition = ring.position;
         ring.velocity = vec2f(0.0, 0.0);
         ring.radius = RING_START_RADIUS;
-        ring.lifetime = MISSILE_RING_LIFETIME;
+        ring.lifetime = select(RING_LIFETIME, MISSILE_RING_LIFETIME, missile);
         ring.extra = RING_GROWTH_SPEED;
-        ring.flags = projectile.flags | PROJECTILE_FLAG_MISSILE_RING;
+        ring.flags = select(projectile.flags, projectile.flags | PROJECTILE_FLAG_MISSILE_RING, missile);
         projectiles[slot] = ring;
         if (atomicAdd(&stats[STAT_RINGS_THIS_FRAME], 1u) == 0u) {
           atomicStore(&stats[STAT_LAST_RING_X], bitcast<u32>(ring.position.x));
