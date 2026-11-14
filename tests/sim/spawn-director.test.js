@@ -296,3 +296,98 @@ test('with narrow bounds every gate opens and drifts inside the bounds, centered
   }
   assert.ok(insideChecks > 60 * 40 * 2, `only ${insideChecks} gate checks`);
 });
+
+// Recorded from the unmodified director (seed 42, see the test below).
+const RECORDED_SOLO_TABLES = [
+  [
+    {x: 26.656750232091753, y: 3.287187671177246, radius: 0.8, emit: 0, species: 4, open: 1, telegraph: 0},
+    {x: 4.747845050664884, y: 12.95901202620739, radius: 0.8, emit: 0, species: 4, open: 1, telegraph: 0},
+    {x: 5.0929114821869454, y: 5.21022168518178, radius: 0.8, emit: 0, species: 4, open: 1, telegraph: 0},
+  ],
+  [
+    {x: 29.066473086448866, y: 6.3801561246538245, radius: 0.8, emit: 1, species: 3, open: 1, telegraph: 0},
+    {x: 6.005217791696682, y: 3.1534773652362222, radius: 0.8, emit: 0, species: 4, open: 1, telegraph: 0},
+    {x: 25.00550620285523, y: 12.537308322052011, radius: 0.8, emit: 0, species: 1, open: 1, telegraph: 0},
+  ],
+  [
+    {x: 30.617601479176685, y: 4.750278611073345, radius: 0.8, emit: 1, species: 3, open: 1, telegraph: 0},
+    {x: 26.911809788757115, y: 11.77535977982943, radius: 0.8, emit: 0, species: 1, open: 1, telegraph: 0},
+    {x: 5.202035565693478, y: 9.361257159980173, radius: 0.8, emit: 0, species: 3, open: 1, telegraph: 0},
+  ],
+  [
+    {x: 4.785213279370531, y: 9.942723025582163, radius: 0.8, emit: 0, species: 1, open: 1, telegraph: 0.19999999999997464},
+    {x: 24.83105708298706, y: 1.7348592225277235, radius: 0.8, emit: 0, species: 0, open: 1, telegraph: 0},
+    {x: 28.48066551129473, y: 11.724137078725867, radius: 0.8, emit: 0, species: 0, open: 0.5, telegraph: 0},
+    {x: 5.651669470648307, y: 8.310908777582306, radius: 0.8, emit: 0, species: 3, open: 0.499999999999566, telegraph: 0},
+  ],
+];
+
+// The solo scenario recorded from the director before the partner option existed: a seeded run
+// with a view and a turning aim, the gate table sampled every 7.5 simulated seconds.
+test('with no partner a seeded run gives the same gate tables as before the option existed', () => {
+  const director = new SpawnDirector({ random: seededRandom(42) });
+  const tables = [];
+  for (let step = 1; step <= 1800; step += 1) {
+    const seconds = step * STEP_SECONDS;
+    director.update(STEP_SECONDS, {
+      ...playerAt(seconds), aimX: Math.cos(seconds), aimY: Math.sin(seconds), safeDistance: SAFE_DISTANCE, shares: EQUAL_SHARES,
+      view: { centerX: 16, centerY: 9, width: 16, height: 9 },
+    });
+    if (step % 450 === 0) tables.push(director.spawnGates.gates);
+  }
+  assert.deepEqual(tables, RECORDED_SOLO_TABLES);
+});
+
+// The partner crosses the arena opposite the player.
+function partnerAt(seconds, aim = { aimX: 0, aimY: 0 }) {
+  return { x: WORLD_WIDTH / 2 - 8 * Math.sin(seconds * 0.3), y: WORLD_HEIGHT / 2 - 4 * Math.sin(seconds * 0.5), ...aim };
+}
+
+test('emitting gates never lie within the safe radius plus their radius of either player', () => {
+  const director = new SpawnDirector({ random: seededRandom(7) });
+  let emittingSteps = 0;
+  for (let step = 1; step <= 60 * 180; step += 1) {
+    const seconds = step * STEP_SECONDS;
+    const partner = partnerAt(seconds);
+    director.update(STEP_SECONDS, { ...playerAt(seconds), partner, safeDistance: SAFE_DISTANCE, shares: EQUAL_SHARES });
+    const { playerX, playerY } = playerAt(seconds);
+    director.gates.filter((gate) => gate.emit > 0).forEach((gate) => {
+      emittingSteps += 1;
+      const nearest = Math.min(Math.hypot(gate.x - playerX, gate.y - playerY), Math.hypot(gate.x - partner.x, gate.y - partner.y));
+      assert.ok(nearest >= SAFE_DISTANCE + gate.radius, `gate at ${gate.x}, ${gate.y} emits ${nearest} from the nearer player`);
+    });
+  }
+  assert.ok(emittingSteps > 500, `only ${emittingSteps} emitting gate steps`);
+});
+
+test('a gate in the partner aim lane does not emit a wave', () => {
+  const director = new SpawnDirector({ random: seededRandom(8), gateCount: 4 });
+  const partner = { x: 2, y: WORLD_HEIGHT / 2, aimX: 1, aimY: 0 };
+  const laneContext = { playerX: partner.x, playerY: partner.y, aimX: partner.aimX, aimY: partner.aimY };
+  let emittingInLane = 0;
+  let emittingOutside = 0;
+  for (let step = 0; step < 60 * 60; step += 1) {
+    director.update(STEP_SECONDS, { playerX: WORLD_WIDTH - 2, playerY: 2, partner, safeDistance: SAFE_DISTANCE, shares: EQUAL_SHARES });
+    director.gates.forEach((gate) => {
+      if (gate.emit <= 0) return;
+      if (inAimLane(gate, gate.radius, laneContext)) emittingInLane += 1;
+      else emittingOutside += 1;
+    });
+  }
+  assert.equal(emittingInLane, 0);
+  assert.ok(emittingOutside > 500, `${emittingOutside} emitting steps outside the lane`);
+});
+
+test('a gate the partner walks into starts closing', () => {
+  const context = { playerX: 2, playerY: WORLD_HEIGHT / 2, safeDistance: SAFE_DISTANCE, shares: EQUAL_SHARES };
+  const alone = new SpawnDirector({ random: seededRandom(10), driftSpeed: 0 });
+  const withPartner = new SpawnDirector({ random: seededRandom(10), driftSpeed: 0 });
+  alone.update(STEP_SECONDS, context);
+  withPartner.update(STEP_SECONDS, context);
+  const target = withPartner.gates[0];
+  assert.equal(target.closing, false);
+  alone.update(STEP_SECONDS, context);
+  withPartner.update(STEP_SECONDS, { ...context, partner: { x: target.x, y: target.y, aimX: 0, aimY: 0 } });
+  assert.equal(alone.gates[0].closing, false);
+  assert.equal(target.closing, true);
+});

@@ -19,6 +19,9 @@
 // gate enters the lane; the bank waits for the next wave), and new gates avoid the lane, so the
 // lane the player is shooting open does not refill from its far end; a gate that stays in the lane
 // for AIM_LANE_CLOSE_SECONDS closes, so a new one opens elsewhere. The first fill ignores the lane.
+// Partner (co-op): with context.partner, a second player { x, y, aimX, aimY }, every distance to
+// the player is to the nearer of the two and a gate in either player's aim lane is in the lane;
+// without one every expression is the solo one and the same random numbers are drawn.
 // Time is the summed deltaSeconds of update (injected), randomness the injected random.
 // Bounds: gates place, drift and bounce inside context.bounds (the playable world bounds,
 // Game.worldBounds; WORLD_BOUNDS by default).
@@ -114,6 +117,26 @@ export function inAimLane(point, radius, { playerX, playerY, aimX, aimY }) {
   return along > 0 && across < AIM_LANE_HALF_WIDTH + radius;
 }
 
+// The offset from the nearer player to the point, and its length. With no partner this is the
+// player's offset and distance exactly.
+function nearestPlayerOffset(point, { playerX, playerY, partner }) {
+  const offsetX = point.x - playerX;
+  const offsetY = point.y - playerY;
+  const distance = Math.hypot(offsetX, offsetY);
+  if (!partner) return { offsetX, offsetY, distance };
+  const partnerOffsetX = point.x - partner.x;
+  const partnerOffsetY = point.y - partner.y;
+  const partnerDistance = Math.hypot(partnerOffsetX, partnerOffsetY);
+  return partnerDistance < distance ? { offsetX: partnerOffsetX, offsetY: partnerOffsetY, distance: partnerDistance } : { offsetX, offsetY, distance };
+}
+
+// inAimLane for the player or, with a partner, either player.
+function inAnyAimLane(point, radius, context) {
+  if (inAimLane(point, radius, context)) return true;
+  const { partner } = context;
+  return Boolean(partner) && inAimLane(point, radius, { playerX: partner.x, playerY: partner.y, aimX: partner.aimX, aimY: partner.aimY });
+}
+
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
@@ -153,12 +176,14 @@ export class SpawnDirector {
   // favored species), continuous (no waves; see the header), aimX and aimY (the player's aim, a
   // unit vector or zero for none), bounds (the playable rectangle { minX, minY, maxX, maxY, width,
   // height }, WORLD_BOUNDS when omitted), view (the camera's { centerX, centerY, width, height }, or
-  // null for none; see the header's view ring).
+  // null for none; see the header's view ring), partner (a second player { x, y, aimX, aimY }, or
+  // null for none; see the header).
   update(deltaSeconds, {
     bounds = WORLD_BOUNDS, playerX = (bounds.minX + bounds.maxX) / 2, playerY = (bounds.minY + bounds.maxY) / 2,
     safeDistance = 0, filling = false, shares = [], continuous = false, aimX = 0, aimY = 0, view = null,
+    partner = null,
   } = {}) {
-    const context = { playerX, playerY, safeDistance, shares, aimX, aimY, bounds, view };
+    const context = { playerX, playerY, safeDistance, shares, aimX, aimY, bounds, view, partner };
     this.filling = filling;
     this.continuous = continuous;
     if (this.needsInitialGates) {
@@ -227,9 +252,8 @@ export class SpawnDirector {
   // A gate may emit a wave when fully open, not closing, outside the player's safe radius and
   // outside the aim lane.
   canEmit(gate, context) {
-    const { playerX, playerY, safeDistance } = context;
-    return this.envelope(gate) >= 1 && !gate.closing && Math.hypot(gate.x - playerX, gate.y - playerY) >= safeDistance + gate.radius
-      && !inAimLane(gate, gate.radius, context);
+    return this.envelope(gate) >= 1 && !gate.closing && nearestPlayerOffset(gate, context).distance >= context.safeDistance + gate.radius
+      && !inAnyAimLane(gate, gate.radius, context);
   }
 
   // The farthest gate that can emit, with some randomness, avoiding the gate of the previous wave
@@ -241,7 +265,7 @@ export class SpawnDirector {
     let best = null;
     let bestScore = -Infinity;
     for (const gate of pool) {
-      const score = Math.hypot(gate.x - context.playerX, gate.y - context.playerY) + this.random() * 4;
+      const score = nearestPlayerOffset(gate, context).distance + this.random() * 4;
       if (score > bestScore) {
         best = gate;
         bestScore = score;
@@ -253,11 +277,9 @@ export class SpawnDirector {
   advanceGate(gate, deltaSeconds, context) {
     gate.age += deltaSeconds;
     if (!gate.closing && gate.age >= gate.lifetime - GATE_FADE_SECONDS) this.beginClosing(gate);
-    const toGateX = gate.x - context.playerX;
-    const toGateY = gate.y - context.playerY;
-    const playerDistance = Math.hypot(toGateX, toGateY);
+    const { offsetX: toGateX, offsetY: toGateY, distance: playerDistance } = nearestPlayerOffset(gate, context);
     if (!gate.closing && playerDistance < context.safeDistance + gate.radius) this.beginClosing(gate);
-    gate.laneSeconds = inAimLane(gate, gate.radius, context) ? gate.laneSeconds + deltaSeconds : 0;
+    gate.laneSeconds = inAnyAimLane(gate, gate.radius, context) ? gate.laneSeconds + deltaSeconds : 0;
     if (!gate.closing && gate.laneSeconds >= AIM_LANE_CLOSE_SECONDS) this.beginClosing(gate);
     if (!gate.closing && context.view && this.farFromView(gate, context.view)) this.beginClosing(gate);
     let { driftX, driftY } = gate;
@@ -342,7 +364,7 @@ export class SpawnDirector {
   // PLACEMENT_DRAW_ATTEMPTS draws (a view in a world corner leaves about a quarter of the ring
   // inside the world), or null for none.
   bestPlacement(context, draw) {
-    const { playerX, playerY, safeDistance } = context;
+    const { safeDistance } = context;
     let best = null;
     let bestScore = -Infinity;
     let candidates = 0;
@@ -350,10 +372,10 @@ export class SpawnDirector {
       const point = draw();
       if (point === null) continue;
       candidates += 1;
-      const playerDistance = Math.hypot(point.x - playerX, point.y - playerY);
+      const playerDistance = nearestPlayerOffset(point, context).distance;
       const spacing = this.gates.reduce((nearest, gate) => Math.min(nearest, Math.hypot(point.x - gate.x, point.y - gate.y)), PREFERRED_GATE_SPACING);
       const placeable = playerDistance >= safeDistance + this.schedule.gateRadius;
-      const laneCost = inAimLane(point, this.schedule.gateRadius, context) ? AIM_LANE_PENALTY : 0;
+      const laneCost = inAnyAimLane(point, this.schedule.gateRadius, context) ? AIM_LANE_PENALTY : 0;
       const score = (placeable ? 1000 : 0) - laneCost + playerDistance * PLACEMENT_DISTANCE_WEIGHT + spacing + this.random() * 2;
       if (score > bestScore) {
         best = point;
