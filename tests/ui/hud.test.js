@@ -285,3 +285,46 @@ test('layout centres the pause button on the arena top edge', () => {
   assert.equal(pause.style.left, '483px');
   assert.equal(pause.style.top, '34px');
 });
+
+test('solo state, with no seats or one seat, keeps the seat rows hidden', () => {
+  const { hud, root } = setup();
+  const seats = find(root, 'hud-seats');
+  hud.update(STATE);
+  assert.equal(seats.hidden, true);
+  hud.update({ ...STATE, seats: [{ ships: 12, armed: 'base', tier: 1, down: false }] });
+  assert.equal(seats.hidden, true);
+});
+
+test('two seats show P1 and P2 rows with ships and weapon in the seat colors', () => {
+  const { hud, root } = setup();
+  hud.update({
+    ...STATE,
+    seats: [
+      { ships: 12, armed: 'base', tier: 1, down: false },
+      { ships: 30, armed: 'scatter', tier: 2, down: false },
+    ],
+  });
+  const seats = find(root, 'hud-seats');
+  assert.equal(seats.hidden, false);
+  const [first, second] = seats.children;
+  assert.equal(first.textContent, 'P1 ▲ 12 BASE');
+  assert.equal(second.textContent, 'P2 ▲ 30 SCATTER II');
+  assert.equal(first.style.color, '#ffffff');
+  assert.equal(second.style.color, 'hsl(130, 90%, 65%)');
+  assert.equal(find(root, 'hud-weapon').textContent, 'RAIL III');
+});
+
+test('a downed seat reads DOWN with its revive progress', () => {
+  const { hud, root } = setup();
+  hud.update({
+    ...STATE,
+    seats: [
+      { ships: 12, armed: 'base', tier: 1, down: false },
+      { ships: 0, armed: 'base', tier: 1, down: true, reviveKills: 37, reviveKillsNeeded: 100 },
+    ],
+  });
+  const seats = find(root, 'hud-seats');
+  assert.equal(seats.hidden, false);
+  assert.equal(seats.children[1].textContent, 'P2 DOWN 37/100');
+  assert.equal(seats.children[0].textContent, 'P1 ▲ 12 BASE');
+});

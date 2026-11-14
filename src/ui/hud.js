@@ -1,3 +1,6 @@
+import { SEAT_COLORS } from '../game/seat-colors.js';
+import { LIFE_ICON, seatReadoutText, tierNumeral, weaponText } from './hud-seat.js';
+
 // HUD: plain DOM in the letterbox bands (or along the arena top edge when the bands are narrow,
 // as on a phone in landscape). Everything is pointer-events none except the game-over overlay,
 // so it never steals touches from the touch sticks.
@@ -18,8 +21,6 @@ export const BAND_PADDING_CSS_PIXELS = 16;
 export const MINIMUM_BAND_FONT_CSS_PIXELS = 13;
 const TOP_OPACITY = '0.6';
 const RESTART_GUARD_MILLISECONDS = 700;
-const ROMAN = ['', 'I', 'II', 'III'];
-const LIFE_ICON = '▲';
 const BOMB_ICON = '●';
 
 // Font sizes (CSS px) that fit each band element's widest text into a band of this width.
@@ -37,15 +38,10 @@ const OFFER_LABELS = Object.freeze({ timewarp: 'TIME WARP' });
 
 const groupDigits = (value) => Math.round(value).toLocaleString('en-US');
 
-function weaponText(armed, tier) {
-  if (!armed || armed === 'base') return 'BASE';
-  return `${armed.toUpperCase()} ${ROMAN[tier] ?? tier}`;
-}
-
 // The rail turrets (owner ruling R29), for example RAIL x3, with the tier numeral above tier 1.
 function turretText(count, tier) {
   if (!(count > 0)) return '';
-  return tier > 1 ? `RAIL x${count} ${ROMAN[tier] ?? tier}` : `RAIL x${count}`;
+  return tier > 1 ? `RAIL x${count} ${tierNumeral(tier)}` :`RAIL x${count}`;
 }
 
 const PAUSE_BUTTON_SIZE_CSS_PIXELS = 34;
@@ -84,8 +80,17 @@ export function createHud(rootElement, {
   const offer = make('div', 'hud-offer');
   const lives = make('div', 'hud-lives');
   const bombs = make('div', 'hud-bombs');
+  // Two seat rows under the icons, shown for a whole two-player run only (the seat count is fixed
+  // for a run, so nothing pops during play); a downed seat changes only its row's text.
+  const seatRows = SEAT_COLORS.map(({ css }) => {
+    const seatRow = make('div', 'hud-seat');
+    seatRow.style.color = css;
+    return seatRow;
+  });
+  const seats = row('hud-seats', seatRows);
+  seats.hidden = true;
   const leftPanel = row('hud-panel hud-left', [score, multiplier]);
-  const rightPanel = row('hud-panel hud-right', [weapon, turrets, warp, charge, offer, row('hud-icons', [lives, bombs])]);
+  const rightPanel = row('hud-panel hud-right', [weapon, turrets, warp, charge, offer, row('hud-icons', [lives, bombs]), seats]);
 
   const finalScore = make('div', 'hud-final-score');
   const playAgain = make('button', 'hud-play-again', 'Play again');
@@ -162,6 +167,9 @@ export function createHud(rootElement, {
       // Player swarm spike: lives is the swarm size (up to 256), shown as one icon and the count.
       setText(lives, `${LIFE_ICON} ${Math.max(0, state.lives ?? 0)}`);
       setText(bombs, BOMB_ICON.repeat(Math.max(0, state.bombs ?? 0)));
+      const seatStates = state.seats?.length === 2 ? state.seats : null;
+      seats.hidden = !seatStates;
+      if (seatStates) seatRows.forEach((seatRow, index) => setText(seatRow, seatReadoutText(seatStates[index], index)));
       const offered = state.offeredType;
       setText(offer, offered ? `NEXT ${OFFER_LABELS[offered] ?? String(offered).toUpperCase()}` : '');
       const armedNow = state.armed && state.armed !== 'base';
