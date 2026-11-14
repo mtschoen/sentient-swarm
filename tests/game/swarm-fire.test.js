@@ -183,3 +183,16 @@ test('no ships fire nothing, and reset restarts the rotation and the cooldowns',
   assert.ok(fire.cooldowns.every((cooldown) => cooldown === 0));
   assert.ok(fire.scheduled.every((flag) => flag === 0));
 });
+
+test('fire held through a weapon change follows the new weapon\'s law at once: no burst arming pulse, no silence after it', () => {
+  const fire = new SwarmFire({ random: seededRandom() });
+  const ships = shipsHeading(60);
+  fireFor(fire, ships, 2);
+  const pulse = fireFor(fire, ships, 10, { ...AIM_RIGHT, kind: 'pulse', tier: 1 });
+  const largestPulseUpdate = Math.max(...pulse.map((spawns) => spawns.length));
+  assert.ok(largestPulseUpdate <= 2, `${largestPulseUpdate} orbs in one update as pulse arms`);
+  assert.ok(Math.abs(total(pulse) / 33 - 1) < 0.2, `${total(pulse)} orbs in 10 s, law 33`);
+  const base = fireFor(fire, ships, 0.5);
+  const expected = aggregateShotsPerSecond(BASE_SHOTS_PER_SECOND, 0.4, 60) * 0.5;
+  assert.ok(Math.abs(total(base) / expected - 1) < 0.15, `${total(base)} base shots in the half second after pulse, law ${expected}`);
+});

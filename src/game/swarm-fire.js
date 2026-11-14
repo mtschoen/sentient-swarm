@@ -9,10 +9,14 @@
 //   the aim and its own cooldown has run out. The heading is where the ship points, which
 //   src/game/swarm-facing.js turns off its course toward the aim within a limit, so shots come from
 //   ships on any course once they have turned, in a spread around the aim.
-// - Cooldowns carry their remainder: a fired ship's cooldown grows by the interval instead of
-//   resetting to it, so the measured aggregate matches the law whatever the step length. Each ship's
-//   first shot after the trigger goes down is phased by slotHash over its interval, so shots are a
-//   continuous drizzle. Ready ships are served in rotation so no slot starves.
+// - Cooldowns are counted in the ship's own intervals, not seconds (1 = one whole interval of the
+//   weapon armed now), so a change of interval while the trigger is held (another kind or tier, a
+//   grown or shrunk swarm) rescales every wait at once: counted in seconds, a ship that had just
+//   fired a pulse orb kept the pulse's wait of many seconds into the base gun, and the swarm fell
+//   silent. They carry their remainder: a fired ship's cooldown grows by 1 instead of resetting, so
+//   the measured aggregate matches the law whatever the step length. Each ship's first shot after
+//   the trigger goes down is phased by slotHash over its interval, so shots are a continuous
+//   drizzle. Ready ships are served in rotation so no slot starves.
 //   MAXIMUM_SWARM_SPAWNS_PER_UPDATE is a backstop for a huge delta.
 // - Rail turrets: each turret volley fires once from one ship in rotation, at full size, in the
 //   turrets' own directions around the aim (the turrets belong to the swarm as a whole).
@@ -49,15 +53,11 @@ export class SwarmFire {
   // Returns { spawns, turretSpawns, beam }. No ships: nothing fires.
   distribute(fire, ships, origin, centroid, { firing, aimX, aimY, deltaSeconds, kind, tier }) {
     const result = { spawns: [], turretSpawns: [], beam: null };
-    // A remainder is at most one step: a waiting ship does not bank shots.
-    for (let slot = 0; slot < MAXIMUM_SWARM_SHIPS; slot += 1) {
-      this.cooldowns[slot] = Math.max(-deltaSeconds, this.cooldowns[slot] - deltaSeconds);
-    }
     const count = ships.length;
     if (count === 0) return result;
     if (!firing) this.scheduled.fill(0);
     const recipe = firing ? swarmShotRecipe(kind, tier) : null;
-    if (recipe !== null) this.fireShips(result.spawns, ships, Math.atan2(aimY, aimX), recipe);
+    if (recipe !== null) this.fireShips(result.spawns, ships, Math.atan2(aimY, aimX), recipe, deltaSeconds);
     if (fire.turretSpawns.length > 0) {
       const ship = ships[this.rotation % count];
       this.rotation = (this.rotation + 1) % count;
@@ -69,17 +69,23 @@ export class SwarmFire {
     return result;
   }
 
-  fireShips(spawns, ships, aimAngle, recipe) {
+  fireShips(spawns, ships, aimAngle, recipe, deltaSeconds) {
     const count = ships.length;
     // The jitter is rate-neutral: the intervals are scaled so the ships' rates still sum to the law.
     let inverseSum = 0;
     for (const ship of ships) inverseSum += 1 / COOLDOWN_FACTORS[ship.slot];
     const interval = (perShipInterval(recipe.baseShotsPerSecond, recipe.exponent, count) * inverseSum) / count;
-    // Phase every ship that has not been scheduled since the trigger went down.
     for (const ship of ships) {
-      if (this.scheduled[ship.slot] === 1) continue;
+      if (this.scheduled[ship.slot] === 1) {
+        // This step's share of the ship's interval. A remainder is at most one step: a waiting
+        // ship does not bank shots.
+        const elapsed = deltaSeconds / (interval * COOLDOWN_FACTORS[ship.slot]);
+        this.cooldowns[ship.slot] = Math.max(-elapsed, this.cooldowns[ship.slot] - elapsed);
+        continue;
+      }
+      // Phase every ship that has not been scheduled since the trigger went down.
       this.scheduled[ship.slot] = 1;
-      this.cooldowns[ship.slot] = slotHash(ship.slot, 21) * interval * COOLDOWN_FACTORS[ship.slot];
+      this.cooldowns[ship.slot] = slotHash(ship.slot, 21);
     }
     const start = this.rotation % count;
     let last = -1;
@@ -91,7 +97,7 @@ export class SwarmFire {
       offset -= 2 * Math.PI * Math.round(offset / (2 * Math.PI));
       if (Math.abs(offset) > SWARM_FIRE_CONE_RADIANS) continue;
       if (spawns.length + recipe.pelletCount > MAXIMUM_SWARM_SPAWNS_PER_UPDATE) break;
-      this.cooldowns[ship.slot] += interval * COOLDOWN_FACTORS[ship.slot];
+      this.cooldowns[ship.slot] += 1;
       this.appendShot(spawns, ship, recipe);
       last = index;
     }
