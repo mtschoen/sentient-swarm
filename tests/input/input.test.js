@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createInput } from '../../src/input/input.js';
+import { firstPadIndex, readGamepad, readGamepadAt } from '../../src/input/gamepad.js';
 
 function createFakeCanvas(width = 1000, height = 500) {
   const canvas = new EventTarget();
@@ -277,4 +278,60 @@ test('gamepad triggers (buttons 6 and 7) bomb like the face buttons', () => {
   gamepads[0] = { axes: [0, 0, 0, 0], buttons: Array.from({ length: 8 }, (unused, index) => ({ pressed: index === 4 || index === 5 })) };
   input.update();
   assert.equal(input.state.bomb, false);
+});
+
+function fakePad(index, overrides = {}) {
+  return {
+    index,
+    axes: [0, 0, 0, 0],
+    buttons: Array.from({ length: 17 }, () => ({ pressed: false })),
+    ...overrides,
+  };
+}
+
+test('with seat 2 on pad 0, seat 1 reads pad 1 and seat 2 reads pad 0', () => {
+  const { gamepads, input } = createFixture();
+  gamepads.length = 0;
+  gamepads.push(fakePad(0, { axes: [0, 0, 0, 1] }), fakePad(1, { axes: [1, 0, 0, 0] }));
+  input.setSeatTwoPad(0);
+  input.update();
+  assert.equal(input.seatTwoPad, 0);
+  assert.equal(input.seatOnePadIndex(), 1);
+  assert.deepEqual(input.state.move, { x: 1, y: 0 });
+  assert.equal(input.state.firing, false);
+  assert.deepEqual(input.seatTwoState.aim, { x: 0, y: 1 });
+  assert.equal(input.seatTwoState.firing, true);
+  assert.equal(input.seatTwoState.pointerWorld, null);
+  assert.equal(input.seatTwoState.pointerPrimaryDown, false);
+  assert.equal(input.seatTwoState.touching, false);
+});
+
+test('one pad and nobody joined reads exactly as before; once it joins seat 2, seat 1 ignores it', () => {
+  const { gamepads, input } = createFixture();
+  gamepads.length = 0;
+  gamepads.push(fakePad(3, { axes: [0, 1, 0, 0] }));
+  input.update();
+  assert.deepEqual(input.state.move, { x: 0, y: 1 });
+  assert.equal(input.seatOnePadIndex(), 3);
+  input.setSeatTwoPad(3);
+  input.update();
+  assert.deepEqual(input.state.move, { x: 0, y: 0 });
+  assert.equal(input.seatOnePadIndex(), null);
+  assert.deepEqual(input.seatTwoState.move, { x: 0, y: 1 });
+  input.setSeatTwoPad(null);
+  input.update();
+  assert.deepEqual(input.state.move, { x: 0, y: 1 });
+  assert.deepEqual(input.seatTwoState.move, { x: 0, y: 0 });
+});
+
+test('readGamepadAt reads by Gamepad.index, not array position, and is neutral for a missing pad', () => {
+  const navigatorObject = { getGamepads: () => [null, fakePad(2, { axes: [0, 0, 1, 0] })] };
+  const found = readGamepadAt(navigatorObject, 2);
+  assert.deepEqual(found.aim, { x: 1, y: 0 });
+  assert.equal(found.firing, true);
+  const missing = readGamepadAt(navigatorObject, 1);
+  assert.deepEqual(missing, { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, firing: false, bomb: false });
+  assert.equal(firstPadIndex(navigatorObject), 2);
+  assert.equal(firstPadIndex(navigatorObject, 2), null);
+  assert.equal(readGamepad(navigatorObject, { excludeIndex: 2 }).firing, false);
 });

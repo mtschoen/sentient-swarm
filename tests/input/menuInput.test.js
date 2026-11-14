@@ -76,3 +76,45 @@ test('dispose removes the key listener', () => {
   input.dispose();
   assert.equal(listeners.keydown.size, 0);
 });
+
+function twoPadSetup() {
+  const windowObject = { addEventListener() {}, removeEventListener() {} };
+  const makePad = (index) => ({ index, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false })) });
+  const first = makePad(0);
+  const second = makePad(1);
+  const navigatorObject = { getGamepads: () => [first, second] };
+  return { input: createMenuInput({ windowObject, navigatorObject }), first, second };
+}
+
+test('without an extra pad a second pad gives no menu actions; with it, its Options pauses and the same button on two pads is two presses', () => {
+  const { input, first, second } = twoPadSetup();
+  input.poll();
+  second.buttons[9].pressed = true;
+  assert.deepEqual(input.poll(), []);
+  second.buttons[9].pressed = false;
+  input.poll();
+  input.setExtraPad(1);
+  input.poll();
+  second.buttons[9].pressed = true;
+  assert.deepEqual(input.poll(), ['pause']);
+  second.buttons[9].pressed = false;
+  input.poll();
+  first.buttons[0].pressed = true;
+  second.buttons[0].pressed = true;
+  assert.deepEqual(input.poll(), ['confirm', 'confirm']);
+});
+
+test('a button held on the extra pad when it is set gives no action until released and pressed again', () => {
+  const { input, first, second } = twoPadSetup();
+  input.poll();
+  first.buttons[1].pressed = true;
+  second.buttons[5].pressed = true;
+  second.buttons[0].pressed = true;
+  assert.deepEqual(input.poll(), ['back', 'altConfirm']);
+  input.setExtraPad(1);
+  assert.deepEqual(input.poll(), []);
+  second.buttons[0].pressed = false;
+  input.poll();
+  second.buttons[0].pressed = true;
+  assert.deepEqual(input.poll(), ['confirm']);
+});

@@ -10,10 +10,16 @@ const VIBRATE_MILLISECONDS = 10;
 // Wraps the effects the game calls so the bomb and the death also buzz the phone, where the
 // platform supports it, and rumble the gamepad (src/input/rumble.js) on bomb, death and pickup.
 // Everything else passes through untouched.
-export function withHaptics(effects, navigatorObject = typeof navigator === 'undefined' ? {} : navigator, rumble = null) {
+export function withHaptics(effects, navigatorObject = typeof navigator === 'undefined' ? {} : navigator, rumble = null, { padForSeat = null } = {}) {
   const buzz = () => navigatorObject.vibrate?.(VIBRATE_MILLISECONDS);
   return new Proxy(effects, {
     get(target, property) {
+      if (property === 'seatDown') {
+        return (seat) => {
+          rumble?.death(padForSeat?.(seat));
+          return target.seatDown?.(seat);
+        };
+      }
       const value = target[property];
       if (typeof value !== 'function') return value;
       if (property === 'bomb' || property === 'death') {
@@ -25,7 +31,7 @@ export function withHaptics(effects, navigatorObject = typeof navigator === 'und
       }
       if (property === 'pickup') {
         return (...args) => {
-          rumble?.pickup();
+          rumble?.pickup(padForSeat ? padForSeat(args[1] ?? 0) : undefined);
           return value.apply(target, args);
         };
       }

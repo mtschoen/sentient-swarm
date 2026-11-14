@@ -1,6 +1,6 @@
 import { createPointerSource } from './pointer.js';
 import { createTouchSource } from './touch.js';
-import { readGamepad } from './gamepad.js';
+import { firstPadIndex, readGamepad, readGamepadAt } from './gamepad.js';
 import { createKeyboardSource } from './keyboard.js';
 
 export class InputState {
@@ -26,12 +26,14 @@ function sumClamped(first, second) {
 
 export function createInput(canvas, viewport, { windowObject = window, navigatorObject = navigator } = {}) {
   const state = new InputState();
+  const seatTwoState = new InputState();
+  let seatTwoPad = null;
   const pointer = createPointerSource(canvas, viewport, windowObject);
   const touch = createTouchSource(canvas);
   const keyboard = createKeyboardSource(windowObject);
 
   function update() {
-    const gamepad = readGamepad(navigatorObject);
+    const gamepad = readGamepad(navigatorObject, { excludeIndex: seatTwoPad });
     state.move = sumClamped(sumClamped(gamepad.move, touch.move), keyboard.move);
     state.aim = sumClamped(gamepad.aim, touch.aim);
     state.firing = gamepad.firing || touch.firing;
@@ -40,6 +42,11 @@ export function createInput(canvas, viewport, { windowObject = window, navigator
     pointer.update();
     state.pointerWorld = pointer.world;
     state.pointerPrimaryDown = pointer.primaryDown;
+    const seatTwo = seatTwoPad === null ? null : readGamepadAt(navigatorObject, seatTwoPad);
+    seatTwoState.move = seatTwo?.move ?? { x: 0, y: 0 };
+    seatTwoState.aim = seatTwo?.aim ?? { x: 0, y: 0 };
+    seatTwoState.firing = seatTwo?.firing ?? false;
+    seatTwoState.bomb = seatTwo?.bomb ?? false;
   }
 
   function dispose() {
@@ -48,5 +55,14 @@ export function createInput(canvas, viewport, { windowObject = window, navigator
     keyboard.dispose();
   }
 
-  return { state, update, dispose, touch };
+  return {
+    state,
+    seatTwoState,
+    update,
+    dispose,
+    touch,
+    setSeatTwoPad(padIndex) { seatTwoPad = padIndex; },
+    get seatTwoPad() { return seatTwoPad; },
+    seatOnePadIndex() { return firstPadIndex(navigatorObject, seatTwoPad); },
+  };
 }

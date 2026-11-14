@@ -18,9 +18,12 @@ function supports(actuator, type) {
   return actuator.type === type;
 }
 
-function findActuator(navigatorObject) {
+// padIndex undefined: the first pad with an actuator; a number: the pad with that index only; null: none.
+function findActuator(navigatorObject, padIndex) {
+  if (padIndex === null) return null;
   const gamepads = navigatorObject.getGamepads?.() ?? [];
   for (const gamepad of gamepads) {
+    if (padIndex !== undefined && gamepad?.index !== padIndex) continue;
     const actuator = gamepad?.vibrationActuator;
     if (actuator && typeof actuator.playEffect === 'function') return actuator;
   }
@@ -40,9 +43,9 @@ function play(actuator, { duration, strong, weak }) {
 }
 
 export function createRumble({ navigatorObject = typeof navigator === 'undefined' ? {} : navigator, isEnabled = () => true } = {}) {
-  const fire = (name) => () => {
+  const fire = (name) => (padIndex) => {
     if (!isEnabled()) return;
-    const actuator = findActuator(navigatorObject);
+    const actuator = findActuator(navigatorObject, padIndex);
     if (!actuator) return;
     try {
       play(actuator, RUMBLE_PATTERNS[name]);

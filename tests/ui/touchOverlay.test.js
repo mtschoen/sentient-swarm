@@ -58,3 +58,28 @@ test('the bomb button lets go of a held bomb when it hides as the phase leaves p
   assert.equal(overlay.bombButton.hidden, true);
   assert.equal(touch.held, false, 'released when hidden');
 });
+
+test('withHaptics routes pickup and seatDown to the seat pad and seatDown works without an effects method', () => {
+  const calls = [];
+  const rumble = {
+    bomb: () => {},
+    death: (padIndex) => calls.push(`death ${padIndex}`),
+    pickup: (padIndex) => calls.push(`pickup ${padIndex}`),
+  };
+  const padForSeat = (seat) => (seat === 1 ? 4 : 2);
+  const effects = { pickup: () => calls.push('effect pickup'), seatDown: (seat) => calls.push(`effect seatDown ${seat}`) };
+  const wrapped = withHaptics(effects, {}, rumble, { padForSeat });
+  wrapped.pickup('rail', 1);
+  wrapped.pickup('rail');
+  wrapped.seatDown(1);
+  assert.deepEqual(calls, ['pickup 4', 'effect pickup', 'pickup 2', 'effect pickup', 'death 4', 'effect seatDown 1']);
+
+  calls.length = 0;
+  const bare = withHaptics({ pickup: () => {} }, {}, rumble, { padForSeat });
+  bare.seatDown(0);
+  assert.deepEqual(calls, ['death 2']);
+  const solo = withHaptics({ pickup: () => {} }, {}, rumble);
+  solo.pickup('rail');
+  solo.seatDown(0);
+  assert.deepEqual(calls, ['death 2', 'pickup undefined', 'death undefined']);
+});

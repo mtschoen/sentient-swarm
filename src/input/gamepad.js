@@ -20,18 +20,46 @@ function readStick(gamepad, horizontalIndex, deadZone) {
   return { x: x * scale, y: y * scale, magnitude: Math.min(magnitude, 1) };
 }
 
-export function readGamepad(navigatorObject, { deadZone = configuredDeadZone } = {}) {
-  const result = { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, firing: false, bomb: false };
-  const gamepads = navigatorObject.getGamepads?.() ?? [];
-  for (const gamepad of gamepads) {
-    if (!gamepad) continue;
-    const left = readStick(gamepad, 0, deadZone);
-    const right = readStick(gamepad, 2, deadZone);
-    result.move = { x: left.x, y: left.y };
-    result.aim = { x: right.x, y: right.y };
-    result.firing = right.magnitude > FIRE_THRESHOLD;
-    if (BOMB_BUTTON_INDICES.some((index) => gamepad.buttons[index]?.pressed)) result.bomb = true;
-    break;
+function neutralReading() {
+  return { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, firing: false, bomb: false };
+}
+
+// The one per-pad reader: sticks through the dead zone, the right stick's push fires, any bomb button bombs.
+function readPad(gamepad, deadZone) {
+  const left = readStick(gamepad, 0, deadZone);
+  const right = readStick(gamepad, 2, deadZone);
+  return {
+    move: { x: left.x, y: left.y },
+    aim: { x: right.x, y: right.y },
+    firing: right.magnitude > FIRE_THRESHOLD,
+    bomb: BOMB_BUTTON_INDICES.some((index) => gamepad.buttons[index]?.pressed),
+  };
+}
+
+function padList(navigatorObject) {
+  return navigatorObject.getGamepads?.() ?? [];
+}
+
+// The first connected pad whose index is not excludeIndex (null excludes none).
+function firstPad(navigatorObject, excludeIndex) {
+  for (const gamepad of padList(navigatorObject)) {
+    if (gamepad && gamepad.index !== excludeIndex) return gamepad;
   }
-  return result;
+  return null;
+}
+
+export function firstPadIndex(navigatorObject, excludeIndex = null) {
+  return firstPad(navigatorObject, excludeIndex)?.index ?? null;
+}
+
+export function readGamepad(navigatorObject, { deadZone = configuredDeadZone, excludeIndex = null } = {}) {
+  const gamepad = firstPad(navigatorObject, excludeIndex);
+  return gamepad ? readPad(gamepad, deadZone) : neutralReading();
+}
+
+export function readGamepadAt(navigatorObject, padIndex, { deadZone = configuredDeadZone } = {}) {
+  for (const gamepad of padList(navigatorObject)) {
+    if (gamepad && gamepad.index === padIndex) return readPad(gamepad, deadZone);
+  }
+  return neutralReading();
 }

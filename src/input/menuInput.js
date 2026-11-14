@@ -32,6 +32,7 @@ export function createMenuInput({ windowObject = window, navigatorObject = navig
   let queued = [];
   let held = new Set();
   let primed = false;
+  let extraPad = null;
 
   const onKeyDown = (event) => {
     if (isFormField(event.target) || event.repeat) return;
@@ -40,26 +41,37 @@ export function createMenuInput({ windowObject = window, navigatorObject = navig
   };
   windowObject.addEventListener('keydown', onKeyDown);
 
-  // The names of the controls pressed right now: 'button:<index>' and 'stick:<direction>'.
+  function addPadControls(now, gamepad, prefix) {
+    gamepad.buttons.forEach((button, index) => { if (button?.pressed) now.add(`${prefix}button:${index}`); });
+    const x = gamepad.axes[0] ?? 0;
+    const y = gamepad.axes[1] ?? 0;
+    if (y > STICK_THRESHOLD) now.add(`${prefix}stick:down`);
+    if (y < -STICK_THRESHOLD) now.add(`${prefix}stick:up`);
+    if (x > STICK_THRESHOLD) now.add(`${prefix}stick:right`);
+    if (x < -STICK_THRESHOLD) now.add(`${prefix}stick:left`);
+  }
+
+  // The names of the controls pressed right now: 'button:<index>' and 'stick:<direction>'. With an
+  // extra pad set, the first other pad and the extra pad both read, as 'pad<index>:button:<n>' and
+  // 'pad<index>:stick:<direction>'.
   function readHeld() {
     const now = new Set();
-    for (const gamepad of navigatorObject.getGamepads?.() ?? []) {
-      if (!gamepad) continue;
-      gamepad.buttons.forEach((button, index) => { if (button?.pressed) now.add(`button:${index}`); });
-      const x = gamepad.axes[0] ?? 0;
-      const y = gamepad.axes[1] ?? 0;
-      if (y > STICK_THRESHOLD) now.add('stick:down');
-      if (y < -STICK_THRESHOLD) now.add('stick:up');
-      if (x > STICK_THRESHOLD) now.add('stick:right');
-      if (x < -STICK_THRESHOLD) now.add('stick:left');
-      break;
+    const gamepads = [...(navigatorObject.getGamepads?.() ?? [])].filter(Boolean);
+    if (extraPad === null) {
+      if (gamepads.length > 0) addPadControls(now, gamepads[0], '');
+      return now;
     }
+    const first = gamepads.find((gamepad) => gamepad.index !== extraPad);
+    if (first) addPadControls(now, first, `pad${first.index}:`);
+    const extra = gamepads.find((gamepad) => gamepad.index === extraPad);
+    if (extra) addPadControls(now, extra, `pad${extra.index}:`);
     return now;
   }
 
   function gamepadActions(pressed) {
     const actions = [];
-    for (const name of pressed) {
+    for (const fullName of pressed) {
+      const name = fullName.replace(/^pad\d+:/, '');
       if (name.startsWith('stick:')) {
         actions.push(name.slice('stick:'.length));
         continue;
@@ -86,6 +98,12 @@ export function createMenuInput({ windowObject = window, navigatorObject = navig
       const actions = queued;
       queued = [];
       return actions;
+    },
+    // Seat 2's pad reads too. Whatever is held when this changes counts as held, so the press that
+    // joined never also confirms.
+    setExtraPad(padIndex) {
+      extraPad = padIndex;
+      if (primed) held = readHeld();
     },
     dispose() {
       windowObject.removeEventListener('keydown', onKeyDown);

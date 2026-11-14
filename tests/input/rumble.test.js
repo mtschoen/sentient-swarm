@@ -106,3 +106,20 @@ test('rumble survives a synchronous playEffect throw', () => {
   };
   assert.doesNotThrow(() => createRumble({ navigatorObject: navigatorWith({ vibrationActuator: triggerOnly }) }).bomb());
 });
+
+test('rumble with a pad index plays only on that pad; null plays nothing', () => {
+  const first = fakeActuator(['dual-rumble']);
+  const second = fakeActuator(['dual-rumble']);
+  const rumble = createRumble({ navigatorObject: navigatorWith({ index: 0, vibrationActuator: first }, { index: 1, vibrationActuator: second }) });
+  rumble.bomb(1);
+  assert.equal(first.calls.length, 0);
+  assert.equal(second.calls.length, 1);
+  rumble.death(0);
+  assert.equal(first.calls.length, 1);
+  rumble.pickup(null);
+  rumble.bomb(7);
+  assert.equal(first.calls.length, 1);
+  assert.equal(second.calls.length, 1);
+  rumble.bomb();
+  assert.equal(first.calls.length, 2, 'undefined still plays on the first pad with an actuator');
+});
