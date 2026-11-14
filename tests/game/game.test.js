@@ -6,6 +6,7 @@ import { RunPhase } from '../../src/game/run.js';
 import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND, PICKUP_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { InputState } from '../../src/input/input.js';
 import { WORLD_HEIGHT, WORLD_WIDTH, WORLD_BOUNDS, SPECIES_COUNT, SWARM_HIT_MASK_WORDS } from '../../src/sim/layout.js';
+import { CAMERA_OVERSHOOT_FRACTION } from '../../src/game/camera.js';
 import { centeredViewBounds } from '../sim/centered-view-bounds.js';
 import { INITIAL_SWARM_SHIPS, KILLS_PER_SWARM_SHIP } from '../../src/game/player-swarm.js';
 import { SWARM_FIRE_CONE_RADIANS } from '../../src/game/swarm-fire.js';
@@ -1131,8 +1132,8 @@ test('the camera follows the swarm through the dead zone, clamps at the world ed
   assert.ok(game.camera.centerX > WORLD_WIDTH / 2, `camera ${game.camera.centerX}`);
   assert.ok(game.camera.centerX < game.player.position.x, 'the camera lags the point');
   runFor(game, 4);
-  // Pinned against the right wall: the view's right edge is the world's.
-  assert.ok(Math.abs(game.camera.centerX - (WORLD_WIDTH - 8)) < 0.05, `camera ${game.camera.centerX}`);
+  // Pinned against the right wall: the view's right edge is the world's plus the overshoot.
+  assert.ok(Math.abs(game.camera.centerX - (WORLD_WIDTH - 8 + CAMERA_OVERSHOOT_FRACTION * 16)) < 0.05, `camera ${game.camera.centerX}`);
   input.state.move = { x: 0, y: 0 };
   game.restart();
   // Cut, not eased: at the new run's focus (the point and the fresh swarm around it) at once.

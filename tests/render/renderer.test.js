@@ -72,7 +72,7 @@ function createRenderer(simulation) {
   viewport.setCanvasSize(1280, 720);
   const renderer = new Renderer(gpu, { simulation, viewport, common: '', fullscreenHeader: '' });
   const pipeline = { getBindGroupLayout: () => ({}) };
-  for (const pass of [renderer.trails, renderer.glyphs, renderer.particles, renderer.warpGrid, renderer.composite]) pass.pipeline = pipeline;
+  for (const pass of [renderer.trails, renderer.glyphs, renderer.particles, renderer.warpGrid, renderer.worldBorder, renderer.composite]) pass.pipeline = pipeline;
   renderer.bloom.downsamplePipeline = pipeline;
   renderer.bloom.blurPipeline = pipeline;
   renderer.resize(1280, 720);
@@ -143,7 +143,7 @@ test('destroy destroys every texture and the pass uniform buffers', () => {
   const { renderer, log } = createRenderer(createFakeSimulation('first', 0));
   renderer.destroy();
   assert.ok(log.textures.every((texture) => texture.destroyed));
-  const uniformLabels = ['glyph-view', 'particle-view', 'warp-view', 'trail-decay', 'composite', 'bloom-blur-horizontal', 'bloom-blur-vertical'];
+  const uniformLabels = ['glyph-view', 'particle-view', 'warp-view', 'world-border-view', 'trail-decay', 'composite', 'bloom-blur-horizontal', 'bloom-blur-vertical'];
   for (const label of uniformLabels) {
     assert.ok(log.buffers.filter((buffer) => buffer.label === label).every((buffer) => buffer.destroyed), label);
   }
@@ -178,7 +178,7 @@ test('render refills the same view array per uniform buffer every frame', () => 
   renderer.render(createFakeEncoder(), { alpha: 0, time: 1, scene, impulses: [{ x: 1, y: 1, strength: 1, time: 1 }] });
   frame = 1;
   renderer.render(createFakeEncoder(), { alpha: 0, time: 2, scene });
-  const labels = ['warp-view', 'trail-decay', 'glyph-view', 'projectile-view', 'pickup-view', 'particle-view', 'ship-view', 'composite'];
+  const labels = ['warp-view', 'world-border-view', 'trail-decay', 'glyph-view', 'projectile-view', 'pickup-view', 'particle-view', 'ship-view', 'composite'];
   for (const label of labels) {
     assert.ok(frames[0].has(label) && frames[1].has(label), `${label} written in both frames`);
     assert.equal(frames[1].get(label), frames[0].get(label), `${label} reuses its array`);
