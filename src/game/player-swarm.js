@@ -6,7 +6,9 @@
 // (src/game/swarm-flocking.js: seek with arrival braking toward the point, alignment above seek,
 // short separation, cohesion and pressure from the neighbourhood), plus a per-slot temperament,
 // wander, a leash that keeps the flock controllable, and attack runs along the aim while firing.
-// Each ship's heading is its velocity; it fires along it (src/game/swarm-fire.js).
+// Each ship flies along its course (its velocity's direction) and points along its heading, which
+// turns off the course toward the aim while firing, within a limit (src/game/swarm-facing.js); it
+// fires along its heading (src/game/swarm-fire.js).
 //
 // Contact bookkeeping (player_collide.wgsl): the GPU sets bit s of a persistent hit mask when an
 // agent touches slot s, and clears it while the slot is uploaded dead or fresh. contactShips(sequence)
@@ -16,6 +18,7 @@
 // Up to MAXIMUM_SWARM_SHIPS (256) ships; update, contactShips and ships reuse their arrays and
 // objects, so a step allocates nothing.
 import { FULL_ARENA_BOUNDS, MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
+import { faceStep } from './swarm-facing.js';
 import { SWARM_CRUISE_SPEED, flockStep, temperamentFor } from './swarm-flocking.js';
 
 export { MAXIMUM_SWARM_SHIPS };
@@ -35,7 +38,7 @@ const NO_AIM = Object.freeze({ firing: false, aimX: 0, aimY: 0 });
 
 function deadSlot() {
   return {
-    alive: false, x: 0, y: 0, velocityX: 0, velocityY: 0, previousVelocityX: 0, previousVelocityY: 0, heading: 0,
+    alive: false, x: 0, y: 0, velocityX: 0, velocityY: 0, previousVelocityX: 0, previousVelocityY: 0, course: 0, heading: 0,
     bornSequence: null, bornTime: 0, ...temperamentFor(0),
   };
 }
@@ -72,7 +75,7 @@ export class PlayerSwarm {
   }
 
   // Alive ships for rendering and firing: { slot, x, y, age, heading } (age in seconds since spawn,
-  // heading in radians along the velocity). The array and its entries are reused: valid until the
+  // heading in radians, where the ship points). The array and its entries are reused: valid until the
   // next call.
   get ships() {
     const ships = this.shipList;
@@ -129,6 +132,7 @@ export class PlayerSwarm {
       y: y + Math.sin(angle) * offset,
       velocityX: Math.cos(angle) * temperament.cruiseSpeed,
       velocityY: Math.sin(angle) * temperament.cruiseSpeed,
+      course: angle,
       heading: angle,
       bornSequence: null,
       bornTime: this.time,
@@ -136,7 +140,8 @@ export class PlayerSwarm {
     return index;
   }
 
-  // controls (optional): { firing, aimX, aimY } with a unit or zero aim; firing makes attack runs.
+  // controls (optional): { firing, aimX, aimY } with a unit or zero aim; firing makes attack runs
+  // and turns the ships toward the aim.
   update(deltaSeconds, targetX, targetY, controls = NO_AIM) {
     if (!(deltaSeconds > 0)) return;
     this.targetX = targetX;
@@ -152,6 +157,7 @@ export class PlayerSwarm {
     context.aliveCount = this.aliveCountValue;
     context.bounds = this.bounds;
     flockStep(this.slots, deltaSeconds, context);
+    faceStep(this.slots, deltaSeconds, controls);
   }
 
   // One { x, y, alive, fresh } per slot for the step with this frame sequence (packSwarmShips). A

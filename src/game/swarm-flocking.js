@@ -143,9 +143,10 @@ export function homeRadiusFor(aliveCount) {
   return SWARM_HOME_RADIUS * Math.max(1, Math.sqrt(aliveCount / REFERENCE_SHIPS) * SWARM_HOME_SPREAD);
 }
 
-// Advances every alive slot by deltaSeconds. slots carry x, y, velocityX, velocityY, heading plus a
+// Advances every alive slot by deltaSeconds. slots carry x, y, velocityX, velocityY, course plus a
 // temperament; context: { targetX, targetY, firing, aimX, aimY (unit or zero), time, aliveCount,
-// bounds, margin }. Heading follows the velocity.
+// bounds, margin }. The course is the velocity's direction; where the ship points (its heading) is
+// src/game/swarm-facing.js's.
 export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX, aimY, time, aliveCount, bounds, margin }) {
   const home = homeRadiusFor(aliveCount);
   const neighborSquared = SWARM_NEIGHBOR_RADIUS * SWARM_NEIGHBOR_RADIUS;
@@ -252,8 +253,8 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
       }
     }
     const swing = ship.wander * (0.7 * Math.sin(time * ship.wanderRateOne + ship.wanderPhaseOne) + 0.3 * Math.sin(time * ship.wanderRateTwo + ship.wanderPhaseTwo));
-    desiredX += Math.cos(ship.heading + swing * 1.5) * SWARM_WANDER * maximumSpeed;
-    desiredY += Math.sin(ship.heading + swing * 1.5) * SWARM_WANDER * maximumSpeed;
+    desiredX += Math.cos(ship.course + swing * 1.5) * SWARM_WANDER * maximumSpeed;
+    desiredY += Math.sin(ship.course + swing * 1.5) * SWARM_WANDER * maximumSpeed;
     if (attacking) {
       const proximity = Math.max(0, 1 - reach / SWARM_ATTACK_REACH) * attackTurn(time, ship.attackPhase);
       desiredX += aimX * SWARM_ATTACK * proximity * maximumSpeed;
@@ -271,14 +272,14 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     let speed = Math.hypot(ship.velocityX, ship.velocityY);
     const floor = SWARM_SPEED_FLOOR * ship.cruiseSpeed;
     if (speed < EPSILON) {
-      ship.velocityX = Math.cos(ship.heading) * floor;
-      ship.velocityY = Math.sin(ship.heading) * floor;
+      ship.velocityX = Math.cos(ship.course) * floor;
+      ship.velocityY = Math.sin(ship.course) * floor;
       speed = floor;
     }
     const clamped = Math.min(maximumSpeed, Math.max(floor, speed));
     ship.velocityX *= clamped / speed;
     ship.velocityY *= clamped / speed;
-    ship.heading = Math.atan2(ship.velocityY, ship.velocityX);
+    ship.course = Math.atan2(ship.velocityY, ship.velocityX);
     ship.x = clampTo(ship.x + ship.velocityX * deltaSeconds, bounds.minX + margin, bounds.maxX - margin);
     ship.y = clampTo(ship.y + ship.velocityY * deltaSeconds, bounds.minY + margin, bounds.maxY - margin);
   }

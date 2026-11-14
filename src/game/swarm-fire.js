@@ -6,8 +6,9 @@
 //   waits for its first volley.
 // - While the player fires, a ship fires only when its heading lies within SWARM_FIRE_CONE_RADIANS of
 //   the aim and its own cooldown (the weapon's fire interval times SWARM_COOLDOWN_SCALE, with a
-//   per-slot jitter and phase from slotHash) has run out, so shots come from the ships sweeping
-//   through the aim on their attack runs, in a spread around it, staggered.
+//   per-slot jitter and phase from slotHash) has run out. The heading is where the ship points, which
+//   src/game/swarm-facing.js turns off its course toward the aim within a limit, so shots come from
+//   ships on any course once they have turned, in a spread around the aim, staggered.
 // - A global budget (a token bucket refilled at SWARM_MAXIMUM_VOLLEYS_PER_INTERVAL per fire interval,
 //   holding at most SWARM_VOLLEY_BURST) bounds total firepower and pool use whatever the swarm size;
 //   ready ships are served in rotation so no slot starves. MAXIMUM_SWARM_SPAWNS_PER_UPDATE is a
