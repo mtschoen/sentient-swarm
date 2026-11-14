@@ -36,7 +36,7 @@
 // per grid row, the column span of the outer circle minus the columns lying wholly inside the inner
 // circle, in row-major order. At most RING_CELL_BUDGET cells per ring. Each cell's agents are still
 // looped by one thread, as for capsules: the work is bounded by cell count, not by agent count.
-// Entry beam, one workgroup: slot 0 when it is an alive beam. The beam kills the sector swept since
+// Entry beam, one workgroup per beam slot (group.x is the seat): slot BEAM_SLOT + group.x when it is an alive beam. The beam kills the sector swept since
 // the previous step: from position, between the previous direction (seed, extra) and the current
 // one (velocity), both unit, over the shortest arc, out to the arena bounds edge, padded by the half width
 // (radius) around both edge rays, so a fast turn leaves no gaps between steps. A first step has
@@ -541,8 +541,8 @@ fn addRayThreat(start: vec2f, end: vec2f, firstStep: u32, stepStride: u32) {
 }
 
 @compute @workgroup_size(WORKGROUP_SIZE)
-fn beam(@builtin(local_invocation_index) localIndex: u32) {
-  let projectile = projectiles[BEAM_SLOT];
+fn beam(@builtin(workgroup_id) group: vec3u, @builtin(local_invocation_index) localIndex: u32) {
+  let projectile = projectiles[BEAM_SLOT + group.x];
   if ((projectile.flags & PROJECTILE_FLAG_ALIVE) != 0u && projectile.kind == PROJECTILE_KIND_BEAM) {
     let sector = beamSector(projectile);
     collideSector(sector, localIndex, WORKGROUP_SIZE);
