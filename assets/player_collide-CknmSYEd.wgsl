@@ -1,11 +1,12 @@
-// Player swarm contact, one workgroup per swarm slot (MAXIMUM_SWARM_SHIPS workgroups), run after
+// Player swarm contact, one workgroup per contact slot (seatCount * MAXIMUM_SWARM_SHIPS workgroups; seat
+// k's slot s is slot k * MAXIMUM_SWARM_SHIPS + s), run after
 // the registered projectile passes on the freshly integrated agents. The grid was built from the
 // step's input agents, so cell membership is one step stale while distances use current positions.
 //
-// Slot s owns bit s of the persistent swarm hit mask (stats words STAT_SWARM_HIT_MASK and the one
-// after it); only workgroup s touches that bit, so there is no cross-workgroup race. Thread 0 first
+// Slot s owns bit s of the persistent swarm hit masks (stats words STAT_SWARM_HIT_MASK + s / 32: the
+// first seat's eight words, then the second seat's eight); only workgroup s touches that bit, so there is no cross-workgroup race. Thread 0 first
 // clears the bit when the slot is dead or fresh (its first uploaded step: a ship grown into a reused
-// slot never inherits an old hit), then arms the slot when it is alive, swarm.armed is 1 and its bit
+// slot never inherits an old hit), then arms the slot when it is alive, its seat's bit in swarm.armedSeats is 1 and its bit
 // is still clear (a hit ship stays hit until the CPU reads it back and uploads the slot dead). When
 // armed, the threads walk the grid cells within cellSpan = ceil((radius + CONTACT_MARGIN) / cellSize)
 // cells of the ship's cell (capped at MAXIMUM_CELL_SPAN). An alive agent past its spawn-in frames
@@ -14,7 +15,7 @@
 // in the same step do nothing.
 //
 // Storage buffers: agents, cellCounts, cellOffsets, sortedIndices, stats, particles (pool cursor
-// in its header), species table = 7; uniforms: params, swarm.
+// in its header), species table = 7; uniforms: params, swarm (up to MAXIMUM_CONTACT_SLOTS slots).
 
 struct SwarmShip {
   position: vec2f,
@@ -25,10 +26,10 @@ struct SwarmShip {
 
 struct Swarm {
   radius: f32,
-  armed: u32,
+  armedSeats: u32,
   paddingOne: u32,
   paddingTwo: u32,
-  ships: array<SwarmShip, MAXIMUM_SWARM_SHIPS>,
+  ships: array<SwarmShip, MAXIMUM_CONTACT_SLOTS>,
 }
 
 @group(0) @binding(0) var<uniform> params: SimParams;
@@ -41,6 +42,7 @@ struct Swarm {
 @group(0) @binding(7) var<storage, read> speciesTable: array<f32>;
 @group(0) @binding(8) var<uniform> swarm: Swarm;
 
+const MAXIMUM_CONTACT_SLOTS: u32 = __MAXIMUM_CONTACT_SLOTS__u;
 const CONTACT_MARGIN: f32 = 0.02;
 const MAXIMUM_CELL_SPAN: i32 = 8;
 const SHIP_ALIVE: u32 = 1u;
@@ -91,7 +93,7 @@ fn main(@builtin(workgroup_id) group: vec3u, @builtin(local_invocation_index) lo
       atomicAnd(&stats[word], ~bit);
     }
     let clear = (atomicLoad(&stats[word]) & bit) == 0u;
-    armed = select(0u, 1u, alive && clear && swarm.armed == 1u);
+    armed = select(0u, 1u, alive && clear && ((swarm.armedSeats >> (slot / MAXIMUM_SWARM_SHIPS)) & 1u) == 1u);
   }
   if (workgroupUniformLoad(&armed) == 0u) {
     return;
