@@ -31,6 +31,7 @@ export function decodeStats(bytes) {
     lastRingX: floats[STATS_INDICES.lastRingX],
     lastRingY: floats[STATS_INDICES.lastRingY],
     swarmHitMask: values.slice(STATS_INDICES.swarmHitMask, STATS_INDICES.swarmHitMask + SWARM_HIT_MASK_WORDS),
+    secondSwarmHitMask: values.slice(STATS_INDICES.secondSwarmHitMask, STATS_INDICES.secondSwarmHitMask + SWARM_HIT_MASK_WORDS),
   };
 }
 

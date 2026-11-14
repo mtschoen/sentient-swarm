@@ -43,5 +43,19 @@ test('decodeStats reads every field by index', () => {
     lastRingX: 4.5,
     lastRingY: 2.25,
     swarmHitMask: new Uint32Array([5, 0, 0, 0, 0, 0, 0, 0x80000000]),
+    secondSwarmHitMask: new Uint32Array(SWARM_HIT_MASK_WORDS),
   });
+});
+
+test('the second swarm hit mask follows the first in the persistent tail', () => {
+  assert.equal(STATS_INDICES.secondSwarmHitMask, STATS_INDICES.swarmHitMask + SWARM_HIT_MASK_WORDS);
+  assert.equal(STATS_BYTES, 48 * 4);
+  assert.ok((STATS_INDICES.secondSwarmHitMask + SWARM_HIT_MASK_WORDS) * 4 <= STATS_BYTES);
+  assert.ok(STATS_INDICES.secondSwarmHitMask * 4 >= STATS_PERSISTENT_OFFSET_BYTES);
+  const words = new Uint32Array(STATS_BYTES / 4);
+  words[STATS_INDICES.secondSwarmHitMask] = 9;
+  words[STATS_INDICES.secondSwarmHitMask + SWARM_HIT_MASK_WORDS - 1] = 0x80000000;
+  const decoded = decodeStats(words.buffer);
+  assert.deepEqual(decoded.secondSwarmHitMask, new Uint32Array([9, 0, 0, 0, 0, 0, 0, 0x80000000]));
+  assert.deepEqual(decoded.swarmHitMask, new Uint32Array(SWARM_HIT_MASK_WORDS));
 });

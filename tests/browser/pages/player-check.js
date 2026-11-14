@@ -20,7 +20,12 @@
 //     on rings from 0.3 to 3 around the point and a pickup under it, one update collects it. Every
 //     seeded agent inside pickupBlastRadius dies and every one outside lives, the blast step's
 //     stats count them all in killsUnscored and none in killsSinceLastRead, the score stays 0,
-//     and the next step kills nothing.
+//     and the next step kills nothing;
+// (h) the second seat (after the rebuild of (f), so its persistent tail carries): a seat 2 table with
+//     slot 3 fresh on an agent sets bit 3 of secondSwarmHitMask and leaves swarmHitMask as it was;
+//     with seat 2 invulnerable a fresh seat 2 ship on an agent sets no bit while a fresh seat 1 ship
+//     on another agent still hits; after clearSwarmShips(1) the seat 2 bits stay as they were (seat 2
+//     is no longer dispatched).
 import { createGpuContext } from '/src/gpu/device.js';
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, WORLD_HEIGHT, WORLD_WIDTH, MAXIMUM_SWARM_SHIPS, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
@@ -42,10 +47,13 @@ const SPOTS = {
   slotFive: [8, 3],
   slotTwoHundred: [10, 3],
   disarmed: [12, 3],
+  seatTwoSlotThree: [4, 6],
+  seatTwoDisarmed: [6, 6],
 };
 // Agent slots: two on slot 0's spot, one each on slot 37's, slot 200's and the disarmed spot.
 const AGENTS = [
   ['slotZero', 0], ['slotZero', 1], ['slotThirtySeven', 2], ['slotTwoHundred', 3], ['disarmed', 4],
+  ['seatTwoSlotThree', 5], ['seatTwoDisarmed', 6],
 ];
 
 async function readBuffer(device, source) {
@@ -84,6 +92,9 @@ class Harness {
     this.simulation = simulation;
     this.collected = new Map();
     this.invulnerable = false;
+    // null leaves seat 2 absent; else { ships, invulnerable } is uploaded as seat 2's table.
+    this.seatTwo = null;
+    this.seatTwoUploaded = false;
   }
 
   seedAgents() {
@@ -104,6 +115,13 @@ class Harness {
   async step(ships = {}, spawnPerSpecies = new Uint32Array(SPECIES_COUNT)) {
     this.simulation.setPlayerState({ x: CENTER[0], y: CENTER[1], invulnerable: this.invulnerable });
     this.simulation.setSwarmShips(swarmTable(ships), SWARM_SHIP_RADIUS);
+    if (this.seatTwo !== null) {
+      this.simulation.setSwarmShips(swarmTable(this.seatTwo.ships), SWARM_SHIP_RADIUS, { seat: 1, invulnerable: this.seatTwo.invulnerable });
+      this.seatTwoUploaded = true;
+    } else if (this.seatTwoUploaded) {
+      this.simulation.clearSwarmShips(1);
+      this.seatTwoUploaded = false;
+    }
     const encoder = this.device.createCommandEncoder({ label: 'player-check-frame' });
     this.simulation.step(encoder, STEP_SECONDS, spawnPerSpecies);
     this.device.queue.submit([encoder.finish()]);
@@ -229,7 +247,7 @@ async function runCheck() {
   let alive = await harness.seededAlive();
   verdicts.push([maskBits(stats.swarmHitMask).join(',') === '0,37', `(a) hit mask bits ${maskBits(stats.swarmHitMask).join(',')} (need 0,37)`]);
   verdicts.push([stats.killsUnscored === 2 && stats.killsSinceLastRead === 0, `(a) contact kills ${stats.killsUnscored} unscored, ${stats.killsSinceLastRead} scored (need 2 and 0)`]);
-  verdicts.push([alive.join(',') === 'false,true,false,true,true' || alive.join(',') === 'true,false,false,true,true', `(a) seeded agents alive ${alive.join(',')} (need one of slot 0's two dead, slot 37's dead, the rest alive)`]);
+  verdicts.push([['false,true,false,true,true', 'true,false,false,true,true'].includes(alive.slice(0, 5).join(',')), `(a) seeded agents alive ${alive.join(',')} (need one of slot 0's two dead, slot 37's dead, the rest alive)`]);
 
   // (b) the bits persist and a hit ship stays hit.
   const steady = { 0: { spot: 'slotZero' }, 37: { spot: 'slotThirtySeven' }, 5: { spot: 'slotFive' } };
@@ -266,6 +284,19 @@ async function runCheck() {
   harness.simulation = simulation;
   stats = await harness.step(steady);
   verdicts.push([maskBits(stats.swarmHitMask).join(',') === '0,37', `(f) hit mask after recreateWithCapacity ${maskBits(stats.swarmHitMask).join(',')} (need 0,37)`]);
+
+  // (h) the second seat.
+  harness.seedAgents();
+  harness.seatTwo = { ships: { 3: { spot: 'seatTwoSlotThree', fresh: true } }, invulnerable: false };
+  stats = await harness.step(steady);
+  verdicts.push([maskBits(stats.secondSwarmHitMask).join(',') === '3' && maskBits(stats.swarmHitMask).join(',') === '0,37', `(h) seat 2 slot 3 fresh: second mask bits ${maskBits(stats.secondSwarmHitMask).join(',')}, first mask bits ${maskBits(stats.swarmHitMask).join(',')} (need 3 and 0,37)`]);
+  harness.seatTwo = { ships: { 3: { spot: 'seatTwoSlotThree' }, 9: { spot: 'seatTwoDisarmed', fresh: true } }, invulnerable: true };
+  stats = await harness.step({ ...steady, 200: { spot: 'slotTwoHundred', fresh: true } });
+  alive = await harness.seededAlive();
+  verdicts.push([maskBits(stats.secondSwarmHitMask).join(',') === '3' && alive[6] && maskBits(stats.swarmHitMask).includes(200) && !alive[3], `(h) seat 2 invulnerable: second mask bits ${maskBits(stats.secondSwarmHitMask).join(',')}, seat 2 agent alive ${alive[6]}, first mask bits ${maskBits(stats.swarmHitMask).join(',')}, seat 1 agent alive ${alive[3]} (need 3, true, 200 included and false)`]);
+  harness.seatTwo = null;
+  stats = await harness.step({ ...steady, 200: { spot: 'slotTwoHundred' } });
+  verdicts.push([maskBits(stats.secondSwarmHitMask).join(',') === '3', `(h) after clearSwarmShips(1): second mask bits ${maskBits(stats.secondSwarmHitMask).join(',')} (need 3)`]);
   if (lostReason !== null) verdicts.push([false, `device lost: ${lostReason}`]);
   simulation.destroy();
   verdicts.push(...await runBlastCase(gpu));

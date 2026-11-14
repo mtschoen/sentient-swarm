@@ -45,12 +45,18 @@ export const STATS_INDICES = {
   // MAXIMUM_SWARM_SHIPS bits) is set when an agent touched swarm ship slot s; the pass clears a
   // slot's bit while the slot is dead or in its first uploaded step.
   swarmHitMask: 24,
+  // Seat 2's mask (words 32 to 39) follows the first, so word swarmHitMask + slot / 32 addresses both
+  // seats' slots (seat k's slot s is contact slot k * MAXIMUM_SWARM_SHIPS + s). Words 40 to 47 are spare.
+  secondSwarmHitMask: 32,
 };
 export const STATS_PERSISTENT_WORD = 16;
-export const STATS_WORD_COUNT = 32;
+export const STATS_WORD_COUNT = 48;
 // Player swarm slots (src/game/player-swarm.js): the contact uniform and the hit mask hold this many.
 export const MAXIMUM_SWARM_SHIPS = 256;
 export const SWARM_HIT_MASK_WORDS = MAXIMUM_SWARM_SHIPS / 32;
+// Shared-screen co-op has exactly two player seats; the contact uniform holds both seats' slots.
+export const MAXIMUM_PLAYER_SEATS = 2;
+export const MAXIMUM_CONTACT_SLOTS = MAXIMUM_PLAYER_SEATS * MAXIMUM_SWARM_SHIPS;
 
 // Token values for substituteConstants on common.wgsl and every compute shader.
 export const SHADER_CONSTANTS = {
@@ -75,6 +81,7 @@ export const SHADER_CONSTANTS = {
   STAT_HIT_LATCH: STATS_INDICES.hitLatch,
   STAT_SWARM_HIT_MASK: STATS_INDICES.swarmHitMask,
   MAXIMUM_SWARM_SHIPS,
+  MAXIMUM_CONTACT_SLOTS,
   PROJECTILE_KIND_BULLET: PROJECTILE_KINDS.bullet,
   PROJECTILE_KIND_SCATTER: PROJECTILE_KINDS.scatter,
   PROJECTILE_KIND_RAIL: PROJECTILE_KINDS.rail,

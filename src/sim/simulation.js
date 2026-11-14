@@ -134,8 +134,8 @@ export class Simulation {
     this.playerContact = null;
     this.acknowledgedHitSequence = 0;
     // Player swarm slots for contact ({ x, y, alive, fresh } per slot, setSwarmShips) and their radius.
-    this.swarmShips = [];
-    this.swarmShipRadius = DEFAULT_PLAYER_RADIUS;
+    // One table, radius and invulnerable flag per seat; a seat is present once setSwarmShips named it.
+    this.swarmSeats = [{ ships: [], radius: DEFAULT_PLAYER_RADIUS, invulnerable: false }];
     this.swarmBytes = new ArrayBuffer(SWARM_UNIFORM_BYTES);
     this.killAllRequested = false;
     // { x, y, radius } for the next step's radial kill (the pickup blast), or null.
@@ -206,9 +206,29 @@ export class Simulation {
   // The player swarm for the next step's contact pass: ships is one { x, y, alive, fresh } per slot
   // (packSwarmShips in kill.js), radius the contact radius. Contact still needs setPlayerState, whose
   // invulnerable flag disarms every slot.
-  setSwarmShips(ships, radius) {
-    this.swarmShips = ships;
-    this.swarmShipRadius = radius;
+  // seat 1 (the second seat) is dispatched from its first call until clearSwarmShips(1); its
+  // invulnerable flag disarms that seat alone. The contact radius packed is seat 0's.
+  setSwarmShips(ships, radius, { seat = 0, invulnerable = false } = {}) {
+    if (seat !== 0 && seat !== 1) throw new RangeError('seat must be 0 or 1, got ' + seat);
+    this.swarmSeats[seat] = { ships, radius, invulnerable: Boolean(invulnerable) };
+  }
+
+  // Drops seat 1 so the contact pass returns to one seat; seat 0 is always present.
+  clearSwarmShips(seat) {
+    if (seat !== 1) throw new RangeError('only seat 1 can be cleared, got ' + seat);
+    this.swarmSeats.length = 1;
+  }
+
+  // The step's contact uniform and seat count. setPlayerState's invulnerable disarms every seat, else
+  // each present seat that is not itself invulnerable is armed.
+  contactUpload() {
+    const allInvulnerable = this.playerContact?.invulnerable ?? false;
+    let armedSeats = 0;
+    this.swarmSeats.forEach((seat, index) => {
+      if (!allInvulnerable && !seat.invulnerable) armedSeats |= 1 << index;
+    });
+    const bytes = packSwarmShips(this.swarmSeats.map((seat) => seat.ships), { radius: this.swarmSeats[0].radius, armedSeats }, this.swarmBytes);
+    return { bytes, seatCount: this.swarmSeats.length };
   }
 
   // Releases the hit latch once the GPU's playerHitSequence is at or below frameSequence. Never
@@ -395,8 +415,8 @@ export class Simulation {
       this.registeredPasses.forEach((encodeFunction) => encodeFunction(encoder, context));
     }
     if (this.playerContact !== null) {
-      const swarmBytes = packSwarmShips(this.swarmShips, { radius: this.swarmShipRadius, armed: !this.playerContact.invulnerable }, this.swarmBytes);
-      this.playerContactPass.encode(encoder, { ...killBuffers, gridBuffers: this.grid.buffers }, swarmBytes);
+      const { bytes, seatCount } = this.contactUpload();
+      this.playerContactPass.encode(encoder, { ...killBuffers, gridBuffers: this.grid.buffers }, bytes, seatCount);
     }
     if (killRadius > 0) this.killPass.encode(encoder, killBuffers);
     this.particlePoolValue.encodeStep(encoder, params);
@@ -581,7 +601,7 @@ export class Simulation {
     next.setPlayer(...this.playerPosition);
     next.playerContact = this.playerContact === null ? null : { ...this.playerContact };
     next.acknowledgedHitSequence = this.acknowledgedHitSequence;
-    next.setSwarmShips(this.swarmShips, this.swarmShipRadius);
+    next.swarmSeats = this.swarmSeats.map((seat) => ({ ...seat }));
     // The kills counter came over with the tail, so differences continue from the last read.
     next.lastKillsTotal = this.lastKillsTotal;
     next.killAllRequested = this.killAllRequested;
