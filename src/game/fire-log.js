@@ -1,7 +1,13 @@
 // Fire log (diagnostic, ?debug=fire): records why the swarm stopped shooting, for a device with no
 // console at hand. Pure: no DOM or clock (time is the sum of the sampled deltas). Game.update feeds
 // one sample per step; src/ui/fire-debug.js shows the result.
-// Two kinds of entry, newest last, each list capped:
+// Three kinds of entry, newest last, each list capped:
+// - thin stretches: fire held while playing is cut into windows of WINDOW_SECONDS; a window whose
+//   ship shots fall under THIN_SHARE of what the armed weapon's law gives is thin (fire that
+//   sputters without ever stopping), and thin windows in a row are one entry with their length,
+//   their worst share and the average ships in the cone and off cooldown. Windows the law gives
+//   under MINIMUM_EXPECTED_SHOTS (the beam, a pulse) are not judged. The status line counts thin
+//   windows against all judged ones.
 // - releases: the fire input went from held to not held, with the touch event that came last
 //   (src/input/touch.js lastEvent: end, cancel, blur, ...) and how long fire had been held. A
 //   release the player did not make shows here as a cancel, a blur or an end.
@@ -9,7 +15,11 @@
 //   weapon explains (SILENCE_SECONDS, or SILENCE_SHOT_INTERVALS shots of the weapon's aggregate
 //   rate when that is longer), with the reason read from SwarmFire's report at that moment, the
 //   aim and the movement.
-// A dropout with neither entry means the ships did fire: the shots were lost after SwarmFire.
+// A dropout with no entry means the ships did fire: the shots were lost after SwarmFire.
+export const WINDOW_SECONDS = 0.25;
+export const THIN_SHARE = 0.5;
+export const MINIMUM_EXPECTED_SHOTS = 2;
+export const MAXIMUM_THIN = 6;
 export const SILENCE_SECONDS = 0.35;
 export const SILENCE_SHOT_INTERVALS = 5;
 export const MAXIMUM_RELEASES = 4;
@@ -48,6 +58,11 @@ export class FireLog {
     this.heldSeconds = 0;
     this.silentSeconds = 0;
     this.openSilence = null;
+    this.thin = [];
+    this.openThin = null;
+    this.judgedWindows = 0;
+    this.thinWindows = 0;
+    this.window = { seconds: 0, expected: 0, shots: 0, inCone: 0, ready: 0, ships: 0, steps: 0 };
     this.windowSeconds = 0;
     this.windowShots = 0;
     this.shotsPerSecond = 0;
@@ -87,6 +102,8 @@ export class FireLog {
       if (this.openSilence !== null) this.openSilence.seconds = this.silentSeconds;
     }
 
+    this.judge(deltaSeconds, expected, report, `aim ${degrees(aimX, aimY)}, move ${degrees(moveX, moveY)}`);
+
     this.windowSeconds += deltaSeconds;
     this.windowShots += report.fired;
     if (this.windowSeconds >= RATE_WINDOW_SECONDS) {
@@ -94,13 +111,65 @@ export class FireLog {
       this.windowSeconds = 0;
       this.windowShots = 0;
     }
-    this.statusText = `fire ${inputFiring ? 'HELD' : 'off'} | ${phase} | ${armed} | ships ${report.ships} cone ${report.inCone} ready ${report.ready} | ${this.shotsPerSecond.toFixed(0)}/s | touch: ${touchText}`;
+    this.statusText = `fire ${inputFiring ? 'HELD' : 'off'} | ${phase} | ${armed} | ships ${report.ships} cone ${report.inCone} ready ${report.ready} | ${this.shotsPerSecond.toFixed(0)}/s | thin ${this.thinWindows}/${this.judgedWindows} | touch: ${touchText}`;
+  }
+
+  // The thin-fire windows: only time with fire held while playing and a weapon the ships fire
+  // counts, and a break (a release, the beam) starts over.
+  judge(deltaSeconds, expected, report, where) {
+    const window = this.window;
+    if (!expected || !(report.shotsPerSecond > 0)) {
+      window.seconds = 0;
+      this.openThin = null;
+      return;
+    }
+    if (window.seconds === 0) {
+      window.expected = 0;
+      window.shots = 0;
+      window.inCone = 0;
+      window.ready = 0;
+      window.ships = 0;
+      window.steps = 0;
+    }
+    window.seconds += deltaSeconds;
+    window.expected += report.shotsPerSecond * deltaSeconds;
+    window.shots += report.fired;
+    window.inCone += report.inCone;
+    window.ready += report.ready;
+    window.ships += report.ships;
+    window.steps += 1;
+    if (window.seconds < WINDOW_SECONDS) return;
+    const seconds = window.seconds;
+    window.seconds = 0;
+    if (window.expected < MINIMUM_EXPECTED_SHOTS) {
+      this.openThin = null;
+      return;
+    }
+    this.judgedWindows += 1;
+    const share = window.shots / window.expected;
+    if (share >= THIN_SHARE) {
+      this.openThin = null;
+      return;
+    }
+    this.thinWindows += 1;
+    if (this.openThin === null) {
+      this.openThin = { time: this.time - seconds, seconds: 0, share: 1, detail: '' };
+      push(this.thin, this.openThin, MAXIMUM_THIN);
+    }
+    const entry = this.openThin;
+    entry.seconds += seconds;
+    if (share < entry.share) {
+      entry.share = share;
+      const average = (sum) => (sum / window.steps).toFixed(1);
+      entry.detail = `cone ${average(window.inCone)} ready ${average(window.ready)} of ${average(window.ships)} ships; ${where}`;
+    }
   }
 
   // The lines the overlay shows: the status, then the silences and the releases, oldest first.
   lines() {
     return [
       this.statusText,
+      ...this.thin.map((entry) => `${entry.time.toFixed(1)}s THIN ${entry.seconds.toFixed(2)}s at ${Math.round(entry.share * 100)}% of the law: ${entry.detail}`),
       ...this.silences.map((entry) => `${entry.time.toFixed(1)}s SILENT ${entry.seconds.toFixed(1)}s: ${entry.reason}`),
       ...this.releases.map((entry) => `${entry.time.toFixed(1)}s ${entry.text}`),
     ];

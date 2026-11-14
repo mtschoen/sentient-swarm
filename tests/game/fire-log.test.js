@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FireLog, MAXIMUM_RELEASES, MAXIMUM_SILENCES, SILENCE_SECONDS, silenceReason } from '../../src/game/fire-log.js';
+import { FireLog, MAXIMUM_RELEASES, MAXIMUM_SILENCES, MAXIMUM_THIN, SILENCE_SECONDS, silenceReason } from '../../src/game/fire-log.js';
 
 const STEP = 1 / 60;
 const FIRING = { ships: 12, inCone: 12, ready: 1, fired: 1, shotsPerSecond: 65 };
@@ -25,8 +25,8 @@ test('silenceReason names the layer that stopped the shots', () => {
 test('steady fire logs nothing and the status line shows the measured rate', () => {
   const log = new FireLog();
   run(log, 2);
-  assert.deepEqual([log.silences, log.releases], [[], []]);
-  assert.match(log.lines()[0], /^fire HELD \| playing \| base \| ships 12 cone 12 ready 1 \| 60\/s \| touch: none$/);
+  assert.deepEqual([log.silences, log.releases, log.thin], [[], [], []]);
+  assert.match(log.lines()[0], /^fire HELD \| playing \| base \| ships 12 cone 12 ready 1 \| 60\/s \| thin 0\/7 \| touch: none$/);
 });
 
 test('held fire with no shots opens one silence with its reason, aim and movement, and its length grows', () => {
@@ -41,7 +41,7 @@ test('held fire with no shots opens one silence with its reason, aim and movemen
   run(log, 0.5);
   run(log, 1, { report: quiet({ ready: 0 }) });
   assert.equal(log.silences.length, 2, 'a shot ends a silence, the next one is its own entry');
-  assert.match(log.lines()[1], /s SILENT \d\.\ds: 0 of 12 ships/);
+  assert.ok(log.lines().some((line) => /s SILENT \d\.\ds: 0 of 12 ships/.test(line)));
 });
 
 test('a slow weapon gets longer before its quiet counts, and nothing counts off the trigger or out of play', () => {
@@ -77,4 +77,34 @@ test('both lists keep only their newest entries', () => {
   assert.equal(log.silences.length, MAXIMUM_SILENCES);
   assert.equal(log.releases.length, MAXIMUM_RELEASES);
   assert.ok(log.silences[0].time > 4);
+});
+
+test('fire that sputters without stopping is logged as one thin stretch with its worst share', () => {
+  const log = new FireLog();
+  run(log, 1);
+  // One shot every sixth step: a sixth of the 65 per second the law gives, never a long silence.
+  for (let step = 0; step < 60; step += 1) {
+    log.sample(STEP, sample({ report: step % 6 === 0 ? { ...FIRING, inCone: 2 } : quiet({ inCone: 2 }) }));
+  }
+  run(log, 1);
+  assert.equal(log.silences.length, 0);
+  assert.equal(log.thin.length, 1, 'thin windows in a row are one entry');
+  assert.ok(log.thin[0].seconds > 0.7 && log.thin[0].seconds < 1.1, `${log.thin[0].seconds}`);
+  assert.ok(log.thin[0].share < 0.3, `${log.thin[0].share}`);
+  assert.match(log.thin[0].detail, /^cone 2\.0 ready 1\.0 of 12\.0 ships; aim 0deg, move 180deg$/);
+  assert.match(log.lines()[1], /s THIN \d\.\d\ds at \d+% of the law: cone 2\.0/);
+  assert.match(log.lines()[0], /thin [34]\/1[12] \|/);
+});
+
+test('windows the law gives too few shots are not judged, and a release or the beam starts the window over', () => {
+  const log = new FireLog();
+  run(log, 3, { armed: 'pulse', report: quiet({ shotsPerSecond: 3.3 }) });
+  run(log, 3, { armed: 'beam', report: quiet({ shotsPerSecond: 0, inCone: 0, ready: 0 }) });
+  run(log, 3, { inputFiring: false, report: quiet() });
+  assert.deepEqual([log.thin.length, log.judgedWindows], [0, 0]);
+  for (let round = 0; round < 10; round += 1) {
+    run(log, 0.5, { report: quiet({ inCone: 0 }) });
+    run(log, 0.5);
+  }
+  assert.equal(log.thin.length, MAXIMUM_THIN);
 });
