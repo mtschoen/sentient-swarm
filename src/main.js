@@ -10,6 +10,8 @@ import { installCaptureHook } from './render/capture-hook.js';
 import { createLabPanel } from './ui/labPanel.js';
 import { LabMode } from './ui/lab.js';
 import { capacityOptionsUpTo, pinnedCapacityFromSearch, probeDisabledFromSearch } from './ui/panelModel.js';
+import { feelFromSearch, feelToSearchMerged } from './game/swarm-feel.js';
+import { createSwarmFeelGroup } from './ui/swarm-feel-panel.js';
 import { PRESETS } from './settings/presets.js';
 import { FrameTimeProbe } from './settings/probe.js';
 import { SettingsStore } from './settings/storage.js';
@@ -147,6 +149,9 @@ async function boot() {
   // Player swarm spike: ?swarm=N starts every run with N ships (1 to the cap), for trying a big swarm.
   const swarmParameter = new URLSearchParams(location.search).get('swarm');
   if (swarmParameter !== null) game.setInitialSwarmShips(Number(swarmParameter));
+  // Swarm feel dials (experiment): ?swarmAlignment=&swarmTightness=&swarmBuzz= over the bees default.
+  const swarmFeel = feelFromSearch(location.search);
+  game.setSwarmFeel(swarmFeel);
   window.__murmuration.game = game;
 
   // The settings panel applies every stored setting live: volumes, renderer effects, shake, trails,
@@ -180,6 +185,13 @@ async function boot() {
     },
   });
   document.body.append(settingsPanel.element);
+  // The dials sit right under the panel's title, so they are the first thing a phone player sees.
+  const swarmFeelGroup = createSwarmFeelGroup({
+    feel: swarmFeel,
+    onChange: (feel) => history.replaceState(null, '', `${location.pathname}${feelToSearchMerged(location.search, feel)}${location.hash}`),
+  });
+  settingsPanel.element.querySelector('.settings-header').after(swarmFeelGroup.element);
+  window.__murmuration.swarmFeel = swarmFeel;
   hud.settingsButton.addEventListener('click', () => openSettings());
   // O toggles the panel. Escape (and the gamepad's back and Options) close it through the menu
   // action path in render (menuRouting.js), so that press never also pauses or resumes the run.

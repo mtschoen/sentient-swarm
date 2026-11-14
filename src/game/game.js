@@ -663,6 +663,11 @@ export class Game {
   }
 
   // Ships every run starts with (the ?swarm= query parameter); the swarm resets to it now.
+  // Swarm feel dials (experiment): { alignment, tightness, buzz }, read live by the swarm's steering.
+  setSwarmFeel(feel) {
+    this.swarm.setFeel(feel);
+  }
+
   setInitialSwarmShips(count) {
     if (!(Number.isInteger(count) && count >= 1 && count <= MAXIMUM_SWARM_SHIPS)) throw new RangeError(`initial swarm ships must be an integer in [1, ${MAXIMUM_SWARM_SHIPS}], got ${count}`);
     this.initialSwarmShips = count;

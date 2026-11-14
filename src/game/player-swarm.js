@@ -19,6 +19,7 @@
 // objects, so a step allocates nothing.
 import { FULL_ARENA_BOUNDS, MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { faceStep } from './swarm-facing.js';
+import { FISH_FEEL } from './swarm-feel.js';
 import { SWARM_CRUISE_SPEED, flockStep, temperamentFor } from './swarm-flocking.js';
 
 export { MAXIMUM_SWARM_SHIPS };
@@ -63,7 +64,13 @@ export class PlayerSwarm {
     this.targetX = (bounds.minX + bounds.maxX) / 2;
     this.targetY = (bounds.minY + bounds.maxY) / 2;
     // Reused flockStep context.
-    this.context = { targetX: 0, targetY: 0, firing: false, aimX: 0, aimY: 0, time: 0, aliveCount: 0, bounds, margin: SWARM_SHIP_RADIUS };
+    this.context = { targetX: 0, targetY: 0, firing: false, aimX: 0, aimY: 0, time: 0, aliveCount: 0, bounds, margin: SWARM_SHIP_RADIUS, feel: FISH_FEEL };
+  }
+
+  // The swarm feel dials (src/game/swarm-feel.js, experiment): { alignment, tightness, buzz }; the
+  // swarm starts with FISH_FEEL (the behaviour before the dials). The object is read every step.
+  setFeel(feel) {
+    this.context.feel = feel;
   }
 
   setBounds(bounds) {

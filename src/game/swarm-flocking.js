@@ -34,6 +34,11 @@
 // Pure and allocation-free: no GPU, DOM, clock or random numbers; neighbours are an all-pairs loop
 // with a squared-distance early-out (65536 pairs at 256 ships), averaged, never summed.
 
+import { slotHash } from './swarm-hash.js';
+import { BUZZ_SPEED_SHARE, FISH_FEEL, TIGHTNESS_WELL_RATE, buzzDirection, roamScaleFor } from './swarm-feel.js';
+
+export { slotHash };
+
 // Chaser row: seek 0.6, cohesion 0.5, alignment 1.4, separation 0.9, maximumSpeed 4.5,
 // maximumTurn 0.9, pressure 0.6, flee 0.4 (dropped); steer.wgsl: STEERING_RESPONSE 4,
 // ARRIVAL_BRAKING 0.7, comfort radius 1, neighbour radius 0.1 (the default grid). Kept as is:
@@ -93,18 +98,12 @@ export const SWARM_HOME_SPREAD = 0.6;
 // World units per second; the controlled point moves at 6.
 export const SWARM_MAXIMUM_SPEED = 11;
 const REFERENCE_SHIPS = 12;
+// Swarm feel dials (src/game/swarm-feel.js, experiment): the context's feel scales alignment, adds a
+// harmonic well toward the point and shrinks the roaming reach, and adds a per-ship buzz velocity.
+const buzzScratch = { x: 0, y: 0 };
 const TWO_PI = Math.PI * 2;
 const EPSILON = 1e-9;
 const GOLDEN_FRACTION = (Math.sqrt(5) - 1) / 2;
-
-// A deterministic value in [0, 1) for a slot and a salt (an integer hash, no shared state).
-export function slotHash(slot, salt) {
-  let value = Math.imul(slot + 1, 0x9e3779b1) ^ Math.imul(salt + 1, 0x85ebca6b);
-  value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
-  value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
-  value ^= value >>> 16;
-  return (value >>> 0) / 4294967296;
-}
 
 // The per-slot temperament, from the slot index alone: some ships are quicker, wider ranging or
 // keener followers than others.
@@ -120,6 +119,7 @@ export function temperamentFor(slot) {
     wanderPhaseOne: slotHash(slot, 8) * TWO_PI,
     wanderPhaseTwo: slotHash(slot, 9) * TWO_PI,
     leash: 0.7 + 0.6 * slotHash(slot, 10),
+    slot,
     roamGroup: slot % SWARM_ROAM_GROUPS,
     attackPhase: attackPhaseFor(slot),
   };
@@ -147,10 +147,11 @@ export function homeRadiusFor(aliveCount) {
 // temperament; context: { targetX, targetY, firing, aimX, aimY (unit or zero), time, aliveCount,
 // bounds, margin }. The course is the velocity's direction; where the ship points (its heading) is
 // src/game/swarm-facing.js's.
-export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX, aimY, time, aliveCount, bounds, margin }) {
+export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX, aimY, time, aliveCount, bounds, margin, feel = FISH_FEEL }) {
   const home = homeRadiusFor(aliveCount);
   const neighborSquared = SWARM_NEIGHBOR_RADIUS * SWARM_NEIGHBOR_RADIUS;
   const cohesionSquared = SWARM_COHESION_RADIUS * SWARM_COHESION_RADIUS;
+  const roamScale = roamScaleFor(feel.tightness);
   const attacking = firing && (aimX !== 0 || aimY !== 0);
   // Velocities as of the start of the step, so alignment does not depend on slot order.
   for (const ship of slots) {
@@ -202,7 +203,7 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     // through the point's region instead of circling it.
     const axis = slotHash(ship.roamGroup, 31) * TWO_PI + SWARM_ROAM_AXIS_TURN * (slotHash(ship.roamGroup, 32) * 2 - 1) * time;
     const roamAngle = axis + Math.PI * (epoch % 2) + 0.6 * (slotHash(ship.roamGroup, 1000 + epoch) - 0.5);
-    const roamRadius = (0.6 + 0.4 * slotHash(ship.roamGroup, 2000 + epoch)) * SWARM_ROAM_REACH * home;
+    const roamRadius = (0.6 + 0.4 * slotHash(ship.roamGroup, 2000 + epoch)) * SWARM_ROAM_REACH * home * roamScale;
     const waypointX = targetX + Math.cos(roamAngle) * roamRadius - ship.x;
     const waypointY = targetY + Math.sin(roamAngle) * roamRadius - ship.y;
     const waypointDistance = Math.hypot(waypointX, waypointY);
@@ -223,6 +224,12 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
       const seek = SWARM_LEASH * ship.leash * reach * reach * maximumSpeed;
       desiredX += (towardX / distance) * seek;
       desiredY += (towardY / distance) * seek;
+      if (feel.tightness > 0) {
+        // The harmonic well: desired speed grows linearly with the distance from the point.
+        const well = Math.min(maximumSpeed, TIGHTNESS_WELL_RATE * feel.tightness * distance);
+        desiredX += (towardX / distance) * well;
+        desiredY += (towardY / distance) * well;
+      }
     }
     if (nearCount > 0) {
       desiredX += (separationX / nearCount) * SWARM_SEPARATION * maximumSpeed;
@@ -235,7 +242,7 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
       const averageVelocityX = alignmentX / alignedCount;
       const averageVelocityY = alignmentY / alignedCount;
       const averageSpeed = Math.hypot(averageVelocityX, averageVelocityY);
-      const alignment = SWARM_ALIGNMENT * ship.alignmentScale * Math.min(1, ship.cruiseSpeed / Math.max(averageSpeed, EPSILON));
+      const alignment = SWARM_ALIGNMENT * feel.alignment * ship.alignmentScale * Math.min(1, ship.cruiseSpeed / Math.max(averageSpeed, EPSILON));
       desiredX += averageVelocityX * alignment;
       desiredY += averageVelocityY * alignment;
     }
@@ -255,6 +262,12 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     const swing = ship.wander * (0.7 * Math.sin(time * ship.wanderRateOne + ship.wanderPhaseOne) + 0.3 * Math.sin(time * ship.wanderRateTwo + ship.wanderPhaseTwo));
     desiredX += Math.cos(ship.course + swing * 1.5) * SWARM_WANDER * maximumSpeed;
     desiredY += Math.sin(ship.course + swing * 1.5) * SWARM_WANDER * maximumSpeed;
+    if (feel.buzz > 0) {
+      buzzDirection(ship.slot, time, buzzScratch);
+      const buzz = feel.buzz * BUZZ_SPEED_SHARE * ship.cruiseSpeed;
+      desiredX += buzzScratch.x * buzz;
+      desiredY += buzzScratch.y * buzz;
+    }
     if (attacking) {
       const proximity = Math.max(0, 1 - reach / SWARM_ATTACK_REACH) * attackTurn(time, ship.attackPhase);
       desiredX += aimX * SWARM_ATTACK * proximity * maximumSpeed;
