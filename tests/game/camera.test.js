@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAMERA_DEAD_ZONE_FRACTION, CAMERA_SMOOTH_SECONDS, Camera, criticallyDampedStep } from '../../src/game/camera.js';
+import { CAMERA_DEAD_ZONE_FRACTION, CAMERA_OVERSHOOT_FRACTION, CAMERA_SMOOTH_SECONDS, Camera, criticallyDampedStep } from '../../src/game/camera.js';
 
 const STEP = 1 / 60;
 const BOUNDS = { minX: 0, minY: 0, maxX: 32, maxY: 18 };
@@ -59,14 +59,47 @@ test('a focus inside the dead zone does not move the camera', () => {
   assert.equal(camera.velocityX, 0);
 });
 
-test('the view never leaves the world: the camera clamps at the edges', () => {
+// The center that puts the world's edge OVERSHOOT_FRACTION of the view in from the screen edge.
+const LEFT_LIMIT = 8 - CAMERA_OVERSHOOT_FRACTION * 16;
+const BOTTOM_LIMIT = 18 - 4.5 + CAMERA_OVERSHOOT_FRACTION * 9;
+
+test('the overshoot is 12 percent of the view by default', () => {
+  assert.equal(CAMERA_OVERSHOOT_FRACTION, 0.12);
+});
+
+test('the view overshoots the world edge by the overshoot fraction and no further', () => {
   const camera = new Camera({ centerX: 16, centerY: 9 });
   run(camera, 3, -5, 40, STEP, (stepped) => {
-    assert.ok(stepped.centerX >= 8 - 1e-9, `x ${stepped.centerX}`);
-    assert.ok(stepped.centerY <= 18 - 4.5 + 1e-9, `y ${stepped.centerY}`);
+    assert.ok(stepped.centerX >= LEFT_LIMIT - 1e-9, `x ${stepped.centerX}`);
+    assert.ok(stepped.centerY <= BOTTOM_LIMIT + 1e-9, `y ${stepped.centerY}`);
   });
-  assert.ok(Math.abs(camera.centerX - 8) < 1e-3);
-  assert.ok(Math.abs(camera.centerY - 13.5) < 1e-3);
+  assert.ok(Math.abs(camera.centerX - LEFT_LIMIT) < 1e-3);
+  assert.ok(Math.abs(camera.centerY - BOTTOM_LIMIT) < 1e-3);
+  // The world edge then sits 12 percent of the view in from the screen edge: the left edge of the
+  // view is 1.92 units past x = 0.
+  assert.ok(Math.abs((camera.centerX - 8) - -CAMERA_OVERSHOOT_FRACTION * 16) < 1e-3);
+});
+
+test('the camera eases into the overshoot limit with no pop: speed falls to zero smoothly', () => {
+  const camera = new Camera({ centerX: 16, centerY: 9 });
+  let previousSpeed = Infinity;
+  let reversed = false;
+  run(camera, 4, -50, 9, STEP, (stepped) => {
+    const speed = Math.abs(stepped.velocityX);
+    if (stepped.centerX > LEFT_LIMIT + 1e-6 && stepped.centerX < 12) {
+      if (speed > previousSpeed + 1) reversed = true;
+      previousSpeed = speed;
+    }
+  });
+  assert.equal(reversed, false);
+  assert.ok(Math.abs(camera.velocityX) < 1e-2);
+});
+
+test('a focus at the world center leaves the camera there (the overshoot only widens the limit)', () => {
+  const camera = new Camera({ centerX: 16, centerY: 9 });
+  run(camera, 1, 16, 9);
+  assert.equal(camera.centerX, 16);
+  assert.equal(camera.centerY, 9);
 });
 
 test('a view larger than the world on an axis centers on the world on that axis', () => {
@@ -80,22 +113,22 @@ test('cut jumps to the clamped focus with no velocity and no easing', () => {
   run(camera, 0.1, 30, 9);
   assert.ok(camera.velocityX > 0);
   camera.cut(1, 17, VIEW);
-  assert.deepEqual([camera.centerX, camera.centerY, camera.velocityX, camera.velocityY], [8, 13.5, 0, 0]);
-  assert.deepEqual(camera.sample(1), { centerX: 8, centerY: 13.5, zoom: 1 });
+  assert.deepEqual([camera.centerX, camera.centerY, camera.velocityX, camera.velocityY], [LEFT_LIMIT, BOTTOM_LIMIT, 0, 0]);
+  assert.deepEqual(camera.sample(1), { centerX: LEFT_LIMIT, centerY: BOTTOM_LIMIT, zoom: 1 });
 });
 
-test('sample extrapolates by alpha of the last step along the velocity, clamped to the world', () => {
+test('sample extrapolates by alpha of the last step along the velocity, clamped to the overshoot limit', () => {
   const camera = new Camera({ centerX: 16, centerY: 9 });
   run(camera, 0.1, 30, 9);
   const { centerX: atStep } = camera.sample(0);
   const { centerX: ahead } = camera.sample(0.5);
   assert.equal(atStep, camera.centerX);
   assert.ok(Math.abs(ahead - (camera.centerX + camera.velocityX * 0.5 * STEP)) < 1e-12);
-  const edge = new Camera({ centerX: 8.001, centerY: 9 });
+  const edge = new Camera({ centerX: LEFT_LIMIT + 0.001, centerY: 9 });
   edge.velocityX = -100;
   edge.lastDeltaSeconds = STEP;
   edge.lastView = VIEW;
-  assert.equal(edge.sample(1).centerX, 8);
+  assert.equal(edge.sample(1).centerX, LEFT_LIMIT);
   assert.deepEqual(new Camera({ centerX: 2, centerY: 3 }).sample(1), { centerX: 2, centerY: 3, zoom: 1 });
 });
 

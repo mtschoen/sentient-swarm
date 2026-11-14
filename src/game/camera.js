@@ -6,13 +6,16 @@
 //   - dead zone: a focus within deadZoneFraction of the view's width and height of the current
 //     center (on each axis) does not move the camera; past it the target is the focus less the
 //     dead zone, so the focus sits on the zone's edge;
-//   - the target is clamped so the view stays inside bounds (on an axis where the view is at least
-//     as large as bounds the view centers on bounds), before smoothing, so the camera eases into
-//     an edge instead of stopping dead;
+//   - the target is clamped so the view stays inside bounds extended by CAMERA_OVERSHOOT_FRACTION
+//     of the view's extent on that axis (the overshoot: the world's edge can scroll that far in
+//     from the screen edge, so a border drawn there is seen coming and the swarm pressed against
+//     it sits clear of the screen edge; on an axis where the view is at least as large as bounds
+//     the view centers on bounds, no overshoot), before smoothing, so the camera eases into an
+//     edge instead of stopping dead;
 //   - a critically damped spring with the exact closed form (frame-rate independent) moves the
 //     center to the target: omega = 2 / smoothSeconds, so a step change covers 1 - 3 e^-2, about
 //     60 percent, in smoothSeconds and about 98 percent in 3 smoothSeconds, never overshooting;
-//   - the result is clamped again, so the view never leaves bounds.
+//   - the result is clamped again, so the view never leaves the overshoot limit.
 // cut(focusX, focusY, view) jumps to the clamped focus with zero velocity (run start and respawn).
 // sample(alpha) is the center extrapolated by alpha of the last update's delta along the velocity,
 // clamped like update, for rendering between fixed updates (glyphs extrapolate the same way).
@@ -22,6 +25,8 @@
 // camera sees plus a margin around the swarm.
 export const CAMERA_SMOOTH_SECONDS = 0.3;
 export const CAMERA_DEAD_ZONE_FRACTION = 0.1;
+// Fraction of the view's width (or height) the view may extend past the world's edge.
+export const CAMERA_OVERSHOOT_FRACTION = 0.12;
 export const CAMERA_POINT_WEIGHT = 0.5;
 export const BOMB_VIEW_HALF_DIAGONALS = 1.2;
 
@@ -42,10 +47,12 @@ function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-// The center on one axis that keeps a view of size extent inside [minimum, maximum].
+// The center on one axis that keeps a view of size extent inside [minimum, maximum] widened by
+// the overshoot on each side.
 function clampAxis(center, extent, minimum, maximum) {
   if (extent >= maximum - minimum) return (minimum + maximum) / 2;
-  return clamp(center, minimum + extent / 2, maximum - extent / 2);
+  const reach = extent / 2 - CAMERA_OVERSHOOT_FRACTION * extent;
+  return clamp(center, minimum + reach, maximum - reach);
 }
 
 // The focus less the dead zone of half extent halfZone around center, on one axis.
