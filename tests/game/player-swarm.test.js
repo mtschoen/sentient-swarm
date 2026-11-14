@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { INITIAL_SWARM_SHIPS, KILLS_PER_SWARM_SHIP, MAXIMUM_SWARM_SHIPS, PlayerSwarm } from '../../src/game/player-swarm.js';
 import {
-  SWARM_CRUISE_SPEED, SWARM_MAXIMUM_SPEED, SWARM_SPEED_FLOOR, homeRadiusFor, slotHash, temperamentFor,
+  SWARM_ATTACK_SECONDS, SWARM_CRUISE_SPEED, SWARM_MAXIMUM_SPEED, SWARM_SPEED_FLOOR, attackPhaseFor, attackTurn, homeRadiusFor,
+  slotHash, temperamentFor,
 } from '../../src/game/swarm-flocking.js';
 import { SWARM_FIRE_CONE_RADIANS } from '../../src/game/swarm-fire.js';
 import { SWARM_HIT_MASK_WORDS } from '../../src/sim/layout.js';
@@ -195,6 +196,46 @@ test('firing makes attack runs: more ships fly within the fire cone of the aim',
   const idle = coneShare(undefined);
   const attacking = coneShare({ firing: true, aimX: 1, aimY: 0 });
   assert.ok(attacking > idle + 0.03, `cone share ${attacking} firing against ${idle} idle`);
+});
+
+test('attack phases are evenly spread over the cycle for any number of slots', () => {
+  for (const count of [3, 12, 32, 256]) {
+    const phases = Array.from({ length: count }, (unused, slot) => attackPhaseFor(slot)).sort((first, second) => first - second);
+    let widestGap = phases[0] + 1 - phases[count - 1];
+    for (let index = 1; index < count; index += 1) widestGap = Math.max(widestGap, phases[index] - phases[index - 1]);
+    assert.ok(phases[0] >= 0 && phases[count - 1] < 1);
+    assert.ok(widestGap < 3 / count, `${count} slots leave a gap of ${widestGap}`);
+  }
+  assert.equal(temperamentFor(7).attackPhase, attackPhaseFor(7));
+});
+
+test('the attack turn swings along and against the aim once per cycle, offset by the phase', () => {
+  assert.ok(Math.abs(attackTurn(0, 0) - 1) < 1e-9);
+  assert.ok(Math.abs(attackTurn(SWARM_ATTACK_SECONDS / 2, 0) + 1) < 1e-9);
+  assert.ok(Math.abs(attackTurn(SWARM_ATTACK_SECONDS, 0) - 1) < 1e-9);
+  assert.ok(Math.abs(attackTurn(SWARM_ATTACK_SECONDS / 4, 0.75) - 1) < 1e-9);
+  assert.ok(Math.abs(attackTurn(1.3, 0.2) - attackTurn(1.3 + 3 * SWARM_ATTACK_SECONDS, 0.2)) < 1e-9);
+});
+
+test('attack runs are staggered: some of a small swarm faces the aim in every step', () => {
+  const controls = { firing: true, aimX: 1, aimY: 0 };
+  const swarm = new PlayerSwarm({ random: sequenceRandom() });
+  swarm.reset(8, 4.5);
+  hold(swarm, 4, 8, 4.5, () => {}, controls);
+  let fewest = Infinity;
+  let inside = 0;
+  let steps = 0;
+  hold(swarm, 30, 8, 4.5, () => {
+    let facing = 0;
+    for (const ship of swarm.ships) {
+      if (Math.abs(Math.atan2(Math.sin(ship.heading), Math.cos(ship.heading))) <= SWARM_FIRE_CONE_RADIANS) facing += 1;
+    }
+    fewest = Math.min(fewest, facing);
+    inside += facing;
+    steps += 1;
+  }, controls);
+  assert.ok(fewest >= 1, 'no ship faced the aim in some step');
+  assert.ok(inside / steps / INITIAL_SWARM_SHIPS > 0.3, `mean share facing the aim ${inside / steps / INITIAL_SWARM_SHIPS}`);
 });
 
 test('a hit kills an alive ship once and only from a frame at or after its first upload', () => {

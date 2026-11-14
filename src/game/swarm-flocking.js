@@ -24,11 +24,13 @@
 // Added for the player (not in the Chaser rules): roaming waypoints per slot group (below), a
 // per-slot wander, the leash (weight (distance /
 // home radius) squared toward the point: weak inside the home region, firm outside it), the attack
-// bias along the aim while firing (strongest at the point, gone SWARM_ATTACK_REACH home radii out),
+// bias along the aim while firing (strongest at the point, gone SWARM_ATTACK_REACH home radii out,
+// swinging along and against the aim on each slot's own evenly staggered attack cycle),
 // catch-up (maximum speed and acceleration grow by SWARM_CATCH_UP per home radius beyond the first)
 // and the speed floor. Steering = (desired - velocity) * SWARM_STEERING_RESPONSE, clamped to
 // maximumTurn * maximumSpeed; speed clamped to [floor, maximumSpeed].
-// Per-slot temperament (speed, turn, alignment, cohesion hold, wander, leash) comes from slotHash.
+// Per-slot temperament (speed, turn, alignment, cohesion hold, wander, leash) comes from slotHash;
+// the attack cycle's phase from attackPhaseFor.
 // Pure and allocation-free: no GPU, DOM, clock or random numbers; neighbours are an all-pairs loop
 // with a squared-distance early-out (65536 pairs at 256 ships), averaged, never summed.
 
@@ -60,8 +62,16 @@ const PRESSURE_MAXIMUM_MULTIPLE = 2;
 // Player additions.
 export const SWARM_WANDER = 0.35;
 export const SWARM_LEASH = 0.8;
-export const SWARM_ATTACK = 2.5;
+// Raised from 2.5 with the attack cycle below: at 2.5 the cycle did not hold the ships to their turns.
+export const SWARM_ATTACK = 4;
 export const SWARM_ATTACK_REACH = 2;
+// Attack runs take turns: the attack bias follows each ship's own cycle of SWARM_ATTACK_SECONDS
+// (attackTurn), along the aim for half of it (the run) and against the aim for the other half (the
+// way back), so the cycle paces the whole loop. The cycle's phase is evenly spaced over the slots
+// (attackPhaseFor), so at any moment about the same share of the swarm is on its run and facing the
+// aim, whatever the swarm's size; a steady bias ran the ships of a roam group in lockstep, so the
+// ships facing the aim came and went together.
+export const SWARM_ATTACK_SECONDS = 2;
 export const SWARM_CATCH_UP = 2.5;
 export const SWARM_SPEED_FLOOR = 0.5;
 // Roaming: the ships fall into SWARM_ROAM_GROUPS groups by slot; each group seeks its own waypoint,
@@ -85,6 +95,7 @@ export const SWARM_MAXIMUM_SPEED = 11;
 const REFERENCE_SHIPS = 12;
 const TWO_PI = Math.PI * 2;
 const EPSILON = 1e-9;
+const GOLDEN_FRACTION = (Math.sqrt(5) - 1) / 2;
 
 // A deterministic value in [0, 1) for a slot and a salt (an integer hash, no shared state).
 export function slotHash(slot, salt) {
@@ -110,7 +121,21 @@ export function temperamentFor(slot) {
     wanderPhaseTwo: slotHash(slot, 9) * TWO_PI,
     leash: 0.7 + 0.6 * slotHash(slot, 10),
     roamGroup: slot % SWARM_ROAM_GROUPS,
+    attackPhase: attackPhaseFor(slot),
   };
+}
+
+// The slot's place in the attack cycle, in [0, 1): multiples of the golden ratio's fraction, so the
+// first N slots are spread evenly over the cycle for every N and consecutive slots are far apart.
+export function attackPhaseFor(slot) {
+  const phase = slot * GOLDEN_FRACTION;
+  return phase - Math.floor(phase);
+}
+
+// The share of the attack bias a ship with this phase feels at this time: 1 along the aim at the
+// middle of its run, -1 (against the aim) at the middle of its way back.
+export function attackTurn(time, phase) {
+  return Math.cos(TWO_PI * (time / SWARM_ATTACK_SECONDS + phase));
 }
 
 // The home radius for this many alive ships.
@@ -230,7 +255,7 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     desiredX += Math.cos(ship.heading + swing * 1.5) * SWARM_WANDER * maximumSpeed;
     desiredY += Math.sin(ship.heading + swing * 1.5) * SWARM_WANDER * maximumSpeed;
     if (attacking) {
-      const proximity = Math.max(0, 1 - reach / SWARM_ATTACK_REACH);
+      const proximity = Math.max(0, 1 - reach / SWARM_ATTACK_REACH) * attackTurn(time, ship.attackPhase);
       desiredX += aimX * SWARM_ATTACK * proximity * maximumSpeed;
       desiredY += aimY * SWARM_ATTACK * proximity * maximumSpeed;
     }
