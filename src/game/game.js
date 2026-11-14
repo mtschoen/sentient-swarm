@@ -59,6 +59,13 @@
 //      that also boosts bloom, respawn recenters the player, sets the respawn sequence to the next
 //      step and resets spawn pressure and the spawn director; gameOver leaves the run frozen until
 //      restart.
+// Seats: the game runs one or two PlayerSeats (setPlayerCount, Ready only; the page seats one until
+// the join screen). Every step above runs per seat in seat order, each reading its own input (input.state
+// for seat 1, input.seatTwoState for seat 2): either seat's gesture starts or restarts the run, and
+// either seat's bomb press spends the shared pool around its own swarm. Both seats' contact tables
+// and seek points reach the simulation (src/game/seats.js); with one seat the calls are exactly the
+// solo ones. A seat wiped while another still has ships goes down; the run's one death is the last
+// seat falling. Kills score once and grow every seat still in the run.
 // Watch mode (the lab, task C6b): setWatch(fraction) puts the run in Ready and keeps it there (no
 // gesture starts it, so weapons and contact stay off); the player point follows the pointer (or
 // the move stick without one) so the swarm chases it, and a watch SpawnPressure with full seek
@@ -72,12 +79,13 @@ import { Awards, ScoreKeeper } from './score.js';
 import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
 import { TimeWarp } from './time-warp.js';
-import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS, SWARM_SHIP_RADIUS } from './player-swarm.js';
+import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS } from './player-swarm.js';
 import { SpawnPressure } from '../sim/spawner.js';
 import { createWatchPressure, moveWatchPoint } from './watch.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
-import { SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
-import { Camera, bombRadiusForView } from './camera.js';
+import { MAXIMUM_PLAYER_SEATS, SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
+import { Camera, bombRadiusForView, framingCenter } from './camera.js';
+import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, seatStarts, uploadSwarms } from './seats.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
@@ -86,9 +94,8 @@ const PICKUP_IMPULSE_STRENGTH = 0.15;
 const PICKUP_BLAST_IMPULSE_STRENGTH = 0.5;
 const TIME_WARP_IMPULSE_STRENGTH = 0.6;
 export const DEFAULT_PICKUP_BLAST_RADIUS = 1.5;
-// Player swarm spike: a lost ship ripples the warp grid; a swarm ship collects pickups this close;
-// the run has one life, lost when the last swarm ship dies (so the death clear and game over follow).
-const SWARM_SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
+// Player swarm spike: a swarm ship collects pickups this close; the run has one life, lost when
+// the last swarm ship (of the last seat) dies, so the death clear and game over follow.
 export { SWARM_PICKUP_RADIUS };
 const SWARM_RUN_LIVES = 1;
 
@@ -152,7 +159,11 @@ export class Game {
     // moves it every update.
     this.camera = new Camera({ centerX: WORLD_WIDTH / 2, centerY: WORLD_HEIGHT / 2 });
     // One seat per player; the first is the solo player.
+    this.random = random;
     this.seats = [new PlayerSeat({ index: 0, random, bounds: this.worldBounds })];
+    // The seat whose swarm was wiped last (where the death flood appears), and seats a debug hook made invulnerable.
+    this.lastWipedSeat = null;
+    this.debugInvulnerableSeats = new Set();
     this.pickups = new PickupDirector({ random, bounds: this.worldBounds });
     this.score = new ScoreKeeper({ capacity });
     this.awards = new Awards();
@@ -224,6 +235,7 @@ export class Game {
       score: this.score.score,
       multiplier: this.score.multiplier,
       ...this.seats[0].hudFields(),
+      seats: this.seats.map((seat) => seat.stateEntry()),
       bombs: this.run.bombs,
       timeWarp: this.timeWarp.fraction,
       offeredType: this.pickups.offeredType,
@@ -248,13 +260,45 @@ export class Game {
     // start() zeroes the run's respawn sequence, so it runs before resetModules moves it forward.
     this.run.start();
     this.resetModules();
-    this.bombHeld = true;
+    this.seats.forEach((seat) => { seat.bombHeld = true; });
+  }
+
+  get playerCount() {
+    return this.seats.length;
+  }
+
+  // One or two seats, changed only in Ready. Two seats start either side of the arena center; the
+  // simulation's second seek point and contact table follow the seat count.
+  setPlayerCount(count) {
+    if (!(count === 1 || count === MAXIMUM_PLAYER_SEATS)) throw new RangeError(`player count must be 1 or ${MAXIMUM_PLAYER_SEATS}, got ${count}`);
+    if (this.run.phase !== RunPhase.Ready) throw new Error('the player count changes only in Ready');
+    if (count === this.seats.length) return;
+    if (count === 2) {
+      this.seats.push(new PlayerSeat({ index: 1, random: this.random, bounds: this.worldBounds }));
+      this.projectiles.setBeamSlotCount(count);
+    } else this.removeSecondSeat();
+    this.placeSeats();
+  }
+
+  removeSecondSeat() {
+    this.seats.length = 1;
+    this.simulation.clearSecondPlayer();
+    this.simulation.clearSwarmShips(1);
+    this.projectiles.setBeamSlotCount(1);
+  }
+
+  // Every seat back at its start with the initial swarm, and the camera cut onto them.
+  placeSeats() {
+    const starts = seatStarts(this.seats.length, this.worldBounds);
+    this.seats.forEach((seat, index) => seat.reset(this.initialSwarmShips, starts[index]));
+    this.followCamera(0, { cut: true });
   }
 
   // Back to the title: every module reset and the run in Ready again (the arena is cleared once,
   // the swarm keeps running behind the menu). Sequence guards stay monotonic as in beginRun.
   quitToTitle() {
     this.paused = false;
+    if (this.seats.length > 1) this.removeSecondSeat();
     this.resetModules();
     this.run = createRunState();
     // The title menu takes over the start; the confirming press (Space, a face button) must not start the run.
@@ -270,6 +314,7 @@ export class Game {
       this.watchPressure = null;
       return;
     }
+    if (this.seats.length > 1) this.removeSecondSeat();
     const previous = this.watchPressure;
     const next = createWatchPressure(this.capacity, fraction, previous);
     if (previous === null) {
@@ -298,7 +343,7 @@ export class Game {
   // What the camera frames: the swarm (cameraFocus) unless watching, where it holds still so the
   // pointer-driven point cannot drag it. cut (run start, respawn, quit) jumps there with no easing.
   followCamera(deltaSeconds, { cut = false } = {}) {
-    const focus = this.seats[0].cameraFocus;
+    const focus = framingCenter(framedFocuses(this.seats));
     const view = { viewWidth: this.viewSize.width, viewHeight: this.viewSize.height, bounds: this.worldBounds };
     if (cut) this.camera.cut(focus.x, focus.y, view);
     else if (!this.watching) this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view });
@@ -335,7 +380,9 @@ export class Game {
     this.score.reset();
     this.awards = new Awards();
     this.pickups.reset();
-    this.seats.forEach((seat) => seat.reset(this.initialSwarmShips));
+    this.lastWipedSeat = null;
+    const starts = seatStarts(this.seats.length, this.worldBounds);
+    this.seats.forEach((seat, index) => seat.reset(this.initialSwarmShips, starts[index]));
     this.followCamera(0, { cut: true });
     this.spawnPressure.reset();
     this.spawnDirector.reset();
@@ -371,74 +418,56 @@ export class Game {
     if (this.paused) return;
     this.sceneSeconds += deltaSeconds;
     this.input.update();
-    const inputState = this.input.state;
-    const seat = this.seats[0];
-    const firingPressed = seat.firingEdge(inputState);
-    if (this.run.phase === RunPhase.Ready && this.startsOnGesture && !this.watching && isGesture(inputState)) this.start();
-    else if (this.run.phase === RunPhase.GameOver) this.updateGameOver(deltaSeconds, firingPressed || (inputState.bomb && !this.bombHeld));
-
-    const bombPressed = seat.bombEdge(inputState);
-    if (bombPressed && this.run.useBomb(this.player.position)) {
-      // The bomb clears around the swarm out past the view's corners (bombRadiusForView), not the whole world.
-      const center = this.swarm.aliveCount > 0 ? this.swarm.centroid : this.player.position;
-      this.simulation.requestRadialKill(center.x, center.y, bombRadiusForView(this.viewSize.width, this.viewSize.height));
-      this.effects?.bomb();
+    const { seats } = this;
+    const inputs = seats.map((seat) => this.inputFor(seat));
+    const firingPressed = seats.map((seat, index) => seat.firingEdge(inputs[index]));
+    if (this.run.phase === RunPhase.Ready && this.startsOnGesture && !this.watching && inputs.some(isGesture)) this.start();
+    else if (this.run.phase === RunPhase.GameOver) {
+      this.updateGameOver(deltaSeconds, seats.some((seat, index) => firingPressed[index] || (inputs[index].bomb && !seat.bombHeld)));
     }
 
+    seats.forEach((seat, index) => {
+      const pressed = seat.bombEdge(inputs[index]);
+      if (pressed && !seat.down && this.run.useBomb(seat.point)) {
+        // The bomb clears around the swarm out past the view's corners (bombRadiusForView), not the whole world.
+        const center = seat.aliveCount > 0 ? seat.centroid : seat.point;
+        this.simulation.requestRadialKill(center.x, center.y, bombRadiusForView(this.viewSize.width, this.viewSize.height));
+        this.effects?.bomb();
+      }
+    });
+
     const playing = this.run.phase === RunPhase.Playing;
-    const controls = seat.controlsFrom(inputState);
-    if (playing) seat.steer(deltaSeconds, controls, { beamTurnRevolutionsPerSecond: this.beamTurnRevolutionsPerSecondValue });
-    else if (this.watching) moveWatchPoint(seat.player, deltaSeconds, inputState, controls);
-    const { x, y } = this.player.position;
-    const swarmFiring = playing && controls.firing;
-    const swarmControls = seat.swarmControls;
-    seat.flock(deltaSeconds, swarmFiring);
+    const controls = seats.map((seat, index) => seat.controlsFrom(inputs[index]));
+    seats.forEach((seat, index) => {
+      if (seat.down) return;
+      if (playing) seat.steer(deltaSeconds, controls[index], { beamTurnRevolutionsPerSecond: this.beamTurnRevolutionsPerSecondValue });
+      else if (this.watching) moveWatchPoint(seat.player, deltaSeconds, inputs[index], controls[index]);
+      seat.flock(deltaSeconds, playing && controls[index].firing);
+    });
     this.followCamera(deltaSeconds);
 
+    const anchor = pickupAnchor(seats);
     this.pickups.update(deltaSeconds, {
-      playerX: x,
-      playerY: y,
-      onBaseGun: this.weapons.isBase,
+      playerX: anchor.x,
+      playerY: anchor.y,
+      onBaseGun: seats.every((seat) => seat.down || seat.weapons.isBase),
       milestone: playing && this.score.consumeMilestone(),
       phasePlaying: playing,
       densityAt: this.densityAt,
     });
-    if (playing) {
-      const collected = seat.collectPickup(this.pickups);
-      if (collected !== null) {
-        const timeWarp = collected === 'timewarp';
-        if (timeWarp) {
-          this.timeWarp.start();
-          this.effects?.pickup?.('timewarp');
-        } else {
-          this.weapons.collect(collected);
-          this.effects?.pickup?.();
-        }
-        const blast = this.pickupBlastRadiusValue > 0;
-        if (blast) this.simulation.requestRadialKill(x, y, this.pickupBlastRadiusValue);
-        const strength = blast ? PICKUP_BLAST_IMPULSE_STRENGTH : PICKUP_IMPULSE_STRENGTH;
-        this.queueImpulse(x, y, timeWarp ? TIME_WARP_IMPULSE_STRENGTH : strength, false);
-      }
-    }
+    if (playing) seats.forEach((seat) => { if (!seat.down) this.collectFor(seat); });
 
-    // The kind and tier this frame fires at; the update itself drops to base on expiry.
-    const { fire, shots: swarmShots, kind: firedKind, tier: firedTier, railTier } = seat.fire(deltaSeconds, { playing, firing: controls.firing });
-    // The fire log (?debug=fire, main.js): why the swarm is silent while fire is held.
-    this.fireLog?.sample(deltaSeconds, {
-      phase: this.run.phase, inputFiring: controls.firing, armed: firedKind, report: seat.swarmFire.report,
-      aimX: swarmControls.aimX, aimY: swarmControls.aimY, moveX: inputState.move.x, moveY: inputState.move.y,
-    });
-    swarmShots.spawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
-    swarmShots.turretSpawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
-    this.projectiles.setBeam(fire.expired ? null : swarmShots.beam);
-    if (fire.spawns.length > 0 || (fire.beam !== null && !fire.expired)) this.effects?.weaponFire?.(firedKind, firedTier);
-    else if (fire.turretSpawns.length > 0) this.effects?.weaponFire?.('rail', railTier);
-    if (fire.expired) this.effects?.expiry?.();
+    fireSeats(this, deltaSeconds, playing, inputs, controls);
 
+    const targets = gameSeekTargets(this);
     if (this.run.phase === RunPhase.Ready) {
-      this.simulation.setPlayer(x, y);
+      this.simulation.setPlayer(targets.primary.x, targets.primary.y);
     } else {
-      this.simulation.setPlayerState({ x, y, radius: this.player.radius, invulnerable: !playing || this.run.invulnerable || this.debugInvulnerableValue });
+      this.simulation.setPlayerState({ x: targets.primary.x, y: targets.primary.y, radius: this.player.radius, invulnerable: !playing || this.run.invulnerable || this.debugInvulnerableValue });
+    }
+    if (seats.length > 1) {
+      if (targets.secondary !== null) this.simulation.setSecondPlayer(targets.secondary.x, targets.secondary.y);
+      else this.simulation.clearSecondPlayer();
     }
 
     this.timeWarp.update(deltaSeconds);
@@ -455,7 +484,7 @@ export class Game {
       const pressure = this.activeSpawnPressure;
       this.simulation.setSeekScale(pressure.seekScale);
       this.simulation.setSpawnDistanceFraction(pressure.spawnDistanceFraction);
-      this.simulation.setSwarmShips(this.swarm.contactShips(this.simulation.frameSequence + 1), SWARM_SHIP_RADIUS);
+      uploadSwarms(this);
       this.stepSimulation(simulationSeconds, spawnPerSpecies, this.stepGates, projectileSeconds);
     }
     this.simulation.pollDensity();
@@ -466,6 +495,32 @@ export class Game {
       this.freshStats = { ...frames[frames.length - 1], killsSinceLastRead };
     }
     this.run.update(deltaSeconds).forEach((action) => this.handleAction(action));
+  }
+
+  // Seat 1 reads the first input state, seat 2 its own.
+  inputFor(seat) {
+    return seat.index === 0 ? this.input.state : this.input.seatTwoState;
+  }
+
+  // A pickup at this seat: its weapon (or the global time warp), the blast and the shockwave.
+  collectFor(seat) {
+    const collected = seat.collectPickup(this.pickups);
+    if (collected === null) return;
+    const { x, y } = seat.point;
+    // Only a two-seat game tells the effect which seat collected.
+    const seatArguments = this.seats.length > 1 ? [seat.index] : [];
+    const timeWarp = collected === 'timewarp';
+    if (timeWarp) {
+      this.timeWarp.start();
+      this.effects?.pickup?.('timewarp', ...seatArguments);
+    } else {
+      seat.weapons.collect(collected);
+      this.effects?.pickup?.(...(seatArguments.length > 0 ? [undefined, ...seatArguments] : []));
+    }
+    const blast = this.pickupBlastRadiusValue > 0;
+    if (blast) this.simulation.requestRadialKill(x, y, this.pickupBlastRadiusValue);
+    const strength = blast ? PICKUP_BLAST_IMPULSE_STRENGTH : PICKUP_IMPULSE_STRENGTH;
+    this.queueImpulse(x, y, timeWarp ? TIME_WARP_IMPULSE_STRENGTH : strength, false);
   }
 
   // Gamepad and keyboard restart: a fresh fire or bomb press once the guard window has passed.
@@ -480,9 +535,10 @@ export class Game {
     const pressure = this.activeSpawnPressure;
     this.stepGates = null;
     if (phase === RunPhase.Dying || phase === RunPhase.Respawning) return NO_SPAWNS;
+    const primary = primarySeat(this.seats);
     this.spawnDirector.update(deltaSeconds, {
-      playerX: this.player.position.x,
-      playerY: this.player.position.y,
+      playerX: primary.point.x,
+      playerY: primary.point.y,
       safeDistance: pressure.spawnDistanceFraction * this.viewSize.width,
       bounds: this.worldBounds,
       // Gates open in a ring just outside what the camera shows.
@@ -492,8 +548,9 @@ export class Game {
       // The Ready arena (before a run) trickles from every gate; waves start with the run.
       continuous: phase === RunPhase.Ready,
       // Waves avoid the gates in the player's aim lane (the lane being shot open).
-      aimX: this.player.aim.x,
-      aimY: this.player.aim.y,
+      aimX: primary.player.aim.x,
+      aimY: primary.player.aim.y,
+      partner: partnerFor(this.seats),
     });
     this.stepGates = this.spawnDirector.spawnGates;
     return pressure.update(deltaSeconds, this.latestStats, this.simulation.shares, this.simulation.frameSequence + 1, this.spawnDirector.wave);
@@ -518,26 +575,13 @@ export class Game {
       if (stats.ringsThisFrame > 0) this.queueImpulse(stats.lastRingX, stats.lastRingY, RING_IMPULSE_STRENGTH, false);
       if (this.run.phase === RunPhase.Playing) {
         this.score.recordKills(stats.killsSinceLastRead);
-        // Kills grow the swarm; award lives are superseded by it, bombs stay.
-        this.swarm.addKills(stats.killsSinceLastRead);
+        // Kills grow every swarm still in the run; award lives are superseded by it, bombs stay.
+        for (const seat of this.seats) if (!seat.down) seat.swarm.addKills(stats.killsSinceLastRead);
         const earned = this.awards.update(this.score.score);
         for (let index = 0; index < earned.bombs; index += 1) this.run.addBomb();
       }
     }
-    if (this.run.phase === RunPhase.Playing) this.processSwarmHits(stats);
-  }
-
-  // Swarm ships the GPU reported hit die (a small shockwave each); losing the last one is the run's
-  // one death: the death clear, then game over. A lost ship does not reset the multiplier.
-  processSwarmHits(stats) {
-    const { killed, last, wiped } = this.seats[0].applyHits(stats);
-    killed.forEach((ship) => this.queueImpulse(ship.x, ship.y, SWARM_SHIP_LOSS_IMPULSE_STRENGTH, false));
-    if (wiped && this.run.playerHit(stats.frameSequence, last)) {
-      this.weapons.dropAll();
-      this.timeWarp.end();
-      this.score.recordHit();
-      this.effects?.death();
-    }
+    if (this.run.phase === RunPhase.Playing) applySwarmHits(this, stats);
   }
 
   handleAction(action) {
@@ -586,11 +630,14 @@ export class Game {
   // point are drawn extrapolated by it so they agree with the camera.
   scene(alpha = 0) {
     const hidden = [RunPhase.Dying, RunPhase.Respawning, RunPhase.GameOver].includes(this.run.phase);
+    const pointShown = this.run.phase === RunPhase.Playing;
+    const swarms = hidden ? [] : this.seats.filter((seat) => !seat.down).map((seat) => seat.sceneEntry(alpha, this.camera.lastDeltaSeconds, pointShown));
     return {
       projectiles: this.projectiles,
       pickups: this.pickups.pickups,
       ship: null,
-      swarm: hidden ? null : this.seats[0].sceneEntry(alpha, this.camera.lastDeltaSeconds, this.run.phase === RunPhase.Playing),
+      swarm: swarms[0] ?? null,
+      swarms,
     };
   }
 
@@ -612,7 +659,7 @@ export class Game {
   setInitialSwarmShips(count) {
     if (!(Number.isInteger(count) && count >= 1 && count <= MAXIMUM_SWARM_SHIPS)) throw new RangeError(`initial swarm ships must be an integer in [1, ${MAXIMUM_SWARM_SHIPS}], got ${count}`);
     this.initialSwarmShips = count;
-    this.swarm.reset(this.player.position.x, this.player.position.y, count);
+    this.seats.forEach((seat) => seat.swarm.reset(seat.point.x, seat.point.y, count));
   }
 
   // The pickup blast radius in world units (the lab sets it); 0 turns the blast off.
@@ -639,8 +686,13 @@ export class Game {
 
   // Debug hook (browser checks, a lab sandbox): while enabled, the GPU contact test never hits, so
   // the ship survives a measurement in a crowded arena (the C0b corridor metric).
-  debugInvulnerable(enabled) {
-    this.debugInvulnerableValue = Boolean(enabled);
+  // With a seat index only that seat's contact upload is invulnerable (two seats); null is every seat.
+  debugInvulnerable(enabled, seat = null) {
+    if (seat === null) {
+      this.debugInvulnerableValue = Boolean(enabled);
+      if (!enabled) this.debugInvulnerableSeats.clear();
+    } else if (enabled) this.debugInvulnerableSeats.add(seat);
+    else this.debugInvulnerableSeats.delete(seat);
   }
 
   // alpha is FrameLoop's fraction of an update; it becomes the fraction of the current simulation

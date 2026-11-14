@@ -43,7 +43,17 @@ export function createFakeSimulation() {
     setPlayer(x, y) { this.playerPositions.push({ x, y }); },
     setPlayerState(state) { this.playerStates.push(state); },
     swarmUploads: [],
-    setSwarmShips(ships, radius) { this.swarmUploads.push({ ships: ships.map((ship) => ({ ...ship })), radius, sequence: this.frameSequence + 1 }); },
+    secondPlayerCalls: [],
+    clearSecondPlayerCalls: 0,
+    clearSwarmShipsCalls: [],
+    setSecondPlayer(x, y) { this.secondPlayerCalls.push({ x, y }); },
+    clearSecondPlayer() { this.clearSecondPlayerCalls += 1; },
+    clearSwarmShips(seat) { this.clearSwarmShipsCalls.push(seat); },
+    // Every upload also records its seat, invulnerable flag and the number of arguments it was called with.
+    setSwarmShips(ships, radius, options) {
+      const { seat = 0, invulnerable = false } = options ?? {};
+      this.swarmUploads.push({ ships: ships.map((ship) => ({ ...ship })), radius, sequence: this.frameSequence + 1, seat, invulnerable, argumentCount: options === undefined ? 2 : 3 });
+    },
     setSeekScale(scale) { this.seekScales.push(scale); },
     setSpawnDistanceFraction(fraction) { this.spawnDistanceFractions.push(fraction); },
     worldBoundsCalls: [],
@@ -89,7 +99,10 @@ export function createFakeProjectiles() {
     beams: [],
     clears: 0,
     queueSpawn(spawn) { this.spawns.push(spawn); return this.spawns.length; },
-    setBeam(beam) { this.beams.push(beam); },
+    beamSeats: [],
+    beamSlotCounts: [],
+    setBeamSlotCount(count) { this.beamSlotCounts.push(count); },
+    setBeam(beam, seat = 0) { this.beams.push(beam); this.beamSeats.push(seat); },
     clear() { this.clears += 1; },
     cacheClears: 0,
     clearBindGroupCaches() { this.cacheClears += 1; },
@@ -107,7 +120,7 @@ export function createFakeRenderer() {
 }
 
 export function createFakeInput() {
-  return { state: new InputState(), update() {} };
+  return { state: new InputState(), seatTwoState: new InputState(), update() {} };
 }
 
 export async function createGame() {

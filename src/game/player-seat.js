@@ -7,6 +7,7 @@ import { SwarmFire } from './swarm-fire.js';
 import { WeaponState } from './weapons.js';
 import { blendedPoint } from './swarm-blend.js';
 import { cameraFocus as focusOf } from './camera.js';
+import { SEAT_COLORS } from './seat-colors.js';
 import { WORLD_BOUNDS } from '../sim/layout.js';
 
 // A swarm ship collects pickups this close (the point collects within the director's own reach).
@@ -75,6 +76,22 @@ export class PlayerSeat {
     };
   }
 
+  // This seat's entry in Game.state.seats (the revive counters are filled in by the revive rules).
+  stateEntry() {
+    const { weapons } = this;
+    return {
+      ships: this.swarm.aliveCount,
+      armed: weapons.armed,
+      tier: weapons.tier,
+      charge: weapons.charge,
+      railTurrets: weapons.railTurrets,
+      railTier: weapons.railTier,
+      down: this.down,
+      reviveKills: 0,
+      reviveKillsNeeded: 0,
+    };
+  }
+
   // The renderer's swarm entry: ships and the point extrapolated by alpha, as the camera samples.
   sceneEntry(alpha, lastDeltaSeconds, pointShown) {
     const { player } = this;
@@ -86,13 +103,16 @@ export class PlayerSeat {
       pointY: point.y,
       pointShown,
       armed: this.weapons.armed,
+      bodyColor: SEAT_COLORS[this.index].body,
     };
   }
 
   // Applies the GPU's swarm hit mask: { killed, last, wiped } where wiped is true when this call
   // killed the final ship (last is then that ship).
   applyHits(stats) {
-    const killed = this.swarm.applyHits(stats.swarmHitMask ?? NO_SWARM_HITS, stats.frameSequence);
+    // Seat 2's hits come from the second persistent mask.
+    const mask = this.index === 0 ? stats.swarmHitMask : stats.secondSwarmHitMask;
+    const killed = this.swarm.applyHits(mask ?? NO_SWARM_HITS, stats.frameSequence);
     const wiped = killed.length > 0 && this.swarm.aliveCount === 0;
     return { killed, last: wiped ? killed[killed.length - 1] : null, wiped };
   }
