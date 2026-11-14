@@ -73,14 +73,13 @@ import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
 import { TimeWarp } from './time-warp.js';
 import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS, SWARM_SHIP_RADIUS } from './player-swarm.js';
-import { blendedPoint } from './swarm-blend.js';
-import { SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../sim/spawner.js';
+import { SpawnPressure } from '../sim/spawner.js';
+import { createWatchPressure, moveWatchPoint } from './watch.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
 import { SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
-import { Camera, bombRadiusForView, cameraFocus } from './camera.js';
+import { Camera, bombRadiusForView } from './camera.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
-const NO_SWARM_HITS = Object.freeze([]);
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
 const RING_IMPULSE_STRENGTH = 0.3;
 const PICKUP_IMPULSE_STRENGTH = 0.15;
@@ -98,10 +97,6 @@ function createRunState() {
 }
 // Matches the HUD's touch restart guard, so the press that ended the run cannot restart it.
 export const RESTART_GUARD_SECONDS = 0.7;
-
-function clamp(value, minimum, maximum) {
-  return Math.min(maximum, Math.max(minimum, value));
-}
 
 function isGesture(inputState) {
   const { move, aim } = inputState;
@@ -228,20 +223,12 @@ export class Game {
     return {
       score: this.score.score,
       multiplier: this.score.multiplier,
-      // The swarm size stands in for lives (the HUD's life icons).
-      lives: this.swarm.aliveCount,
+      ...this.seats[0].hudFields(),
       bombs: this.run.bombs,
-      armed: this.weapons.armed,
-      tier: this.weapons.tier,
-      charge: this.weapons.charge,
-      railTurrets: this.weapons.railTurrets,
-      railTier: this.weapons.railTier,
       timeWarp: this.timeWarp.fraction,
       offeredType: this.pickups.offeredType,
       phase: this.paused ? 'paused' : this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
-      playerX: this.player.position.x,
-      playerY: this.player.position.y,
     };
   }
 
@@ -283,21 +270,12 @@ export class Game {
       this.watchPressure = null;
       return;
     }
-    if (!(typeof fraction === 'number' && fraction >= 0 && fraction <= 1)) throw new RangeError(`watch fraction must lie in [0, 1], got ${fraction}`);
     const previous = this.watchPressure;
+    const next = createWatchPressure(this.capacity, fraction, previous);
     if (previous === null) {
       this.paused = false;
       this.resetModules();
       this.run = createRunState();
-    }
-    const next = new SpawnPressure({
-      capacity: this.capacity, floorFraction: fraction, ceilingFraction: fraction, seekFloorFraction: 1,
-      spawnDistanceStartFraction: SPEC_SPAWN_DISTANCE_FRACTION,
-    });
-    if (previous !== null) {
-      next.newestStats = previous.newestStats;
-      next.requests = previous.requests;
-      next.filling = previous.filling;
     }
     this.watchPressure = next;
   }
@@ -320,7 +298,7 @@ export class Game {
   // What the camera frames: the swarm (cameraFocus) unless watching, where it holds still so the
   // pointer-driven point cannot drag it. cut (run start, respawn, quit) jumps there with no easing.
   followCamera(deltaSeconds, { cut = false } = {}) {
-    const focus = cameraFocus(this.player.position, this.swarm.aliveCount > 0 ? this.swarm.centroid : null);
+    const focus = this.seats[0].cameraFocus;
     const view = { viewWidth: this.viewSize.width, viewHeight: this.viewSize.height, bounds: this.worldBounds };
     if (cut) this.camera.cut(focus.x, focus.y, view);
     else if (!this.watching) this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view });
@@ -394,13 +372,12 @@ export class Game {
     this.sceneSeconds += deltaSeconds;
     this.input.update();
     const inputState = this.input.state;
-    const firingPressed = inputState.firing && !this.firingHeld;
-    this.firingHeld = inputState.firing;
+    const seat = this.seats[0];
+    const firingPressed = seat.firingEdge(inputState);
     if (this.run.phase === RunPhase.Ready && this.startsOnGesture && !this.watching && isGesture(inputState)) this.start();
     else if (this.run.phase === RunPhase.GameOver) this.updateGameOver(deltaSeconds, firingPressed || (inputState.bomb && !this.bombHeld));
 
-    const bombPressed = inputState.bomb && !this.bombHeld;
-    this.bombHeld = inputState.bomb;
+    const bombPressed = seat.bombEdge(inputState);
     if (bombPressed && this.run.useBomb(this.player.position)) {
       // The bomb clears around the swarm out past the view's corners (bombRadiusForView), not the whole world.
       const center = this.swarm.aliveCount > 0 ? this.swarm.centroid : this.player.position;
@@ -409,12 +386,9 @@ export class Game {
     }
 
     const playing = this.run.phase === RunPhase.Playing;
-    const seat = this.seats[0];
     const controls = seat.controlsFrom(inputState);
-    if (playing) {
-      seat.steer(deltaSeconds, controls, { beamTurnRevolutionsPerSecond: this.beamTurnRevolutionsPerSecondValue });
-    }
-    else if (this.watching) this.moveWatchPoint(deltaSeconds, inputState, controls);
+    if (playing) seat.steer(deltaSeconds, controls, { beamTurnRevolutionsPerSecond: this.beamTurnRevolutionsPerSecondValue });
+    else if (this.watching) moveWatchPoint(seat.player, deltaSeconds, inputState, controls);
     const { x, y } = this.player.position;
     const swarmFiring = playing && controls.firing;
     const swarmControls = seat.swarmControls;
@@ -500,18 +474,6 @@ export class Game {
     if (pressed && this.gameOverSeconds > RESTART_GUARD_SECONDS) this.restart();
   }
 
-  // Watch mode: the point sits on the pointer (clamped inside the arena), else moves with the stick.
-  moveWatchPoint(deltaSeconds, inputState, controls) {
-    const pointer = inputState.pointerWorld;
-    if (!pointer) {
-      this.player.update(deltaSeconds, { ...controls, firing: false });
-      return;
-    }
-    const { radius, bounds } = this.player;
-    this.player.positionX = clamp(pointer.x, bounds.minX + radius, bounds.maxX - radius);
-    this.player.positionY = clamp(pointer.y, bounds.minY + radius, bounds.maxY - radius);
-  }
-
   // No spawns and no gates between death and respawn: the arena stays clear for the pause.
   spawnCounts(deltaSeconds) {
     const phase = this.run.phase;
@@ -568,11 +530,9 @@ export class Game {
   // Swarm ships the GPU reported hit die (a small shockwave each); losing the last one is the run's
   // one death: the death clear, then game over. A lost ship does not reset the multiplier.
   processSwarmHits(stats) {
-    const killed = this.swarm.applyHits(stats.swarmHitMask ?? NO_SWARM_HITS, stats.frameSequence);
+    const { killed, last, wiped } = this.seats[0].applyHits(stats);
     killed.forEach((ship) => this.queueImpulse(ship.x, ship.y, SWARM_SHIP_LOSS_IMPULSE_STRENGTH, false));
-    if (killed.length === 0 || this.swarm.aliveCount > 0) return;
-    const last = killed[killed.length - 1];
-    if (this.run.playerHit(stats.frameSequence, last)) {
+    if (wiped && this.run.playerHit(stats.frameSequence, last)) {
       this.weapons.dropAll();
       this.timeWarp.end();
       this.score.recordHit();
@@ -626,19 +586,11 @@ export class Game {
   // point are drawn extrapolated by it so they agree with the camera.
   scene(alpha = 0) {
     const hidden = [RunPhase.Dying, RunPhase.Respawning, RunPhase.GameOver].includes(this.run.phase);
-    const point = blendedPoint(this.player.position, this.player.velocityX, this.player.velocityY, alpha, this.camera.lastDeltaSeconds);
     return {
       projectiles: this.projectiles,
       pickups: this.pickups.pickups,
       ship: null,
-      swarm: hidden ? null : {
-        ships: this.swarm.shipsAt(alpha),
-        facing: this.player.facing,
-        pointX: point.x,
-        pointY: point.y,
-        pointShown: this.run.phase === RunPhase.Playing,
-        armed: this.weapons.armed,
-      },
+      swarm: hidden ? null : this.seats[0].sceneEntry(alpha, this.camera.lastDeltaSeconds, this.run.phase === RunPhase.Playing),
     };
   }
 

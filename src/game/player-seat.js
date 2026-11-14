@@ -5,11 +5,14 @@ import { PlayerShip } from './player.js';
 import { PlayerSwarm } from './player-swarm.js';
 import { SwarmFire } from './swarm-fire.js';
 import { WeaponState } from './weapons.js';
+import { blendedPoint } from './swarm-blend.js';
+import { cameraFocus as focusOf } from './camera.js';
 import { WORLD_BOUNDS } from '../sim/layout.js';
 
 // A swarm ship collects pickups this close (the point collects within the director's own reach).
 export const SWARM_PICKUP_RADIUS = 0.2;
 const NO_AIM = Object.freeze({ x: 0, y: 0 });
+const NO_SWARM_HITS = Object.freeze([]);
 
 export class PlayerSeat {
   constructor({ index = 0, random = Math.random, bounds = WORLD_BOUNDS } = {}) {
@@ -35,6 +38,63 @@ export class PlayerSeat {
 
   get centroid() {
     return this.swarm.centroid;
+  }
+
+  // What the camera frames for this seat: the point and the swarm centroid (the point alone when none is alive).
+  get cameraFocus() {
+    return focusOf(this.player.position, this.swarm.aliveCount > 0 ? this.swarm.centroid : null);
+  }
+
+  // True on the update the fire input rises (the level is remembered).
+  firingEdge(inputState) {
+    const pressed = inputState.firing && !this.firingHeld;
+    this.firingHeld = inputState.firing;
+    return pressed;
+  }
+
+  // True on the update the bomb input rises, as firingEdge.
+  bombEdge(inputState) {
+    const pressed = inputState.bomb && !this.bombHeld;
+    this.bombHeld = inputState.bomb;
+    return pressed;
+  }
+
+  // This seat's share of Game.state.
+  hudFields() {
+    const { weapons } = this;
+    return {
+      // The swarm size stands in for lives (the HUD's life icons).
+      lives: this.swarm.aliveCount,
+      armed: weapons.armed,
+      tier: weapons.tier,
+      charge: weapons.charge,
+      railTurrets: weapons.railTurrets,
+      railTier: weapons.railTier,
+      playerX: this.player.position.x,
+      playerY: this.player.position.y,
+    };
+  }
+
+  // The renderer's swarm entry: ships and the point extrapolated by alpha, as the camera samples.
+  sceneEntry(alpha, lastDeltaSeconds, pointShown) {
+    const { player } = this;
+    const point = blendedPoint(player.position, player.velocityX, player.velocityY, alpha, lastDeltaSeconds);
+    return {
+      ships: this.swarm.shipsAt(alpha),
+      facing: player.facing,
+      pointX: point.x,
+      pointY: point.y,
+      pointShown,
+      armed: this.weapons.armed,
+    };
+  }
+
+  // Applies the GPU's swarm hit mask: { killed, last, wiped } where wiped is true when this call
+  // killed the final ship (last is then that ship).
+  applyHits(stats) {
+    const killed = this.swarm.applyHits(stats.swarmHitMask ?? NO_SWARM_HITS, stats.frameSequence);
+    const wiped = killed.length > 0 && this.swarm.aliveCount === 0;
+    return { killed, last: wiped ? killed[killed.length - 1] : null, wiped };
   }
 
   // Drops the weapons, puts the point back at the bounds center (or at start) and refills the swarm.
@@ -71,7 +131,7 @@ export class PlayerSeat {
     this.player.update(deltaSeconds, controls, { maximumTurnRadians });
   }
 
-  // Steps the swarm around the point; firing is already gated by the run phase.
+  // Steps the swarm around the point. firing is the GATED value (playing && fire input), unlike fire's raw firing plus playing.
   flock(deltaSeconds, firing) {
     const { x, y } = this.player.position;
     const aimLength = Math.hypot(this.player.aim.x, this.player.aim.y);

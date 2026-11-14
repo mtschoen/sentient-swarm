@@ -53,4 +53,82 @@ test('fire reports the kind and tier fired and queues nothing while not playing'
   const playing = seat.fire(1 / 60, { playing: true, firing: true });
   assert.equal(playing.kind, 'scatter');
   assert.equal(playing.tier, 2);
+  let spawned = 0;
+  for (let step = 0; step < 120; step += 1) {
+    seat.flock(1 / 60, true);
+    spawned += seat.fire(1 / 60, { playing: true, firing: true }).shots.spawns.length;
+  }
+  assert.ok(spawned > 0, `ships in the cone fired ${spawned} shots`);
+});
+
+test('controlsFrom gives no aim for a pointer on the point, and fires on the button or the primary pointer', () => {
+  const seat = new PlayerSeat({ random: () => 0.5 });
+  seat.reset(12);
+  const inputState = new InputState();
+  inputState.pointerWorld = { ...seat.point };
+  assert.deepEqual(seat.controlsFrom(inputState).aim, { x: 0, y: 0 });
+  assert.equal(seat.controlsFrom(inputState).firing, false);
+  inputState.pointerPrimaryDown = true;
+  assert.equal(seat.controlsFrom(inputState).firing, true);
+  inputState.pointerPrimaryDown = false;
+  inputState.firing = true;
+  assert.equal(seat.controlsFrom(inputState).firing, true);
+});
+
+test('firingEdge and bombEdge are true once per rising input', () => {
+  const seat = new PlayerSeat({ random: () => 0.5 });
+  const inputState = new InputState();
+  assert.equal(seat.firingEdge(inputState), false);
+  inputState.firing = true;
+  inputState.bomb = true;
+  assert.equal(seat.firingEdge(inputState), true);
+  assert.equal(seat.firingEdge(inputState), false);
+  assert.equal(seat.bombEdge(inputState), true);
+  assert.equal(seat.bombEdge(inputState), false);
+  inputState.bomb = false;
+  assert.equal(seat.bombEdge(inputState), false);
+  assert.equal(seat.bombHeld, false);
+});
+
+test('hudFields and cameraFocus read the point, swarm and weapon', () => {
+  const seat = new PlayerSeat({ random: () => 0.5 });
+  seat.reset(7, { x: 3, y: 4 });
+  seat.weapons.collect('pulse');
+  const fields = seat.hudFields();
+  assert.equal(fields.lives, 7);
+  assert.equal(fields.armed, 'pulse');
+  assert.equal(fields.tier, 1);
+  assert.equal(fields.playerX, 3);
+  assert.equal(fields.playerY, 4);
+  const focus = seat.cameraFocus;
+  assert.ok(Math.abs(focus.x - 3) < 1 && Math.abs(focus.y - 4) < 1);
+});
+
+test('sceneEntry extrapolates the point and names the armed weapon', () => {
+  const seat = new PlayerSeat({ random: () => 0.5 });
+  seat.reset(5, { x: 3, y: 4 });
+  const entry = seat.sceneEntry(0, 1 / 60, true);
+  assert.equal(entry.pointX, 3);
+  assert.equal(entry.pointY, 4);
+  assert.equal(entry.pointShown, true);
+  assert.equal(entry.armed, 'base');
+  assert.equal(entry.ships.length, 5);
+});
+
+test('applyHits reports the killed ships and wiped only when the last one dies', () => {
+  const seat = new PlayerSeat({ random: () => 0.5 });
+  seat.reset(3);
+  const slots = seat.swarm.contactShips(1).map((ship, index) => (ship.alive ? index : -1)).filter((index) => index >= 0);
+  const some = new Uint32Array(8);
+  some[Math.floor(slots[0] / 32)] |= 1 << (slots[0] % 32);
+  const first = seat.applyHits({ swarmHitMask: some, frameSequence: 2 });
+  assert.equal(first.killed.length, 1);
+  assert.equal(first.wiped, false);
+  assert.equal(first.last, null);
+  const all = new Uint32Array(8).fill(0xffffffff);
+  const second = seat.applyHits({ swarmHitMask: all, frameSequence: 3 });
+  assert.equal(second.killed.length, 2);
+  assert.equal(second.wiped, true);
+  assert.equal(second.last, second.killed[1]);
+  assert.deepEqual(seat.applyHits({ frameSequence: 4 }), { killed: [], last: null, wiped: false });
 });
