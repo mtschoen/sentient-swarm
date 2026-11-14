@@ -5,7 +5,9 @@ import { Game } from '../../src/game/game.js';
 import { RunPhase } from '../../src/game/run.js';
 import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND, PICKUP_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { InputState } from '../../src/input/input.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT, SWARM_HIT_MASK_WORDS, arenaBoundsForAspect } from '../../src/sim/layout.js';
+import { WORLD_HEIGHT, WORLD_WIDTH, WORLD_BOUNDS, SPECIES_COUNT, SWARM_HIT_MASK_WORDS } from '../../src/sim/layout.js';
+import { CAMERA_OVERSHOOT_FRACTION } from '../../src/game/camera.js';
+import { centeredViewBounds } from '../sim/centered-view-bounds.js';
 import { INITIAL_SWARM_SHIPS, KILLS_PER_SWARM_SHIP } from '../../src/game/player-swarm.js';
 import { SWARM_FIRE_CONE_RADIANS } from '../../src/game/swarm-fire.js';
 import { SHIP_TURN_RATE, ShipRenderer } from '../../src/render/ship.js';
@@ -53,8 +55,10 @@ function createFakeSimulation() {
     setSwarmShips(ships, radius) { this.swarmUploads.push({ ships: ships.map((ship) => ({ ...ship })), radius, sequence: this.frameSequence + 1 }); },
     setSeekScale(scale) { this.seekScales.push(scale); },
     setSpawnDistanceFraction(fraction) { this.spawnDistanceFractions.push(fraction); },
-    arenaBoundsCalls: [],
-    setArenaBounds(bounds) { this.arenaBoundsCalls.push(bounds); },
+    worldBoundsCalls: [],
+    spawnViewWidths: [],
+    setWorldBounds(bounds) { this.worldBoundsCalls.push(bounds); },
+    setSpawnViewWidth(width) { this.spawnViewWidths.push(width); },
     acknowledgeHit(sequence) { this.acknowledged.push(sequence); },
     requestKillAll() {
       this.killAllRequests += 1;
@@ -409,28 +413,45 @@ test('every hundred scored kills grows the swarm by one ship, uploaded fresh in 
   assert.equal(game.state.lives, INITIAL_SWARM_SHIPS + 2);
 });
 
-test('a bomb press kills everything before the step, once per press', async () => {
+test('a bomb press clears 1.2 view half-diagonals around the swarm before the step, once per press', async () => {
   const { game, simulation, input } = await createGame();
   game.start();
   game.update(STEP);
   simulation.events.length = 0;
+  const killAllBefore = simulation.killAllRequests;
   input.state.bomb = true;
   game.update(STEP);
   game.update(STEP);
-  assert.deepEqual(simulation.events, ['killAll', 'step', 'step']);
+  assert.deepEqual(simulation.events, ['radialKill', 'step', 'step']);
   assert.equal(game.state.bombs, 2);
+  const [blast] = simulation.radialKills;
+  const centroid = game.swarm.centroid;
+  assert.ok(Math.abs(blast.x - centroid.x) < 1 && Math.abs(blast.y - centroid.y) < 1, 'centered on the swarm');
+  assert.ok(Math.abs(blast.radius - 1.2 * Math.hypot(16, 9) / 2) < 1e-9, `radius ${blast.radius}`);
   input.state.bomb = false;
   game.update(STEP);
   input.state.bomb = true;
   game.update(STEP);
   assert.equal(game.state.bombs, 1);
-  assert.equal(simulation.killAllRequests, 3);
+  assert.equal(simulation.radialKills.length, 2);
+  // The death clear and a start stay world-wide; the bomb is not a kill-all.
+  assert.equal(simulation.killAllRequests, killAllBefore);
+});
+
+test('the bomb radius follows the view: a narrow window clears a smaller disc', async () => {
+  const { game, simulation, input } = await createGame();
+  game.setView({ width: 9, height: 9 });
+  game.start();
+  game.update(STEP);
+  input.state.bomb = true;
+  game.update(STEP);
+  assert.ok(Math.abs(simulation.radialKills.at(-1).radius - 1.2 * Math.hypot(9, 9) / 2) < 1e-9);
 });
 
 test('mouse aim is the pointer minus the player and the primary button fires, from ships flying near the aim', async () => {
   const { game, input, projectiles } = await createGame();
   game.start();
-  input.state.pointerWorld = { x: 8, y: 2.5 };
+  input.state.pointerWorld = { x: WORLD_WIDTH / 2, y: WORLD_HEIGHT / 2 - 2 };
   input.state.pointerPrimaryDown = true;
   runFor(game, 2);
   assert.deepEqual(game.player.aim, { x: 0, y: -1 });
@@ -1072,36 +1093,63 @@ test('watch mode holds the alive target at its fraction of capacity with full se
   assert.ok(simulation.seekScales[simulation.seekScales.length - 1] < 1);
 });
 
-test('setArenaBounds forwards the bounds to the simulation, ship and pickups, and scales both pressures by area', async () => {
+test('setView sets the spawn view width and the pickup view, and keeps the whole world and the alive target', async () => {
   const { game, simulation } = await createGame();
-  assert.equal(game.arenaBounds, FULL_ARENA_BOUNDS);
-  const bounds = arenaBoundsForAspect(1);
-  const fraction = (bounds.width * bounds.height) / (ARENA_WIDTH * ARENA_HEIGHT);
+  assert.equal(game.worldBounds, WORLD_BOUNDS);
   const full = game.spawnPressure.targetAlive;
   game.setWatch(0.5);
-  game.setArenaBounds(bounds);
-  assert.deepEqual(simulation.arenaBoundsCalls, [bounds]);
-  assert.equal(game.player.bounds, bounds);
-  assert.equal(game.pickups.bounds, bounds);
-  assert.equal(game.spawnPressure.targetAlive, full * fraction);
-  assert.equal(game.watchPressure.targetAlive, CAPACITY * 0.5 * fraction);
-  game.setWatch(0.25);
-  assert.equal(game.watchPressure.targetAlive, CAPACITY * 0.25 * fraction);
+  game.setView({ width: 9, height: 9 });
+  assert.deepEqual(simulation.worldBoundsCalls, []);
+  assert.deepEqual(simulation.spawnViewWidths, [9]);
+  assert.equal(game.worldBounds, WORLD_BOUNDS);
+  assert.equal(game.player.bounds, WORLD_BOUNDS);
+  assert.equal(game.pickups.viewHalfWidth, 4.5);
+  assert.equal(game.spawnPressure.targetAlive, full);
+  assert.equal(game.watchPressure.targetAlive, CAPACITY * 0.5);
 });
 
-test('the spawn director context carries the bounds and the safe distance uses their width', async () => {
+test('the spawn director context carries the world bounds, the camera view and a safe distance from the view width', async () => {
   const { game } = await createGame();
-  const bounds = arenaBoundsForAspect(1);
-  game.setArenaBounds(bounds);
+  game.setView({ width: 9, height: 9 });
   const contexts = [];
   const original = game.spawnDirector.update.bind(game.spawnDirector);
   game.spawnDirector.update = (deltaSeconds, context) => { contexts.push(context); return original(deltaSeconds, context); };
   game.update(STEP);
   assert.equal(contexts.length, 1);
-  assert.equal(contexts[0].bounds, bounds);
+  assert.equal(contexts[0].bounds, WORLD_BOUNDS);
+  assert.deepEqual(contexts[0].view, { centerX: game.camera.centerX, centerY: game.camera.centerY, width: 9, height: 9 });
   // The ramp has advanced one step by the time the director runs, so compare with a tolerance.
-  assert.ok(Math.abs(contexts[0].safeDistance - game.spawnPressure.spawnDistanceFraction * bounds.width) < 1e-6);
-  assert.ok(Math.abs(contexts[0].safeDistance - game.spawnPressure.spawnDistanceFraction * ARENA_WIDTH) > 0.1);
+  assert.ok(Math.abs(contexts[0].safeDistance - game.spawnPressure.spawnDistanceFraction * 9) < 1e-6);
+});
+
+test('the camera follows the swarm through the dead zone, clamps at the world edge and cuts on a new run', async () => {
+  const { game, input } = await createGame();
+  game.start();
+  const nearCenter = () => Math.abs(game.camera.centerX - WORLD_WIDTH / 2) < 0.5 && Math.abs(game.camera.centerY - WORLD_HEIGHT / 2) < 0.5;
+  assert.ok(nearCenter(), `camera ${game.camera.centerX}, ${game.camera.centerY}`);
+  input.state.move = { x: 1, y: 0 };
+  runFor(game, 0.5);
+  // The point moved 3 units right; the camera trails it (the swarm lags the point, the dead zone holds 1.6).
+  assert.ok(game.camera.centerX > WORLD_WIDTH / 2, `camera ${game.camera.centerX}`);
+  assert.ok(game.camera.centerX < game.player.position.x, 'the camera lags the point');
+  runFor(game, 4);
+  // Pinned against the right wall: the view's right edge is the world's plus the overshoot.
+  assert.ok(Math.abs(game.camera.centerX - (WORLD_WIDTH - 8 + CAMERA_OVERSHOOT_FRACTION * 16)) < 0.05, `camera ${game.camera.centerX}`);
+  input.state.move = { x: 0, y: 0 };
+  game.restart();
+  // Cut, not eased: at the new run's focus (the point and the fresh swarm around it) at once.
+  assert.ok(nearCenter(), `camera ${game.camera.centerX}, ${game.camera.centerY}`);
+  assert.deepEqual([game.camera.velocityX, game.camera.velocityY], [0, 0]);
+});
+
+test('watch mode holds the camera still, so the pointer-driven point cannot drag it', async () => {
+  const { game, input } = await createGame();
+  game.setWatch(0.3);
+  const before = [game.camera.centerX, game.camera.centerY];
+  input.state.pointerWorld = { x: WORLD_WIDTH / 2 + 7, y: WORLD_HEIGHT / 2 };
+  runFor(game, 2);
+  assert.deepEqual([game.camera.centerX, game.camera.centerY], before);
+  assert.equal(game.player.position.x, WORLD_WIDTH / 2 + 7);
 });
 
 test('watch mode without a pointer moves the point with the move stick', async () => {

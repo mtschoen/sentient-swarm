@@ -17,7 +17,7 @@
 // bornSequence, so a late readback never kills a ship twice or kills a ship grown into a reused slot.
 // Up to MAXIMUM_SWARM_SHIPS (256) ships; update, contactShips and ships reuse their arrays and
 // objects, so a step allocates nothing.
-import { FULL_ARENA_BOUNDS, MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
+import { WORLD_BOUNDS, MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { faceStep } from './swarm-facing.js';
 import { FISH_FEEL, FOLLOW_SMOOTH_SECONDS } from './swarm-feel.js';
 import { SWARM_CRUISE_SPEED, SWARM_MAXIMUM_SPEED, flockStep, temperamentFor } from './swarm-flocking.js';
@@ -50,7 +50,7 @@ function clearSlot(slot) {
 }
 
 export class PlayerSwarm {
-  constructor({ random = Math.random, bounds = FULL_ARENA_BOUNDS } = {}) {
+  constructor({ random = Math.random, bounds = WORLD_BOUNDS } = {}) {
     this.random = random;
     this.bounds = bounds;
     this.slots = Array.from({ length: MAXIMUM_SWARM_SHIPS }, deadSlot);

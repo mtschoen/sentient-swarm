@@ -4,7 +4,7 @@ import {
   BEES_FEEL, BUZZ_SPEED_SHARE, FEEL_DIALS, FISH_FEEL, FOLLOW_SMOOTH_SECONDS, TIGHTNESS_WELL_RATE, buzzDirection, feelFromSearch, feelToSearch,
   feelToSearchMerged, roamScaleFor,
 } from '../../src/game/swarm-feel.js';
-import { FULL_ARENA_BOUNDS } from '../../src/sim/layout.js';
+import { WORLD_BOUNDS } from '../../src/sim/layout.js';
 import { PlayerSwarm } from '../../src/game/player-swarm.js';
 import { flockStep, temperamentFor } from '../../src/game/swarm-flocking.js';
 
@@ -20,7 +20,7 @@ function sequenceRandom() {
 
 function context(feel, overrides = {}) {
   return {
-    targetX: 8, targetY: 4.5, firing: false, aimX: 0, aimY: 0, time: 1, aliveCount: 1, bounds: FULL_ARENA_BOUNDS, margin: 0.02, feel,
+    targetX: 8, targetY: 4.5, firing: false, aimX: 0, aimY: 0, time: 1, aliveCount: 1, bounds: WORLD_BOUNDS, margin: 0.02, feel,
     ...overrides,
   };
 }

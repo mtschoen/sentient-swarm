@@ -5,7 +5,7 @@
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { prependCommon } from '../gpu/shaders.js';
-import { COARSE_COLUMNS, COARSE_ROWS } from '../sim/layout.js';
+import { COARSE_CELL_SIZE, VIEW_HEIGHT } from '../sim/layout.js';
 import { SCENE_FORMAT, loadQuadHeader, loadRenderShader } from './render-shaders.js';
 
 export const GLYPH_VIEW_BYTES = 64;
@@ -20,7 +20,8 @@ export const MINIMUM_SHIP_DEVICE_PIXELS = 8;
 export const SHIP_ZOOM_EXPONENT = 0.5;
 
 // On-screen ship length (the glyph body, local [-1, 1]) in device pixels: shipArenaFraction of the
-// world height (9 units, so the ship's world size is the same at every aspect), at least MINIMUM_SHIP_DEVICE_PIXELS, times effectiveZoom ** SHIP_ZOOM_EXPONENT.
+// 16:9 view's height (VIEW_HEIGHT, 9 units, so the ship's world size is the same at every aspect
+// and world size), at least MINIMUM_SHIP_DEVICE_PIXELS, times effectiveZoom ** SHIP_ZOOM_EXPONENT.
 // A fraction of 0 or less hides the ships (the smoke's kill-flash check does this); a missing or
 // non-numeric fraction throws instead of silently hiding them.
 export function shipDevicePixels(viewport, shipArenaFraction) {
@@ -28,18 +29,17 @@ export function shipDevicePixels(viewport, shipArenaFraction) {
     throw new TypeError(`shipArenaFraction must be a number, got ${shipArenaFraction}`);
   }
   if (shipArenaFraction <= 0) return 0;
-  const unzoomed = Math.max(MINIMUM_SHIP_DEVICE_PIXELS, shipArenaFraction * viewport.worldRectDevicePixels.height);
+  const unzoomed = Math.max(MINIMUM_SHIP_DEVICE_PIXELS, shipArenaFraction * VIEW_HEIGHT * viewport.pixelsPerWorldUnit);
   return unzoomed * viewport.effectiveZoom ** SHIP_ZOOM_EXPONENT;
 }
 
 // Device-pixel area of one on-screen ship body divided by the on-screen device-pixel area of one
-// coarse cell (the field covers the whole world) (which grows with the square of the zoom). Times the coarse density (agents per
+// coarse cell (COARSE_CELL_SIZE world units on a side, growing with the square of the zoom). Times the coarse density (agents per
 // cell) it gives the fraction of a cell the ship bodies cover, so density attenuation follows what
 // is on screen: zooming in spreads the ships apart and attenuates less.
 export function shipCoverageScale(viewport, shipPixels) {
-  const rect = viewport.worldRectDevicePixels;
-  const zoom = viewport.effectiveZoom;
-  const cellArea = (rect.width / COARSE_COLUMNS) * (rect.height / COARSE_ROWS) * zoom * zoom;
+  const cellSide = COARSE_CELL_SIZE * viewport.pixelsPerWorldUnit * viewport.effectiveZoom;
+  const cellArea = cellSide * cellSide;
   return (shipPixels * shipPixels) / Math.max(cellArea, 1e-6);
 }
 

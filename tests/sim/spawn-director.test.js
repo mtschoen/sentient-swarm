@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_GATE_SCHEDULE, GATE_FADE_SECONDS, MAXIMUM_SPAWN_GATES, SpawnDirector, TELEGRAPH_SECONDS, inAimLane, validatedSchedule } from '../../src/sim/spawn-director.js';
 import { SpawnPressure } from '../../src/sim/spawner.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, arenaBoundsForAspect } from '../../src/sim/layout.js';
+import { WORLD_HEIGHT, WORLD_WIDTH } from '../../src/sim/layout.js';
+import { centeredViewBounds } from './centered-view-bounds.js';
 
 const STEP_SECONDS = 1 / 60;
 const SAFE_DISTANCE = 4;
@@ -20,8 +21,8 @@ function seededRandom(seed = 12345) {
 // The player walks a slow figure eight through the arena.
 function playerAt(seconds) {
   return {
-    playerX: ARENA_WIDTH / 2 + 5 * Math.sin(seconds * 0.4),
-    playerY: ARENA_HEIGHT / 2 + 2.5 * Math.sin(seconds * 0.8),
+    playerX: WORLD_WIDTH / 2 + 5 * Math.sin(seconds * 0.4),
+    playerY: WORLD_HEIGHT / 2 + 2.5 * Math.sin(seconds * 0.8),
   };
 }
 
@@ -76,7 +77,7 @@ test('gates open, drift, close and are replaced elsewhere over a run', () => {
         maximumStep = Math.max(maximumStep, Math.hypot(gate.x - x, gate.y - y));
       }
       positions.set(gate, [gate.x, gate.y]);
-      assert.ok(gate.x > 0 && gate.x < ARENA_WIDTH && gate.y > 0 && gate.y < ARENA_HEIGHT);
+      assert.ok(gate.x > 0 && gate.x < WORLD_WIDTH && gate.y > 0 && gate.y < WORLD_HEIGHT);
       assert.ok(gate.open >= 0 && gate.open <= 1);
     });
     previous = positions;
@@ -212,7 +213,7 @@ test('continuous mode emits from every open gate with no wave state', () => {
 
 test('gates in the aim lane never emit a wave, and new gates avoid the lane', () => {
   const director = new SpawnDirector({ random: seededRandom(8), gateCount: 4 });
-  const context = { playerX: 2, playerY: ARENA_HEIGHT / 2, aimX: 1, aimY: 0 };
+  const context = { playerX: 2, playerY: WORLD_HEIGHT / 2, aimX: 1, aimY: 0 };
   let emittingInLane = 0;
   let emittingOutside = 0;
   let openedInLane = 0;
@@ -232,7 +233,7 @@ test('gates in the aim lane never emit a wave, and new gates avoid the lane', ()
 
 test('a gate that stays in the aim lane closes after AIM_LANE_CLOSE_SECONDS', () => {
   const director = new SpawnDirector({ random: seededRandom(10), driftSpeed: 0 });
-  const context = { playerX: 2, playerY: ARENA_HEIGHT / 2, safeDistance: SAFE_DISTANCE, shares: EQUAL_SHARES };
+  const context = { playerX: 2, playerY: WORLD_HEIGHT / 2, safeDistance: SAFE_DISTANCE, shares: EQUAL_SHARES };
   director.update(STEP_SECONDS, context);
   const gate = director.gates[0];
   // Aim straight at the first gate from now on.
@@ -278,7 +279,7 @@ test('validatedSchedule accepts the range edges and rejects each field just outs
 
 // A phone in portrait or a tall window: the playable arena is a narrow strip of the world.
 test('with narrow bounds every gate opens and drifts inside the bounds, centered on them by default', () => {
-  const bounds = arenaBoundsForAspect(0.5);
+  const bounds = centeredViewBounds(0.5);
   const director = new SpawnDirector({ random: seededRandom(77), driftSpeed: 3 });
   let insideChecks = 0;
   for (let step = 0; step < 60 * 40; step += 1) {

@@ -1,12 +1,12 @@
 // Density readback for pickup placement: every DENSITY_READBACK_INTERVAL steps a small compute pass
 // sums the five species density channels of the blurred coarse field into one f32 per coarse cell
-// (64 by 36, about 9 KB; threat and padding channels are never read), copies it into its own
+// (COARSE_COLUMNS by COARSE_ROWS, 128 by 72 or about 37 KB; threat and padding channels are never read), copies it into its own
 // staging ring (three buffers) and the CPU samples the newest mapped map with densityAt. The ring
 // never blocks: a busy ring skips the copy and a map arrives a few frames later. Before the first
 // map arrives densityAt returns 0. The shader is shaders/density_sum.wgsl.
 import { createStorageBuffer, StagingRing } from '../gpu/buffers.js';
 import { loadShader, substituteConstants } from '../gpu/shaders.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, COARSE_COLUMNS, COARSE_ROWS, SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
+import { WORLD_HEIGHT, WORLD_WIDTH, COARSE_COLUMNS, COARSE_ROWS, SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
 
 export const DENSITY_READBACK_INTERVAL = 15;
 const CELL_COUNT = COARSE_COLUMNS * COARSE_ROWS;
@@ -78,8 +78,8 @@ export class DensityReadback {
   // Bilinear sample of the newest map at world position (x, y), clamped to the arena; 0 before the first map.
   densityAt(x, y) {
     if (this.map === null) return 0;
-    const column = Math.min(COARSE_COLUMNS - 1, Math.max(0, (x / ARENA_WIDTH) * COARSE_COLUMNS - 0.5));
-    const row = Math.min(COARSE_ROWS - 1, Math.max(0, (y / ARENA_HEIGHT) * COARSE_ROWS - 0.5));
+    const column = Math.min(COARSE_COLUMNS - 1, Math.max(0, (x / WORLD_WIDTH) * COARSE_COLUMNS - 0.5));
+    const row = Math.min(COARSE_ROWS - 1, Math.max(0, (y / WORLD_HEIGHT) * COARSE_ROWS - 0.5));
     const column0 = Math.floor(column);
     const row0 = Math.floor(row);
     const column1 = Math.min(COARSE_COLUMNS - 1, column0 + 1);

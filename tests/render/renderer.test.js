@@ -61,6 +61,7 @@ function createFakeSimulation(name, frameSequence) {
     fieldBuffer: buffer('field'),
     speciesTableBuffer: buffer('species'),
     particlePool: { capacity: 64, buffers: { particles: buffer('particles') }, registerBindGroupCache() {} },
+    worldBounds: { minX: 0, minY: 0, maxX: 16, maxY: 9, width: 16, height: 9 },
   };
 }
 
@@ -71,7 +72,7 @@ function createRenderer(simulation) {
   viewport.setCanvasSize(1280, 720);
   const renderer = new Renderer(gpu, { simulation, viewport, common: '', fullscreenHeader: '' });
   const pipeline = { getBindGroupLayout: () => ({}) };
-  for (const pass of [renderer.trails, renderer.glyphs, renderer.particles, renderer.warpGrid, renderer.composite]) pass.pipeline = pipeline;
+  for (const pass of [renderer.trails, renderer.glyphs, renderer.particles, renderer.warpGrid, renderer.worldBorder, renderer.composite]) pass.pipeline = pipeline;
   renderer.bloom.downsamplePipeline = pipeline;
   renderer.bloom.blurPipeline = pipeline;
   renderer.resize(1280, 720);
@@ -142,7 +143,7 @@ test('destroy destroys every texture and the pass uniform buffers', () => {
   const { renderer, log } = createRenderer(createFakeSimulation('first', 0));
   renderer.destroy();
   assert.ok(log.textures.every((texture) => texture.destroyed));
-  const uniformLabels = ['glyph-view', 'particle-view', 'warp-view', 'trail-decay', 'composite', 'bloom-blur-horizontal', 'bloom-blur-vertical'];
+  const uniformLabels = ['glyph-view', 'particle-view', 'warp-view', 'world-border-view', 'trail-decay', 'composite', 'bloom-blur-horizontal', 'bloom-blur-vertical'];
   for (const label of uniformLabels) {
     assert.ok(log.buffers.filter((buffer) => buffer.label === label).every((buffer) => buffer.destroyed), label);
   }
@@ -177,10 +178,26 @@ test('render refills the same view array per uniform buffer every frame', () => 
   renderer.render(createFakeEncoder(), { alpha: 0, time: 1, scene, impulses: [{ x: 1, y: 1, strength: 1, time: 1 }] });
   frame = 1;
   renderer.render(createFakeEncoder(), { alpha: 0, time: 2, scene });
-  const labels = ['warp-view', 'trail-decay', 'glyph-view', 'projectile-view', 'pickup-view', 'particle-view', 'ship-view', 'composite'];
+  const labels = ['warp-view', 'world-border-view', 'trail-decay', 'glyph-view', 'projectile-view', 'pickup-view', 'particle-view', 'ship-view', 'composite'];
   for (const label of labels) {
     assert.ok(frames[0].has(label) && frames[1].has(label), `${label} written in both frames`);
     assert.equal(frames[1].get(label), frames[0].get(label), `${label} reuses its array`);
   }
   assert.equal(renderer.impulses.toUniformArray(2, renderer.impulseUniform), renderer.impulseUniform);
+});
+
+test('the trail decay shifts by the camera movement in device pixels since the last frame, and not after a resize', () => {
+  const { renderer } = createRenderer(createFakeSimulation('first', 0));
+  const draws = [];
+  renderer.trails.draw = (pass, previousIndex, decay, shiftX, shiftY) => draws.push([shiftX, shiftY]);
+  const viewport = renderer.viewport;
+  viewport.setCamera({ centerX: 10, centerY: 5 });
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 1 });
+  // 80 device pixels per world unit at 1280 by 720.
+  viewport.setCamera({ centerX: 10.5, centerY: 4.75 });
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 2 });
+  renderer.resize(1280, 720);
+  viewport.setCamera({ centerX: 12, centerY: 4.75 });
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 3 });
+  assert.deepEqual(draws, [[0, 0], [40, -20], [0, 0]]);
 });

@@ -22,7 +22,7 @@
 //     stats count them all in killsUnscored and none in killsSinceLastRead, the score stays 0,
 //     and the next step kills nothing.
 import { createGpuContext } from '/src/gpu/device.js';
-import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, MAXIMUM_SWARM_SHIPS, SPECIES_COUNT } from '/src/sim/layout.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, WORLD_HEIGHT, WORLD_WIDTH, MAXIMUM_SWARM_SHIPS, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { Game } from '/src/game/game.js';
 import { SWARM_SHIP_RADIUS } from '/src/game/player-swarm.js';
@@ -34,7 +34,7 @@ const GROWN_CAPACITY = 32768;
 const STEP_SECONDS = 1 / 60;
 const CLEAR_SPAWN = [200, 0, 0, 0, 0];
 const READBACK_ATTEMPTS = 20;
-const CENTER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
+const CENTER = [WORLD_WIDTH / 2, WORLD_HEIGHT / 2];
 // Ship positions for the cases, far apart so no ship reaches another's agents.
 const SPOTS = {
   slotZero: [4, 3],

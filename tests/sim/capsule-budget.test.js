@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { PROJECTILE_KINDS, WEAPON_TYPES } from '../../src/game/weaponTypes.js';
 import { PRESETS } from '../../src/settings/presets.js';
-import { ARENA_HEIGHT, ARENA_WIDTH } from '../../src/sim/layout.js';
+import { WORLD_HEIGHT, WORLD_WIDTH } from '../../src/sim/layout.js';
 
 const FIXED_STEP_SECONDS = 1 / 60;
 const HEADING_SAMPLES = 180;
@@ -23,8 +23,8 @@ async function shaderConstant(name) {
 
 // Cells collideCapsule walks for the segment from start to end with the given reach.
 function capsuleCellCount(start, end, reach, cellSize) {
-  const columns = Math.ceil(ARENA_WIDTH / cellSize);
-  const rows = Math.ceil(ARENA_HEIGHT / cellSize);
+  const columns = Math.ceil(WORLD_WIDTH / cellSize);
+  const rows = Math.ceil(WORLD_HEIGHT / cellSize);
   const majorIsX = Math.abs(end[0] - start[0]) >= Math.abs(end[1] - start[1]);
   const startAxes = majorIsX ? start : [start[1], start[0]];
   const endAxes = majorIsX ? end : [end[1], end[0]];
@@ -53,7 +53,7 @@ function worstCellCount(travel, reach, cellSize) {
     const angle = (heading / HEADING_SAMPLES) * (Math.PI / 4);
     for (let offsetX = 0; offsetX < OFFSET_SAMPLES; offsetX += 1) {
       for (let offsetY = 0; offsetY < OFFSET_SAMPLES; offsetY += 1) {
-        const start = [ARENA_WIDTH / 2 + (offsetX / OFFSET_SAMPLES) * cellSize, ARENA_HEIGHT / 2 + (offsetY / OFFSET_SAMPLES) * cellSize];
+        const start = [WORLD_WIDTH / 2 + (offsetX / OFFSET_SAMPLES) * cellSize, WORLD_HEIGHT / 2 + (offsetY / OFFSET_SAMPLES) * cellSize];
         const end = [start[0] + Math.cos(angle) * travel, start[1] + Math.sin(angle) * travel];
         worst = Math.max(worst, capsuleCellCount(start, end, reach, cellSize));
       }

@@ -60,7 +60,7 @@
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
-import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, PROJECTILE_FLAG_ALIVE, PROJECTILE_FLAG_MISSILE_RING, SPECIES_COUNT } from '/src/sim/layout.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, PROJECTILE_FLAG_ALIVE, PROJECTILE_FLAG_MISSILE_RING, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES } from '/src/sim/params.js';
 import { defaultSpecies, normalizeShares } from '/src/sim/species.js';
@@ -76,6 +76,11 @@ const PROJECTILE_OFFSETS = { position: 0, velocity: 16, radius: 24, lifetime: 28
 const ARENA_INSET = 0.001;
 // Every kill's burst: params.killBurstParticles at its default (the pool has room for all of them here).
 const PROJECTILE_KILL_PARTICLES = DEFAULT_KILL_BURST_PARTICLES + DEFAULT_KILL_FRAGMENT_PARTICLES;
+// The checks run in a 16 by 9 playable rectangle at the world origin (Simulation.setWorldBounds),
+// the bounds every position and expectation below is written for.
+const ARENA_WIDTH = 16;
+const ARENA_HEIGHT = 9;
+const CHECK_BOUNDS = { minX: 0, minY: 0, maxX: ARENA_WIDTH, maxY: ARENA_HEIGHT };
 const CENTER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
 
 function seededRandom(seed) {
@@ -701,6 +706,7 @@ async function runCheck() {
 
   const species = defaultSpecies().map((row) => ({ ...row, maximumSpeed: 0 }));
   const simulation = await Simulation.create(gpu, { capacity: CAPACITY, species, shares: normalizeShares([1, 1, 1, 1, 1]) });
+  simulation.setWorldBounds(CHECK_BOUNDS);
   simulation.setPlayer(1, 1);
   const projectiles = await Projectiles.create(gpu, {});
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));

@@ -17,6 +17,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
+import { WORLD_HEIGHT, WORLD_WIDTH } from '../../src/sim/layout.js';
 
 const SEARCH = '?probe=off&capacity=262144';
 const READY_TIMEOUT_MILLISECONDS = 15_000;
@@ -133,7 +134,8 @@ async function checkDesktop(baseUrl) {
     await page.mouse.move(DESKTOP_VIEWPORT.width * 0.2, DESKTOP_VIEWPORT.height * 0.3);
     await waitFrames(page, SETTLE_FRAMES);
     state = await readLab(page);
-    expect(state.player.x < 6 && state.player.y < 4, `the watch point should follow the pointer to the upper left, got ${JSON.stringify(state.player)}`);
+    // The camera holds still in Watch, on the world center, so the upper left of the window is up and left of it.
+    expect(state.player.x < WORLD_WIDTH / 2 - 2 && state.player.y < WORLD_HEIGHT / 2 - 0.5, `the watch point should follow the pointer to the upper left, got ${JSON.stringify(state.player)}`);
     expect(state.phase === 'ready', `a pointer move must not start the run in Watch, got ${state.phase}`);
 
     await page.click('.lab-panel .lab-play');

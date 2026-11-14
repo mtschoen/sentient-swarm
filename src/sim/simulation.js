@@ -43,11 +43,11 @@ import { DensityReadback } from './density-readback.js';
 import { SpatialGrid } from './grid.js';
 import { DebugKillPass, KillAllPass, PlayerContactPass, SWARM_UNIFORM_BYTES, packSwarmShips } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SHADER_CONSTANTS, SPECIES_COUNT, agentBufferBytes, gridDimensions } from './layout.js';
+import { SHADER_CONSTANTS, SPECIES_COUNT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, agentBufferBytes, gridDimensions } from './layout.js';
 import {
   DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES,
   DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, SIM_PARAMS_BYTES,
-  packSimParams, validatedArenaBounds, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles,
+  packSimParams, validatedWorldBounds, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles,
   validatedKillFragmentParticles, validatedSpawnBandWidth, validatedSpawnDensityBias, validatedWallMargin,
   validatedWallStiffness,
 } from './params.js';
@@ -129,7 +129,7 @@ export class Simulation {
     this.paramsBufferValue = createUniformBuffer(this.device, SIM_PARAMS_BYTES, 'sim-params');
     this.statsBufferValue = createStorageBuffer(this.device, STATS_BYTES, 'stats');
     this.stagingRing = new StagingRing(this.device, STATS_BYTES);
-    this.playerPosition = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
+    this.playerPosition = [WORLD_WIDTH / 2, WORLD_HEIGHT / 2];
     // Contact is off until the first setPlayerState, so the Plan A demo's pointer never hits.
     this.playerContact = null;
     this.acknowledgedHitSequence = 0;
@@ -149,10 +149,12 @@ export class Simulation {
     this.sameSpeciesCohesion = true;
     // Multiplier on every species' seek weight; the game sets it from SpawnPressure every step.
     this.seekScale = 1;
-    // Minimum spawn distance from the player, a fraction of the arena bounds width (also from SpawnPressure).
+    // Minimum spawn distance from the player, a fraction of the view width (also from SpawnPressure),
+    // and that view width (setSpawnViewWidth, a spawn hint: the simulation never reads a camera).
     this.spawnDistanceFraction = 0.25;
-    // The playable arena inside the world (arenaBoundsForAspect in layout.js); the whole world by default.
-    this.arenaBounds = FULL_ARENA_BOUNDS;
+    this.spawnViewWidth = VIEW_WIDTH;
+    // The playable rectangle inside the world (setWorldBounds); the whole world by default.
+    this.worldBounds = WORLD_BOUNDS;
     // Lab knobs (task C0b): particles per kill, wall band depth and spawn density bias.
     this.killBurstParticles = DEFAULT_KILL_BURST_PARTICLES;
     this.spawnBandWidth = DEFAULT_SPAWN_BAND_WIDTH;
@@ -224,9 +226,11 @@ export class Simulation {
   }
 
   // Kills every agent within radius of (x, y), spawning ones included, in the next step only,
-  // through the kill-all pass; those kills land in killsUnscored. A later request in the same
-  // step replaces it, and a kill-all requested for that step wins over it.
+  // through the kill-all pass; those kills land in killsUnscored. Of two requests for the same step
+  // the larger radius wins (a bomb and a pickup blast together), and a kill-all requested for that
+  // step wins over both.
   requestRadialKill(x, y, radius) {
+    if (this.radialKill !== null && this.radialKill.radius >= radius) return;
     this.radialKill = { x, y, radius };
   }
 
@@ -272,17 +276,24 @@ export class Simulation {
     this.seekScale = scale;
   }
 
-  // Spawns from the next step on land at least fraction * arenaBounds.width from the player.
+  // Spawns from the next step on land at least fraction * spawnViewWidth from the player.
   setSpawnDistanceFraction(fraction) {
     this.spawnDistanceFraction = fraction;
   }
 
-  // The playable arena from the next step on: { minX, minY, maxX, maxY } in world units, a
-  // non-empty rectangle inside the 16 by 9 world (arenaBoundsForAspect). Integrate's walls, the wall
-  // band and gate spawns, the spawn distance and the projectile edges use it; the grid and the
-  // coarse field keep covering the whole world. Throws RangeError and changes nothing when invalid.
-  setArenaBounds(bounds) {
-    this.arenaBounds = validatedArenaBounds(bounds);
+  // The width in world units of what the player sees (the view), which the minimum spawn distance is
+  // a fraction of. Throws RangeError unless it is a positive finite number.
+  setSpawnViewWidth(width) {
+    if (!(Number.isFinite(width) && width > 0)) throw new RangeError(`spawn view width must be a positive finite number, got ${width}`);
+    this.spawnViewWidth = width;
+  }
+
+  // The playable rectangle from the next step on: { minX, minY, maxX, maxY } in world units, a
+  // non-empty rectangle inside the world (WORLD_WIDTH by WORLD_HEIGHT). Integrate's walls, the wall
+  // band and gate spawns and the projectile edges use it; the grid and the coarse field keep
+  // covering the whole world. Throws RangeError and changes nothing when invalid.
+  setWorldBounds(bounds) {
+    this.worldBounds = validatedWorldBounds(bounds);
   }
 
   // Particles per kill from the next step on, an integer in [0, MAXIMUM_KILL_BURST_PARTICLES]
@@ -292,8 +303,8 @@ export class Simulation {
     this.killBurstParticles = validatedKillBurstParticles(count);
   }
 
-  // Depth in world units of the wall band new agents spawn in, in (0, ARENA_HEIGHT / 2]; half the
-  // arena height spawns anywhere. Throws RangeError when out of range.
+  // Depth in world units of the wall band new agents spawn in, in (0, WORLD_HEIGHT / 2]; half the
+  // bounds' shorter side spawns anywhere. Throws RangeError when out of range.
   setSpawnBandWidth(width) {
     this.spawnBandWidth = validatedSpawnBandWidth(width);
   }
@@ -412,8 +423,8 @@ export class Simulation {
       frameSequence: this.frameSequenceValue,
       sameSpeciesCohesion: this.sameSpeciesCohesion ? 1 : 0,
       seekScale: this.seekScale,
-      spawnDistanceFraction: this.spawnDistanceFraction,
-      arenaBounds: this.arenaBounds,
+      spawnDistance: this.spawnDistanceFraction * this.spawnViewWidth,
+      worldBounds: this.worldBounds,
       killBurstParticles: this.killBurstParticles,
       killFragmentParticles: this.killFragmentParticles,
       deathFloodParticles: this.killAllRequested && this.deathFloodRequested ? this.deathFloodParticles : 0,
@@ -551,7 +562,8 @@ export class Simulation {
     next.setSameSpeciesCohesion(this.sameSpeciesCohesion);
     next.setSeekScale(this.seekScale);
     next.setSpawnDistanceFraction(this.spawnDistanceFraction);
-    next.setArenaBounds(this.arenaBounds);
+    next.setSpawnViewWidth(this.spawnViewWidth);
+    next.setWorldBounds(this.worldBounds);
     next.setKillBurstParticles(this.killBurstParticles);
     next.setSpawnBandWidth(this.spawnBandWidth);
     next.setSpawnDensityBias(this.spawnDensityBias);

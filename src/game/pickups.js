@@ -1,11 +1,15 @@
 // Pickup director: rotates the offered pickup type (the weapons, then the time warp) and spawns
-// pickups on milestones and the recovery guard.
+// pickups on milestones and the recovery guard. A pickup lands on an annulus around the player,
+// inside the world bounds and inside a view-sized rectangle centered on the player, so it appears
+// near enough to reach; the annulus radii (minimumDistance and maximumDistance, for the 16:9 view)
+// scale with the view's half-diagonal (setView), so a narrow window places them closer.
 import { PICKUP_TYPE_NAMES } from './weaponTypes.js';
-import { FULL_ARENA_BOUNDS } from '../sim/layout.js';
+import { VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS } from '../sim/layout.js';
 
 const PLACEMENT_ATTEMPTS = 16;
 const DENSITY_CANDIDATES = 8;
 const TIME_EPSILON = 1e-9;
+const REFERENCE_HALF_DIAGONAL = Math.hypot(VIEW_WIDTH, VIEW_HEIGHT) / 2;
 
 export class PickupDirector {
   constructor({
@@ -14,23 +18,41 @@ export class PickupDirector {
     fadeSeconds = 10,
     minimumDistance = 3,
     maximumDistance = 5,
-    bounds = FULL_ARENA_BOUNDS,
+    bounds = WORLD_BOUNDS,
     random = Math.random,
   } = {}) {
     if (!(rotationSeconds > 0)) throw new Error(`rotationSeconds must be above 0, got ${rotationSeconds}`);
     this.rotationSeconds = rotationSeconds;
     this.pitySeconds = pitySeconds;
     this.fadeSeconds = fadeSeconds;
-    this.minimumDistance = minimumDistance;
-    this.maximumDistance = maximumDistance;
+    this.referenceMinimumDistance = minimumDistance;
+    this.referenceMaximumDistance = maximumDistance;
     this.bounds = bounds;
     this.random = random;
+    this.setView(VIEW_WIDTH, VIEW_HEIGHT);
     this.reset();
   }
 
-  // The playable rectangle changed (a canvas resize); pickups already placed stay where they are.
+  // The playable rectangle changed; pickups already placed stay where they are.
   setBounds(bounds) {
     this.bounds = bounds;
+  }
+
+  // The view's size in world units (a canvas resize): new pickups land within a rectangle of this
+  // size around the player, on an annulus scaled by its half-diagonal over the 16:9 view's.
+  setView(width, height) {
+    this.viewHalfWidth = width / 2;
+    this.viewHalfHeight = height / 2;
+    const scale = Math.hypot(width, height) / 2 / REFERENCE_HALF_DIAGONAL;
+    this.minimumDistance = this.referenceMinimumDistance * scale;
+    this.maximumDistance = this.referenceMaximumDistance * scale;
+  }
+
+  // Inside the world bounds and within the view-sized rectangle around the player.
+  placeable(x, y, playerX, playerY) {
+    const { minX, minY, maxX, maxY } = this.bounds;
+    return x >= minX && x <= maxX && y >= minY && y <= maxY
+      && Math.abs(x - playerX) <= this.viewHalfWidth && Math.abs(y - playerY) <= this.viewHalfHeight;
   }
 
   reset() {
@@ -72,8 +94,8 @@ export class PickupDirector {
   }
 
   // Rejection-samples points on the placement annulus (16 attempts). Without densityAt the first
-  // in-arena point wins; with densityAt(x, y) the lowest-density of the first 8 in-arena points wins
-  // (ties go to the earlier one). If every attempt lands outside the arena it steps minimumDistance toward the arena center.
+  // placeable point wins; with densityAt(x, y) the lowest-density of the first 8 placeable points wins
+  // (ties go to the earlier one). If no attempt is placeable it steps minimumDistance toward the bounds center.
   // A pity spawn (the base-gun recovery guard) always offers a weapon: on the time warp slot it
   // takes the next slot's type instead, leaving the rotation where it is.
   spawn(playerX, playerY, densityAt = null, { pity = false } = {}) {
@@ -84,7 +106,7 @@ export class PickupDirector {
       const distance = this.minimumDistance + this.random() * (this.maximumDistance - this.minimumDistance);
       const x = playerX + Math.cos(angle) * distance;
       const y = playerY + Math.sin(angle) * distance;
-      if (x >= this.bounds.minX && x <= this.bounds.maxX && y >= this.bounds.minY && y <= this.bounds.maxY) candidates.push({ x, y });
+      if (this.placeable(x, y, playerX, playerY)) candidates.push({ x, y });
     }
     let chosen = null;
     if (candidates.length > 0) {

@@ -4,7 +4,7 @@
 // is longer than AIM_DEADZONE and otherwise holds its last value; facing is the aim's angle. An
 // optional maximumTurnRadians per update limits how far the aim turns toward the input aim.
 // Getters return copies.
-import { FULL_ARENA_BOUNDS } from '../sim/layout.js';
+import { WORLD_BOUNDS } from '../sim/layout.js';
 
 const AIM_DEADZONE = 0.2;
 const INITIAL_AIM = { x: 1, y: 0 };
@@ -28,7 +28,7 @@ export function turnAimToward(currentX, currentY, targetX, targetY, maximumTurnR
 }
 
 export class PlayerShip {
-  constructor({ speed = 6, radius = 0.12, bounds = FULL_ARENA_BOUNDS } = {}) {
+  constructor({ speed = 6, radius = 0.12, bounds = WORLD_BOUNDS } = {}) {
     PlayerShip.#validate(bounds, radius);
     this.speed = speed;
     this.velocityX = 0;

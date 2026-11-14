@@ -2,7 +2,7 @@
 // and polling the stats ring after every submit (stats lag one step), and checks: (a) the alive total tracks the ramping target (0.6 to 1.02
 // of it) and never exceeds what was requested (no double-spent budget); (b) every species holds
 // its share within 10 percent relative; (c) the read-back frameSequence lags the CPU frame by at
-// most 3; (d) after frame 1 every agent was spawned that frame: it sits at least ARENA_WIDTH / 4
+// most 3; (d) after frame 1 every agent was spawned that frame: it sits at least DEFAULT_SPAWN_DISTANCE (a quarter of the view width)
 // from the player and within the default spawn band of a wall (task C0b) with 29 spawn-in frames left, in-range species, phase and hueJitter, and zero
 // velocity unless integrate's wall spring already pushed it (inside DEFAULT_WALL_MARGIN of an edge);
 // (e) recreateWithCapacity(131072) keeps at least 95 percent of the alive agents after one more step;
@@ -23,13 +23,13 @@
 // the check cannot fall back to the lag-1 case), and the peak alive / target ratio over the run,
 // target taken at each step's request, stays at or below 1.05.
 import { createGpuContext } from '/src/gpu/device.js';
-import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT } from '/src/sim/layout.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, WORLD_HEIGHT, WORLD_WIDTH, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT } from '/src/sim/layout.js';
 import { normalizeShares } from '/src/sim/species.js';
 import { SpawnPressure } from '/src/sim/spawner.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { DENSITY_READBACK_INTERVAL } from '/src/sim/density-readback.js';
 import { PARTICLE_HEADER_BYTES, PARTICLE_STRIDE_BYTES } from '/src/sim/particles.js';
-import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_WALL_MARGIN } from '/src/sim/params.js';
+import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DISTANCE, DEFAULT_WALL_MARGIN } from '/src/sim/params.js';
 
 const INITIAL_CAPACITY = 65536;
 const GROWN_CAPACITY = 131072;
@@ -37,7 +37,7 @@ const FRAME_COUNT = 300;
 const STEP_SECONDS = 1 / 60;
 const SPAWN_FRAMES = 30;
 const MAXIMUM_SEQUENCE_LAG = 3;
-const PLAYER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
+const PLAYER = [WORLD_WIDTH / 2, WORLD_HEIGHT / 2];
 const READBACK_ATTEMPTS = 20;
 const PHASE_TOLERANCE = 1e-5;
 const KILL_RADIUS = 2;
@@ -59,7 +59,8 @@ const CADENCE_FRAMES = 300;
 // species 0 spawn lands at the first gate and every species 1 spawn at the second; a spawn moves
 // by its outward ejection (at most 1.6 world units per second) for one step before the readback.
 const GATE_CHECK_CAPACITY = 16384;
-const GATE_CHECK_GATES = [{ x: 3, y: 2, radius: 0.6, emit: 1, species: 0 }, { x: 13, y: 7, radius: 0.6, emit: 1, species: 1 }];
+// Placed around PLAYER, the same offsets from the player at any world size.
+const GATE_CHECK_GATES = [{ x: PLAYER[0] - 5, y: PLAYER[1] - 2.5, radius: 0.6, emit: 1, species: 0 }, { x: PLAYER[0] + 5, y: PLAYER[1] + 2.5, radius: 0.6, emit: 1, species: 1 }];
 const GATE_CHECK_SPAWNS = 400;
 const GATE_EJECT_REACH = 1.6 * STEP_SECONDS + 1e-4;
 const CADENCE_BURST_INTERVAL = 50;
@@ -116,9 +117,9 @@ function spawnPlacement(agentBytes) {
     const distance = Math.hypot(x - PLAYER[0], y - PLAYER[1]);
     closest = Math.min(closest, distance);
     const slot = base / AGENT_STRIDE_BYTES;
-    if (distance < ARENA_WIDTH / 4) return { failure: `slot ${slot} spawned ${distance.toFixed(3)} from the player` };
-    if (x < 0 || x > ARENA_WIDTH || y < 0 || y > ARENA_HEIGHT) return { failure: `slot ${slot} spawned outside the arena at (${x}, ${y})` };
-    const wallDistance = Math.min(x, y, ARENA_WIDTH - x, ARENA_HEIGHT - y);
+    if (distance < DEFAULT_SPAWN_DISTANCE) return { failure: `slot ${slot} spawned ${distance.toFixed(3)} from the player` };
+    if (x < 0 || x > WORLD_WIDTH || y < 0 || y > WORLD_HEIGHT) return { failure: `slot ${slot} spawned outside the arena at (${x}, ${y})` };
+    const wallDistance = Math.min(x, y, WORLD_WIDTH - x, WORLD_HEIGHT - y);
     if (wallDistance > DEFAULT_SPAWN_BAND_WIDTH) return { failure: `slot ${slot} spawned ${wallDistance.toFixed(3)} from the nearest wall, outside the ${DEFAULT_SPAWN_BAND_WIDTH} band` };
     const insideMargin = wallDistance < DEFAULT_WALL_MARGIN;
     if (!insideMargin && (velocity[0] !== 0 || velocity[1] !== 0)) return { failure: `slot ${slot} has velocity ${velocity} in its spawn frame` };
@@ -129,7 +130,7 @@ function spawnPlacement(agentBytes) {
     if (!(hueJitter >= -1 && hueJitter <= 1)) return { failure: `slot ${slot} has hueJitter ${hueJitter}` };
   }
   if (spawning === 0) return { failure: 'no agent spawned' };
-  return { summary: `${spawning} agents spawned in frame 1, closest ${closest.toFixed(3)} from the player (need >= ${ARENA_WIDTH / 4})` };
+  return { summary: `${spawning} agents spawned in frame 1, closest ${closest.toFixed(3)} from the player (need >= ${DEFAULT_SPAWN_DISTANCE})` };
 }
 
 // Drains every ready ring slot into collected, keyed by frameSequence.
@@ -165,8 +166,8 @@ function threatNearCenter(accumulatorBytes, center) {
   const cells = new Uint32Array(accumulatorBytes);
   let total = 0;
   for (let index = 0; index < cells.length; index += 1) {
-    const x = ((index % COARSE_COLUMNS) + 0.5) / COARSE_COLUMNS * ARENA_WIDTH;
-    const y = (Math.floor(index / COARSE_COLUMNS) + 0.5) / COARSE_ROWS * ARENA_HEIGHT;
+    const x = ((index % COARSE_COLUMNS) + 0.5) / COARSE_COLUMNS * WORLD_WIDTH;
+    const y = (Math.floor(index / COARSE_COLUMNS) + 0.5) / COARSE_ROWS * WORLD_HEIGHT;
     if (Math.hypot(x - center[0], y - center[1]) <= KILL_RADIUS + 1) total += cells[index];
   }
   return total / THREAT_FIXED_POINT_SCALE;
@@ -303,8 +304,8 @@ async function runDensityCheck(gpu) {
   await submitStep(device, simulation, zeroSpawns());
   const field = await simulation.readCoarseField();
   const first = await pollUntilMaps(device, simulation, 1);
-  const cellColumn = Math.floor(3.2 / ARENA_WIDTH * COARSE_COLUMNS);
-  const cellRow = Math.floor(4.2 / ARENA_HEIGHT * COARSE_ROWS);
+  const cellColumn = Math.floor(3.2 / WORLD_WIDTH * COARSE_COLUMNS);
+  const cellRow = Math.floor(4.2 / WORLD_HEIGHT * COARSE_ROWS);
   const cell = cellRow * COARSE_COLUMNS + cellColumn;
   let expectedSum = 0;
   for (let channel = 0; channel < SPECIES_COUNT; channel += 1) expectedSum += field[cell * 8 + channel];
@@ -459,7 +460,7 @@ async function runCheck() {
 async function runGateCheck(gpu) {
   const { device } = gpu;
   const simulation = await Simulation.create(gpu, { capacity: GATE_CHECK_CAPACITY, shares: normalizeShares([1, 1, 1, 1, 1]) });
-  simulation.setPlayer(ARENA_WIDTH / 2, ARENA_HEIGHT / 2);
+  simulation.setPlayer(WORLD_WIDTH / 2, WORLD_HEIGHT / 2);
   const spawnPerSpecies = Uint32Array.from({ length: SPECIES_COUNT }, (unused, species) => (species < 2 ? GATE_CHECK_SPAWNS : 0));
   await submitStep(device, simulation, spawnPerSpecies, { gates: GATE_CHECK_GATES, speciesBias: 1 });
   const view = new DataView(await readBuffer(device, simulation.agentsBuffer));

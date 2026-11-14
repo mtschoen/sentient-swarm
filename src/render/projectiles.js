@@ -10,7 +10,7 @@ import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
 export const PROJECTILE_VIEW_BYTES = 80;
 const PROJECTILE_VIEW_FLOATS = PROJECTILE_VIEW_BYTES / Float32Array.BYTES_PER_ELEMENT;
-const ARENA_BOUNDS_FLOAT_OFFSET = 16;
+const WORLD_BOUNDS_FLOAT_OFFSET = 16;
 const VERTICES_PER_QUAD = 4;
 
 // The weapon whose palette entry colors each projectile kind.
@@ -25,15 +25,15 @@ const KIND_WEAPONS = Object.freeze({
 });
 
 // Matches the ProjectileView table in projectiles.wgsl: the world view (32 bytes), eight hue slots (bytes 32 to 63,
-// one per kind), then the arena bounds vec4f (minX, minY, maxX, maxY at bytes 64 to 79).
-// Fills floats (a new array by default) and returns it.
-export function packProjectileView({ viewport, time }, floats = new Float32Array(PROJECTILE_VIEW_FLOATS)) {
+// one per kind), then the world bounds vec4f (minX, minY, maxX, maxY at bytes 64 to 79): the
+// simulation's playable rectangle, which the projectile step and the beam's kill sector stop at, so
+// the beam is drawn to the same edge it kills to. Fills floats (a new array by default) and returns it.
+export function packProjectileView({ viewport, time, worldBounds }, floats = new Float32Array(PROJECTILE_VIEW_FLOATS)) {
   packWorldView(viewport, time, floats);
   Object.entries(KIND_WEAPONS).forEach(([kind, weapon]) => {
     floats[WORLD_VIEW_FLOATS + Number(kind)] = WEAPON_HUES[weapon];
   });
-  const bounds = viewport.arenaBounds;
-  floats.set([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY], ARENA_BOUNDS_FLOAT_OFFSET);
+  floats.set([worldBounds.minX, worldBounds.minY, worldBounds.maxX, worldBounds.maxY], WORLD_BOUNDS_FLOAT_OFFSET);
   return floats;
 }
 
@@ -65,10 +65,11 @@ export class ProjectileRenderer {
     });
   }
 
-  // Draws into an open render pass whose color target is a scene texture.
-  encode(pass, time, projectiles = this.projectiles) {
+  // Draws into an open render pass whose color target is a scene texture. worldBounds is the
+  // simulation's (Simulation.worldBounds).
+  encode(pass, time, projectiles, worldBounds) {
     if (projectiles === null) return;
-    this.device.queue.writeBuffer(this.viewBuffer, 0, packProjectileView({ viewport: this.viewport, time }, this.viewFloats));
+    this.device.queue.writeBuffer(this.viewBuffer, 0, packProjectileView({ viewport: this.viewport, time, worldBounds }, this.viewFloats));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer, projectiles.buffer]));
     pass.draw(VERTICES_PER_QUAD, projectiles.capacity);

@@ -15,7 +15,7 @@ import { BLOOM_DIVISORS } from '/src/render/bloom.js';
 import { Renderer } from '/src/render/renderer.js';
 import { Viewport } from '/src/render/viewport.js';
 import {
-  AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT,
+  AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, WORLD_HEIGHT, WORLD_WIDTH, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT,
 } from '/src/sim/layout.js';
 import { PARTICLE_HEADER_BYTES, PARTICLE_STRIDE_BYTES } from '/src/sim/particles.js';
 import { Simulation } from '/src/sim/simulation.js';
@@ -48,8 +48,8 @@ function seedAgents(device, simulation, random) {
   const view = new DataView(bytes);
   const counts = new Float32Array(COARSE_COLUMNS * COARSE_ROWS * SPECIES_COUNT);
   for (let slot = 0; slot < AGENT_COUNT; slot += 1) {
-    const x = 0.05 + random() * (ARENA_WIDTH - 0.1);
-    const y = 0.05 + random() * (ARENA_HEIGHT - 0.1);
+    const x = 0.05 + random() * (WORLD_WIDTH - 0.1);
+    const y = 0.05 + random() * (WORLD_HEIGHT - 0.1);
     const heading = random() * TAU;
     const speed = 0.5 + random();
     const species = slot % SPECIES_COUNT;
@@ -62,8 +62,8 @@ function seedAgents(device, simulation, random) {
     view.setUint32(base + AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
     view.setFloat32(base + AGENT_OFFSETS.phase, random() * TAU, true);
     view.setFloat32(base + AGENT_OFFSETS.hueJitter, random() * 2 - 1, true);
-    const column = Math.min(COARSE_COLUMNS - 1, Math.floor((x / ARENA_WIDTH) * COARSE_COLUMNS));
-    const row = Math.min(COARSE_ROWS - 1, Math.floor((y / ARENA_HEIGHT) * COARSE_ROWS));
+    const column = Math.min(COARSE_COLUMNS - 1, Math.floor((x / WORLD_WIDTH) * COARSE_COLUMNS));
+    const row = Math.min(COARSE_ROWS - 1, Math.floor((y / WORLD_HEIGHT) * COARSE_ROWS));
     counts[(row * COARSE_COLUMNS + column) * SPECIES_COUNT + species] += 1;
   }
   device.queue.writeBuffer(simulation.agentsBuffer, 0, bytes);
@@ -81,8 +81,8 @@ function seedField(device, simulation, counts) {
       for (let species = 0; species < SPECIES_COUNT; species += 1) {
         field[cell * COARSE_CHANNELS + species] = counts[cell * SPECIES_COUNT + species];
       }
-      const x = ((column + 0.5) / COARSE_COLUMNS) * ARENA_WIDTH;
-      const y = ((row + 0.5) / COARSE_ROWS) * ARENA_HEIGHT;
+      const x = ((column + 0.5) / COARSE_COLUMNS) * WORLD_WIDTH;
+      const y = ((row + 0.5) / COARSE_ROWS) * WORLD_HEIGHT;
       const distance = Math.hypot(x - THREAT_CENTER[0], y - THREAT_CENTER[1]);
       field[cell * COARSE_CHANNELS + SPECIES_COUNT] = THREAT_PEAK * Math.exp(-distance * distance);
     }
