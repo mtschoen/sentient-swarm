@@ -74,6 +74,7 @@ import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
 import { TimeWarp } from './time-warp.js';
 import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS, PlayerSwarm, SWARM_SHIP_RADIUS } from './player-swarm.js';
+import { blendedPoint } from './swarm-blend.js';
 import { SwarmFire } from './swarm-fire.js';
 import { SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../sim/spawner.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
@@ -661,17 +662,20 @@ export class Game {
   // What the renderer draws besides the enemy swarm: the player swarm (white ships, the controlled
   // point's marker while Playing) replaces the ship, so ship is always null. The player swarm hides
   // from death on, and at game over.
-  scene() {
+  // alpha is FrameLoop's fraction of an update, the one the camera samples with: the ships and the
+  // point are drawn extrapolated by it so they agree with the camera.
+  scene(alpha = 0) {
     const hidden = [RunPhase.Dying, RunPhase.Respawning, RunPhase.GameOver].includes(this.run.phase);
+    const point = blendedPoint(this.player.position, this.player.velocityX, this.player.velocityY, alpha, this.camera.lastDeltaSeconds);
     return {
       projectiles: this.projectiles,
       pickups: this.pickups.pickups,
       ship: null,
       swarm: hidden ? null : {
-        ships: this.swarm.ships,
+        ships: this.swarm.shipsAt(alpha),
         facing: this.player.facing,
-        pointX: this.player.position.x,
-        pointY: this.player.position.y,
+        pointX: point.x,
+        pointY: point.y,
         pointShown: this.run.phase === RunPhase.Playing,
         armed: this.weapons.armed,
       },
@@ -750,7 +754,7 @@ export class Game {
       sceneTime: this.sceneSeconds,
       deltaSeconds,
       impulses: this.takeImpulses(),
-      scene: this.scene(),
+      scene: this.scene(alpha),
       timeWarp: this.timeWarp.strength,
     });
     this.frameTimer?.endSection(encoder);

@@ -18,6 +18,7 @@
 // Up to MAXIMUM_SWARM_SHIPS (256) ships; update, contactShips and ships reuse their arrays and
 // objects, so a step allocates nothing.
 import { WORLD_BOUNDS, MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
+import { blendShips } from './swarm-blend.js';
 import { faceStep } from './swarm-facing.js';
 import { FISH_FEEL, FOLLOW_SMOOTH_SECONDS } from './swarm-feel.js';
 import { SWARM_CRUISE_SPEED, SWARM_MAXIMUM_SPEED, flockStep, temperamentFor } from './swarm-flocking.js';
@@ -39,7 +40,7 @@ const NO_AIM = Object.freeze({ firing: false, aimX: 0, aimY: 0 });
 
 function deadSlot() {
   return {
-    alive: false, x: 0, y: 0, velocityX: 0, velocityY: 0, previousVelocityX: 0, previousVelocityY: 0, course: 0, heading: 0,
+    alive: false, x: 0, y: 0, previousX: 0, previousY: 0, velocityX: 0, velocityY: 0, previousVelocityX: 0, previousVelocityY: 0, course: 0, heading: 0,
     bornSequence: null, bornTime: 0, ...temperamentFor(0),
   };
 }
@@ -56,8 +57,9 @@ export class PlayerSwarm {
     this.slots = Array.from({ length: MAXIMUM_SWARM_SHIPS }, deadSlot);
     // Reused outputs: contactShips' per-slot table, ships' alive list and its entries.
     this.contactTable = Array.from({ length: MAXIMUM_SWARM_SHIPS }, () => ({ x: 0, y: 0, alive: false, fresh: false }));
-    this.shipEntries = Array.from({ length: MAXIMUM_SWARM_SHIPS }, () => ({ slot: 0, x: 0, y: 0, age: 0, heading: 0 }));
+    this.shipEntries = Array.from({ length: MAXIMUM_SWARM_SHIPS }, () => ({ slot: 0, x: 0, y: 0, previousX: 0, previousY: 0, age: 0, heading: 0 }));
     this.shipList = [];
+    this.drawnShips = [];
     this.aliveCountValue = 0;
     this.time = 0;
     this.killCredit = 0;
@@ -97,11 +99,19 @@ export class PlayerSwarm {
       entry.slot = index;
       entry.x = slot.x;
       entry.y = slot.y;
+      entry.previousX = slot.previousX;
+      entry.previousY = slot.previousY;
       entry.age = this.time - slot.bornTime;
       entry.heading = slot.heading;
       ships.push(entry);
     });
     return ships;
+  }
+
+  // The alive ships as drawn alpha of a step past the last one (blendShips, as the camera samples);
+  // reused entries, valid until the next call.
+  shipsAt(alpha) {
+    return blendShips(this.ships, alpha, this.drawnShips);
   }
 
   // Mean position of the alive ships, or the target with none alive.
@@ -150,6 +160,9 @@ export class PlayerSwarm {
       bornSequence: null,
       bornTime: this.time,
     });
+    // No previous step: drawn where it is until it has moved.
+    this.slots[index].previousX = this.slots[index].x;
+    this.slots[index].previousY = this.slots[index].y;
     return index;
   }
 
@@ -184,6 +197,10 @@ export class PlayerSwarm {
     context.time = this.time;
     context.aliveCount = this.aliveCountValue;
     context.bounds = this.bounds;
+    for (const slot of this.slots) {
+      slot.previousX = slot.x;
+      slot.previousY = slot.y;
+    }
     flockStep(this.slots, deltaSeconds, context);
     faceStep(this.slots, deltaSeconds, controls);
   }
