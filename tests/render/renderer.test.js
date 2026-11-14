@@ -201,3 +201,33 @@ test('the trail decay shifts by the camera movement in device pixels since the l
   renderer.render(createFakeEncoder(), { alpha: 0, time: 3 });
   assert.deepEqual(draws, [[0, 0], [40, -20], [0, 0]]);
 });
+
+test('scene.swarms draws one swarm per entry, each from its own uniform buffer', () => {
+  const { renderer } = createRenderer(createFakeSimulation('first', 0));
+  renderer.swarm.pipeline = { getBindGroupLayout: () => ({}) };
+  renderer.swarm.bindGroups = renderer.swarm.viewBuffers.map((buffer) => ({ buffer }));
+  const writes = [];
+  renderer.device.queue.writeBuffer = (buffer, offset, data) => { if (renderer.swarm.viewBuffers.includes(buffer)) writes.push({ buffer, data }); };
+  const entry = (x, bodyColor) => ({ ships: [{ x, y: 1, age: 1, heading: 0 }], facing: 0, pointX: 0, pointY: 0, pointShown: false, armed: 'base', bodyColor });
+  const swarms = [entry(3, [1, 1, 1]), entry(5, [0.45, 1, 0.55]), entry(7, [1, 0, 0])];
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 1, scene: { swarms } });
+  assert.equal(writes.length, 2);
+  assert.notEqual(writes[0].buffer, writes[1].buffer);
+  assert.equal(writes[0].data[20], 3);
+  assert.equal(writes[1].data[20], 5);
+  assert.equal(writes[1].data[16], Math.fround(0.45));
+  writes.length = 0;
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 2, scene: { swarm: swarms[0] } });
+  assert.equal(writes.length, 1);
+});
+
+test('the trail decay gets the zoom ratio when the camera zoom changes', () => {
+  const { renderer } = createRenderer(createFakeSimulation('first', 0));
+  const draws = [];
+  renderer.trails.draw = (pass, previousIndex, decay, shiftX, shiftY, zoomRatio) => draws.push([shiftX, shiftY, zoomRatio]);
+  renderer.viewport.setCamera({ centerX: 10, centerY: 5, zoom: 1 });
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 1 });
+  renderer.viewport.setCamera({ centerX: 10, centerY: 5, zoom: 0.5 });
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 2 });
+  assert.deepEqual(draws, [[0, 0, 1], [0, 0, 2]]);
+});

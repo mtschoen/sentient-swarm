@@ -30,7 +30,7 @@ import { ProjectileRenderer } from './projectiles.js';
 import { ShipRenderer } from './ship.js';
 import { SwarmRenderer } from './swarm.js';
 import { SCENE_FORMAT, loadFullscreenHeader } from './render-shaders.js';
-import { TrailDecayPass, trailFrameFactors, trailOriginFor } from './trails.js';
+import { TrailDecayPass, trailFrameFactors, trailShiftFor } from './trails.js';
 import { WORLD_WARP_LATTICE, WarpGrid } from './warpgrid.js';
 import { WorldBorder } from './world-border.js';
 
@@ -103,16 +103,15 @@ export class Renderer {
     this.gridTexture = null;
     this.currentIndex = 0;
     this.sizeDevicePixels = [1, 1];
-    // The camera's rounded device-pixel position at the last frame (trailOrigin), null after a resize.
+    // The camera's rounded device-pixel position and zoom at the last frame (trailOrigin), null after a resize.
     this.trailOrigin = null;
   }
 
-  // Device pixels the camera moved since the last frame, so the trail decay reads the previous
-  // scene where this frame's pixels were then (a translation: the camera zoom is fixed).
+  // Device pixels the camera moved since the last frame and the zoom ratio, so the trail decay
+  // reads the previous scene where this frame's pixels were then (trailShiftFor).
   trailShift(viewport) {
-    const origin = trailOriginFor(viewport);
-    const shift = this.trailOrigin === null ? { x: 0, y: 0 } : { x: origin.x - this.trailOrigin.x, y: origin.y - this.trailOrigin.y };
-    this.trailOrigin = origin;
+    const shift = trailShiftFor(this.trailOrigin, viewport);
+    this.trailOrigin = shift.next;
     return shift;
   }
 
@@ -184,14 +183,14 @@ export class Renderer {
     });
     const { decay, emissionScale } = trailFrameFactors(settings.trailDecay, deltaSeconds);
     const shift = this.trailShift(viewport);
-    this.trails.draw(scenePass, previousIndex, decay, shift.x, shift.y);
+    this.trails.draw(scenePass, previousIndex, decay, shift.shiftX, shift.shiftY, shift.zoomRatio);
     this.gates.encode(scenePass, simulation, time);
     this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time, emissionScale, interpolate });
     if (scene?.projectiles) this.projectileRenderer.encode(scenePass, sceneTime, scene.projectiles, simulation.worldBounds);
     if (scene?.pickups) this.pickupRenderer.encode(scenePass, scene.pickups, sceneTime);
     this.particles.encode(scenePass, simulation.particlePool, emissionScale);
     if (scene?.ship) this.ship.encode(scenePass, { ...scene.ship, time: sceneTime });
-    if (scene?.swarm) this.swarm.encode(scenePass, scene.swarm, sceneTime);
+    this.swarm.encode(scenePass, scene?.swarms ?? (scene?.swarm ? [scene.swarm] : []), sceneTime);
     scenePass.end();
     this.bloom.encode(encoder, currentIndex);
     const swapchainTexture = this.gpu.context.getCurrentTexture();

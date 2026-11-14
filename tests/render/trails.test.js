@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { MAXIMUM_TRAIL_DELTA_SECONDS, trailFrameFactors, trailOriginFor } from '../../src/render/trails.js';
+import { MAXIMUM_TRAIL_DELTA_SECONDS, trailFrameFactors, trailOriginFor, trailShiftFor } from '../../src/render/trails.js';
 import { Viewport } from '../../src/render/viewport.js';
 
 // Steady-state brightness of a pixel that receives one unit of emission per 1/60 second, after
@@ -83,4 +83,37 @@ test('trails_decay.wgsl reads the previous scene at the shifted texel and treats
   const source = readFileSync(new URL('../../src/render/shaders/trails_decay.wgsl', import.meta.url), 'utf8');
   assert.match(source, /vec2i\(position\.xy\) \+ vec2i\(i32\(decayUniform\.shiftX\), i32\(decayUniform\.shiftY\)\)/);
   assert.match(source, /any\(source < vec2i\(0\)\) \|\| any\(source >= size\)/);
+});
+
+test('trailShiftFor with an unchanged zoom gives the trailOriginFor difference and ratio 1', () => {
+  const viewport = new Viewport();
+  viewport.setCanvasSize(1600, 900);
+  viewport.setCamera({ centerX: 10, centerY: 5 });
+  const first = trailShiftFor(null, viewport);
+  assert.deepEqual([first.shiftX, first.shiftY, first.zoomRatio], [0, 0, 1]);
+  assert.deepEqual(first.next, { originX: 1000, originY: 500, zoom: 1 });
+  viewport.setCamera({ centerX: 10.5, centerY: 4.75 });
+  const second = trailShiftFor(first.next, viewport);
+  assert.deepEqual([second.shiftX, second.shiftY, second.zoomRatio], [50, -25, 1]);
+  assert.deepEqual(second.next, { originX: 1050, originY: 475, zoom: 1 });
+});
+
+test('a zoom change from 1 to 0.5 gives ratio 2 and the shift at the previous scale', () => {
+  const viewport = new Viewport();
+  viewport.setCanvasSize(1600, 900);
+  viewport.setCamera({ centerX: 10, centerY: 5, zoom: 1 });
+  const first = trailShiftFor(null, viewport);
+  viewport.setCamera({ centerX: 10.5, centerY: 4.75, zoom: 0.5 });
+  const second = trailShiftFor(first.next, viewport);
+  assert.equal(second.zoomRatio, 2);
+  // The camera moved (0.5, -0.25) world units, measured at 100 device pixels per unit (zoom 1).
+  assert.deepEqual([second.shiftX, second.shiftY], [50, -25]);
+  assert.deepEqual(second.next, { originX: 525, originY: 238, zoom: 0.5 });
+});
+
+test('trails_decay.wgsl keeps the integer path at ratio 1 and scales about the center otherwise', () => {
+  const source = readFileSync(new URL('../../src/render/shaders/trails_decay.wgsl', import.meta.url), 'utf8');
+  assert.match(source, /zoomRatio == 1\.0/);
+  assert.ok(source.includes('floor(center + (position.xy - center) * decayUniform.zoomRatio)'));
+  assert.match(source, /vec2i\(position\.xy\) \+ vec2i\(i32\(decayUniform\.shiftX\), i32\(decayUniform\.shiftY\)\)/);
 });
