@@ -1,46 +1,44 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Viewport } from '../../src/render/viewport.js';
-import { FULL_ARENA_BOUNDS } from '../../src/sim/layout.js';
+import { WORLD_BOUNDS } from '../../src/sim/layout.js';
 
 test('a 16:9 canvas plays the whole world, as before', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(1600, 900);
   assert.deepEqual(viewport.arenaRectDevicePixels, { x: 0, y: 0, width: 1600, height: 900 });
-  assert.deepEqual(viewport.arenaBounds, FULL_ARENA_BOUNDS);
+  assert.deepEqual(viewport.viewBounds, WORLD_BOUNDS);
   assertNear(viewport.worldToClip(0, 0), { x: -1, y: 1 });
   assertNear(viewport.worldToClip(16, 9), { x: 1, y: -1 });
   assert.equal(viewport.pixelsPerWorldUnit, 100);
-  assert.deepEqual(viewport.worldRectDevicePixels, { width: 1600, height: 900 });
 });
 
-test('a wide canvas fills the window with 16 by 8 bounds centered in the world', () => {
+test('a wide canvas fills the window with a 16 by 8 view centered on the camera', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(2000, 1000);
   assert.deepEqual(viewport.arenaRectDevicePixels, { x: 0, y: 0, width: 2000, height: 1000 });
-  const bounds = viewport.arenaBounds;
+  const bounds = viewport.viewBounds;
   assert.equal(bounds.width, 16);
   assert.equal(bounds.height, 8);
   assert.equal(bounds.minY, 0.5);
   assert.equal(viewport.pixelsPerWorldUnit, 125);
-  assert.deepEqual(viewport.worldRectDevicePixels, { width: 2000, height: 1125 });
 });
 
 test('a square canvas fills the window with 9 by 9 bounds', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(1000, 1000);
   assert.deepEqual(viewport.arenaRectDevicePixels, { x: 0, y: 0, width: 1000, height: 1000 });
-  assert.equal(viewport.arenaBounds.width, 9);
-  assert.equal(viewport.arenaBounds.height, 9);
-  assert.equal(viewport.arenaBounds.minX, 3.5);
+  assert.equal(viewport.viewBounds.width, 9);
+  assert.equal(viewport.viewBounds.height, 9);
+  assert.equal(viewport.viewBounds.minX, 3.5);
 });
 
 test('beyond 4:1 the arena letterboxes at the clamped aspect', () => {
   const viewport = new Viewport();
   viewport.setCanvasSize(5000, 1000);
   assert.deepEqual(viewport.arenaRectDevicePixels, { x: 500, y: 0, width: 4000, height: 1000 });
-  assert.equal(viewport.arenaBounds.width, 16);
-  assert.equal(viewport.arenaBounds.height, 4);
+  assert.equal(viewport.viewBounds.width, 16);
+  assert.equal(viewport.viewBounds.height, 4);
 });
 
 test('odd canvas sizes leave no one-pixel band from rounding', () => {
@@ -148,4 +146,34 @@ test('the inspect zoom is off until the lab enables it, and disabling it drops a
   viewport.setInspectZoomEnabled(false);
   assert.equal(viewport.inspectZoomEnabled, false);
   assert.equal(viewport.inspectZoom, 1);
+});
+
+test('the camera moves the view: its center maps to the canvas center and screenToWorld still inverts worldToClip', () => {
+  const viewport = new Viewport();
+  viewport.setCanvasSize(1280, 720, 2);
+  viewport.setCamera({ centerX: 3.5, centerY: 7.25 });
+  assert.deepEqual(viewport.viewBounds, { minX: -4.5, minY: 2.75, maxX: 11.5, maxY: 11.75, width: 16, height: 9 });
+  assertNear(viewport.worldToClip(3.5, 7.25), { x: 0, y: 0 });
+  assertNear(viewport.screenToWorld(320, 180), { x: 3.5, y: 7.25 });
+  for (const zoom of [1, 4]) {
+    viewport.inspectZoom = zoom;
+    for (const point of [{ x: 0, y: 0 }, { x: 5, y: 8 }]) {
+      const device = clipToDevice(viewport, viewport.worldToClip(point.x, point.y));
+      assertNear(viewport.screenToWorld(device.x / 2, device.y / 2), point, 1e-6);
+    }
+  }
+  // A resize keeps the camera center.
+  viewport.setCanvasSize(1000, 1000);
+  assertNear(viewport.worldToClip(3.5, 7.25), { x: 0, y: 0 });
+  assert.equal(viewport.viewBounds.width, 9);
+});
+
+test('the camera zoom multiplies the inspect zoom, and a zoom of 0 or less is 1', () => {
+  const viewport = new Viewport();
+  viewport.setCanvasSize(1600, 900);
+  viewport.setCamera({ centerX: 8, centerY: 4.5, zoom: 2 });
+  viewport.inspectZoom = 4;
+  assert.equal(viewport.effectiveZoom, 8);
+  viewport.setCamera({ centerX: 8, centerY: 4.5, zoom: 0 });
+  assert.equal(viewport.effectiveZoom, 4);
 });

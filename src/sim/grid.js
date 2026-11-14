@@ -3,11 +3,12 @@
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
-import { SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
+import { MAXIMUM_GRID_CELLS, SHADER_CONSTANTS, WORKGROUP_SIZE } from './layout.js';
 
 const BYTES_PER_U32 = 4;
-// Block sums are scanned by a single workgroup, so at most WORKGROUP_SIZE blocks of WORKGROUP_SIZE cells.
-export const MAXIMUM_GRID_CELLS = WORKGROUP_SIZE * WORKGROUP_SIZE;
+// Block sums are scanned by a single workgroup, so at most WORKGROUP_SIZE blocks of WORKGROUP_SIZE
+// cells (MAXIMUM_GRID_CELLS in world.js; gridDimensions keeps every grid within it).
+export { MAXIMUM_GRID_CELLS };
 
 function workgroupsFor(itemCount) {
   return Math.ceil(itemCount / WORKGROUP_SIZE);

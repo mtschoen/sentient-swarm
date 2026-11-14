@@ -80,7 +80,7 @@ async function boot() {
     canvas.height = height;
     viewport.setCanvasSize(width, height, devicePixelRatio);
     renderer?.resize(width, height);
-    game?.setArenaBounds(viewport.arenaBounds);
+    game?.setView(viewport.viewSize);
     layoutHud();
   };
   // Sized explicitly before the first frame; the observer then keeps it current.
@@ -143,7 +143,7 @@ async function boot() {
   quality = new QualityController({ game, store, probe: new FrameTimeProbe(), adapterKey, ceiling: initialPreset.ceiling });
   if (pinnedCapacity === null) quality.start(initialPreset.name, { allowUp: initialPreset.allowUp });
   window.__murmuration.quality = quality;
-  game.setArenaBounds(viewport.arenaBounds);
+  game.setView(viewport.viewSize);
   // Player swarm spike: ?swarm=N starts every run with N ships (1 to the cap), for trying a big swarm.
   const swarmParameter = new URLSearchParams(location.search).get('swarm');
   if (swarmParameter !== null) game.setInitialSwarmShips(Number(swarmParameter));
@@ -330,6 +330,7 @@ async function boot() {
 
   let gameOverShown = false;
   const render = (alpha, deltaSeconds) => {
+    viewport.setCamera(game.camera.sample(alpha));
     game.render(alpha, deltaSeconds);
     const state = game.state;
     hud.update(state);

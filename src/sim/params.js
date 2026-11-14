@@ -1,5 +1,5 @@
 // Packs the SimParams uniform. Byte layout matches the table at the top of common.wgsl.
-import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT } from './layout.js';
+import { SPECIES_COUNT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH } from './layout.js';
 
 export const SIM_PARAMS_BYTES = 256;
 
@@ -7,8 +7,8 @@ export const SIM_PARAMS_BYTES = 256;
 // kills would outrun the free particle slots.
 export const DEFAULT_KILL_BURST_PARTICLES = 12;
 // Depth in world units of the band along the walls where new agents appear (owner ruling R13);
-// the integrate pass's 0.5 wall margin pushes them inward. Half the arena height or more covers
-// the whole arena (the uniform spawn of Plan A).
+// the integrate pass's 0.5 wall margin pushes them inward. Half the bounds' shorter side or more
+// covers the whole playable rectangle (the uniform spawn of Plan A).
 export const DEFAULT_SPAWN_BAND_WIDTH = 0.6;
 // 0 to 1: the chance that a spawn takes the densest of its candidate positions rather than the
 // first, so new agents join existing masses at the walls instead of refilling cleared space.
@@ -59,17 +59,18 @@ export function validatedDeathFloodParticles(count) {
 }
 
 export function validatedSpawnBandWidth(width) {
-  if (!(width > 0 && width <= ARENA_HEIGHT / 2)) throw new RangeError(`spawnBandWidth must lie in (0, ${ARENA_HEIGHT / 2}], got ${width}`);
+  if (!(width > 0 && width <= WORLD_HEIGHT / 2)) throw new RangeError(`spawnBandWidth must lie in (0, ${WORLD_HEIGHT / 2}], got ${width}`);
   return width;
 }
 
-// Arena bounds (Simulation.setArenaBounds): finite, non-empty and inside the 16 by 9 world. Returns
-// a { minX, minY, maxX, maxY, width, height } copy or throws RangeError.
-export function validatedArenaBounds(bounds) {
+// World bounds (Simulation.setWorldBounds, the playable rectangle): finite, non-empty and inside the
+// world (WORLD_WIDTH by WORLD_HEIGHT). Returns a { minX, minY, maxX, maxY, width, height } copy or
+// throws RangeError.
+export function validatedWorldBounds(bounds) {
   const { minX, minY, maxX, maxY } = bounds ?? {};
   const finite = [minX, minY, maxX, maxY].every(Number.isFinite);
-  if (!(finite && minX < maxX && minY < maxY && minX >= 0 && minY >= 0 && maxX <= ARENA_WIDTH && maxY <= ARENA_HEIGHT)) {
-    throw new RangeError(`arena bounds must be finite with minX < maxX and minY < maxY inside [0, ${ARENA_WIDTH}] by [0, ${ARENA_HEIGHT}], got ${JSON.stringify(bounds)}`);
+  if (!(finite && minX < maxX && minY < maxY && minX >= 0 && minY >= 0 && maxX <= WORLD_WIDTH && maxY <= WORLD_HEIGHT)) {
+    throw new RangeError(`world bounds must be finite with minX < maxX and minY < maxY inside [0, ${WORLD_WIDTH}] by [0, ${WORLD_HEIGHT}], got ${JSON.stringify(bounds)}`);
   }
   return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
 }
@@ -99,9 +100,9 @@ export function validatedComfortRadius(radius) {
 const FLOAT_FIELDS = { dt: 0, time: 4, neighborRadius: 16, cellSize: 28, debugKillRadius: 80, playerRadius: 92 };
 // The projectile step's dt (owner ruling R31: full speed while a time warp slows the swarm); dt when omitted.
 const PROJECTILE_DT_OFFSET = 236;
-// The playable arena (arenaBoundsForAspect in layout.js) as vec4f (minX, minY, maxX, maxY); the
-// whole world (FULL_ARENA_BOUNDS) when omitted.
-const ARENA_BOUNDS_OFFSET = 240;
+// The playable rectangle (Simulation.setWorldBounds) as vec4f (minX, minY, maxX, maxY); the whole
+// world (WORLD_BOUNDS) when omitted.
+const WORLD_BOUNDS_OFFSET = 240;
 const UNSIGNED_FIELDS = {
   gridColumns: 20, gridRows: 24, capacity: 32, frameSequence: 84,
   playerInvulnerable: 96, acknowledgedHitSequence: 100, killAllRequested: 104,
@@ -110,9 +111,10 @@ const UNSIGNED_FIELDS = {
 const SAME_SPECIES_COHESION_OFFSET = 88;
 // Multiplier on every species' seek weight (SpawnPressure.seekScale); 1, full seek, when omitted.
 const SEEK_SCALE_OFFSET = 108;
-// Minimum spawn distance from the player as a fraction of the arena bounds width (SpawnPressure); the
-// spec's quarter when omitted.
-const SPAWN_DISTANCE_FRACTION_OFFSET = 36;
+// Minimum spawn distance from the player in world units (Simulation: SpawnPressure's fraction times
+// the view width); the spec's quarter of the 16:9 view width when omitted.
+const SPAWN_DISTANCE_OFFSET = 36;
+export const DEFAULT_SPAWN_DISTANCE = 0.25 * VIEW_WIDTH;
 const KILL_BURST_PARTICLES_OFFSET = 112;
 const SPAWN_BAND_WIDTH_OFFSET = 116;
 const SPAWN_DENSITY_BIAS_OFFSET = 120;
@@ -149,7 +151,7 @@ export function packSimParams(values) {
   }
   view.setUint32(SAME_SPECIES_COHESION_OFFSET, values.sameSpeciesCohesion ?? 1, true);
   view.setFloat32(SEEK_SCALE_OFFSET, values.seekScale ?? 1, true);
-  view.setFloat32(SPAWN_DISTANCE_FRACTION_OFFSET, values.spawnDistanceFraction ?? 0.25, true);
+  view.setFloat32(SPAWN_DISTANCE_OFFSET, values.spawnDistance ?? DEFAULT_SPAWN_DISTANCE, true);
   view.setUint32(KILL_BURST_PARTICLES_OFFSET, values.killBurstParticles ?? DEFAULT_KILL_BURST_PARTICLES, true);
   view.setFloat32(SPAWN_BAND_WIDTH_OFFSET, values.spawnBandWidth ?? DEFAULT_SPAWN_BAND_WIDTH, true);
   view.setFloat32(SPAWN_DENSITY_BIAS_OFFSET, values.spawnDensityBias ?? DEFAULT_SPAWN_DENSITY_BIAS, true);
@@ -160,8 +162,8 @@ export function packSimParams(values) {
   view.setFloat32(COMFORT_RADIUS_OFFSET, values.comfortRadius ?? DEFAULT_COMFORT_RADIUS, true);
   view.setUint32(COARSE_FIELD_PRESSURE_OFFSET, values.coarseFieldPressure ?? 1, true);
   view.setFloat32(PROJECTILE_DT_OFFSET, values.projectileDt ?? values.dt ?? 0, true);
-  const { minX, minY, maxX, maxY } = values.arenaBounds ?? FULL_ARENA_BOUNDS;
-  [minX, minY, maxX, maxY].forEach((value, component) => view.setFloat32(ARENA_BOUNDS_OFFSET + component * 4, value, true));
+  const { minX, minY, maxX, maxY } = values.worldBounds ?? WORLD_BOUNDS;
+  [minX, minY, maxX, maxY].forEach((value, component) => view.setFloat32(WORLD_BOUNDS_OFFSET + component * 4, value, true));
   // spawnGates: { gates: [{ x, y, radius, emit, species }], speciesBias } or none (wall band spawns).
   const gates = values.spawnGates?.gates ?? [];
   if (gates.length > SIM_PARAMS_GATES) throw new Error('spawnGates has ' + gates.length + ' gates; at most ' + SIM_PARAMS_GATES);

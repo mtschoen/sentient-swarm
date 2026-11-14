@@ -61,6 +61,7 @@ function createFakeSimulation(name, frameSequence) {
     fieldBuffer: buffer('field'),
     speciesTableBuffer: buffer('species'),
     particlePool: { capacity: 64, buffers: { particles: buffer('particles') }, registerBindGroupCache() {} },
+    worldBounds: { minX: 0, minY: 0, maxX: 16, maxY: 9, width: 16, height: 9 },
   };
 }
 

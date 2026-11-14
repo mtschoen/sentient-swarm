@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PlayerShip, turnAimToward } from '../../src/game/player.js';
-import { arenaBoundsForAspect } from '../../src/sim/layout.js';
+import { centeredViewBounds } from '../sim/centered-view-bounds.js';
 
 const ARENA = {};
 
@@ -70,7 +70,7 @@ test('velocity is the clamped displacement over the step, and zero against a wal
 });
 
 test('narrow bounds: respawn goes to the bounds center and movement clamps inside them', () => {
-  const bounds = arenaBoundsForAspect(1);
+  const bounds = centeredViewBounds(1);
   const ship = new PlayerShip({ bounds, radius: 0.12 });
   assert.ok(Math.abs(ship.position.x - 8) < 1e-9 && Math.abs(ship.position.y - 4.5) < 1e-9);
   ship.update(10, input(-1, 1));
@@ -88,7 +88,7 @@ test('a bounds rectangle off the world origin centers the respawn on its own cen
 test('setBounds pulls a ship outside the new bounds back inside and keeps it there', () => {
   const ship = new PlayerShip({ radius: 0.12 });
   ship.update(10, input(1, 0));
-  const bounds = arenaBoundsForAspect(1);
+  const bounds = centeredViewBounds(1);
   ship.setBounds(bounds);
   assert.ok(Math.abs(ship.position.x - (bounds.maxX - 0.12)) < 1e-9);
   assert.equal(ship.bounds, bounds);

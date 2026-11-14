@@ -2,12 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, SIM_PARAMS_GATES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH,
-  DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, MAXIMUM_COMFORT_RADIUS, MAXIMUM_DEATH_FLOOD_PARTICLES,
+  DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_SPAWN_DISTANCE, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, MAXIMUM_COMFORT_RADIUS, MAXIMUM_DEATH_FLOOD_PARTICLES,
   MAXIMUM_KILL_BURST_PARTICLES, MAXIMUM_KILL_FRAGMENT_PARTICLES, MAXIMUM_WALL_MARGIN, MAXIMUM_WALL_STIFFNESS, SIM_PARAMS_BYTES,
   packSimParams, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles, validatedKillFragmentParticles,
-  validatedArenaBounds, validatedSpawnBandWidth, validatedSpawnDensityBias, validatedWallMargin, validatedWallStiffness,
+  validatedWorldBounds, validatedSpawnBandWidth, validatedSpawnDensityBias, validatedWallMargin, validatedWallStiffness,
 } from '../../src/sim/params.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, arenaBoundsForAspect } from '../../src/sim/layout.js';
+import { WORLD_HEIGHT, WORLD_WIDTH, WORLD_BOUNDS } from '../../src/sim/layout.js';
+import { centeredViewBounds } from './centered-view-bounds.js';
 
 test('packSimParams produces the 256-byte uniform layout', () => {
   const buffer = packSimParams({
@@ -37,9 +38,9 @@ test('packSimParams defaults missing fields to zero', () => {
   const view = new DataView(packSimParams({}));
   for (let offset = 0; offset < SIM_PARAMS_BYTES; offset += 4) {
     // Same-species cohesion defaults to on, the seek scale to 1 (full seek), the spawn distance to
-    // 0.25 of the arena width, and the kill burst, spawn band and density bias to their defaults.
+    // a quarter of the 16:9 view width (world units), and the kill burst, spawn band and density bias to their defaults.
     if (offset === 108) assert.equal(view.getFloat32(offset, true), 1);
-    else if (offset === 36) assert.equal(view.getFloat32(offset, true), 0.25);
+    else if (offset === 36) assert.equal(view.getFloat32(offset, true), DEFAULT_SPAWN_DISTANCE);
     else if (offset === 112) assert.equal(view.getUint32(offset, true), DEFAULT_KILL_BURST_PARTICLES);
     else if (offset === 116) assert.equal(view.getFloat32(offset, true), Math.fround(DEFAULT_SPAWN_BAND_WIDTH));
     else if (offset === 120) assert.equal(view.getFloat32(offset, true), Math.fround(DEFAULT_SPAWN_DENSITY_BIAS));
@@ -48,8 +49,8 @@ test('packSimParams defaults missing fields to zero', () => {
     else if (offset === 224) assert.equal(view.getFloat32(offset, true), DEFAULT_WALL_STIFFNESS);
     else if (offset === 228) assert.equal(view.getFloat32(offset, true), DEFAULT_COMFORT_RADIUS);
     else if (offset === 232) assert.equal(view.getUint32(offset, true), 1);
-    else if (offset === 248) assert.equal(view.getFloat32(offset, true), ARENA_WIDTH);
-    else if (offset === 252) assert.equal(view.getFloat32(offset, true), ARENA_HEIGHT);
+    else if (offset === 248) assert.equal(view.getFloat32(offset, true), WORLD_WIDTH);
+    else if (offset === 252) assert.equal(view.getFloat32(offset, true), WORLD_HEIGHT);
     else assert.equal(view.getUint32(offset, true), offset === 88 ? 1 : 0);
   }
 });
@@ -77,8 +78,8 @@ test('packSimParams writes seekScale as f32 at byte offset 108', () => {
   assert.equal(new DataView(packSimParams({ seekScale: 0 })).getFloat32(108, true), 0);
 });
 
-test('packSimParams writes spawnDistanceFraction as f32 at byte offset 36', () => {
-  assert.equal(new DataView(packSimParams({ spawnDistanceFraction: 0.375 })).getFloat32(36, true), 0.375);
+test('packSimParams writes spawnDistance (world units) as f32 at byte offset 36', () => {
+  assert.equal(new DataView(packSimParams({ spawnDistance: 0.375 })).getFloat32(36, true), 0.375);
 });
 
 test('the kill burst defaults to about a dozen particles (owner ruling R12)', () => {
@@ -175,7 +176,7 @@ test('every packSimParams field lands at its pinned byte offset with its type', 
     gridColumns: 7, gridRows: 8, capacity: 9, frameSequence: 10,
     playerInvulnerable: 1, acknowledgedHitSequence: 11, killAllRequested: 1,
     playerPosition: [12.5, 13.5], debugKillPosition: [14.5, 15.5],
-    sameSpeciesCohesion: 0, seekScale: 0.25, spawnDistanceFraction: 0.375, killBurstParticles: 16,
+    sameSpeciesCohesion: 0, seekScale: 0.25, spawnDistance: 0.375, killBurstParticles: 16,
     spawnBandWidth: 1.25, spawnDensityBias: 0.75, killFragmentParticles: 17, deathFloodParticles: 18,
     wallMargin: 1.5, wallStiffness: 20.5, comfortRadius: 2.25, coarseFieldPressure: 0, projectileDt: 0.125,
     spawnPerSpecies: [21, 22, 23, 24, 25],
@@ -198,7 +199,7 @@ test('the packed defaults when nothing is given pin the omitted-field values by 
   const view = new DataView(packSimParams({}));
   assert.equal(view.getUint32(88, true), 1, 'sameSpeciesCohesion');
   assert.equal(view.getFloat32(108, true), 1, 'seekScale');
-  assert.equal(view.getFloat32(36, true), 0.25, 'spawnDistanceFraction');
+  assert.equal(view.getFloat32(36, true), 4, 'spawnDistance');
   assert.equal(view.getUint32(112, true), 12, 'killBurstParticles');
   assert.equal(view.getFloat32(116, true), Math.fround(0.6), 'spawnBandWidth');
   assert.equal(view.getFloat32(120, true), 0.5, 'spawnDensityBias');
@@ -242,26 +243,26 @@ test('the range constants and defaults are pinned by value', () => {
   assert.deepEqual([DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS], [0.6, 0.5]);
 });
 
-test('packSimParams packs the arena bounds as a vec4f at 240, the whole world when omitted', () => {
+test('packSimParams packs the world bounds as a vec4f at 240, the whole world when omitted', () => {
   const read = (view) => [240, 244, 248, 252].map((offset) => view.getFloat32(offset, true));
-  assert.deepEqual(read(new DataView(packSimParams({}))), [0, 0, ARENA_WIDTH, ARENA_HEIGHT]);
-  assert.deepEqual(read(new DataView(packSimParams({ arenaBounds: FULL_ARENA_BOUNDS }))), [0, 0, 16, 9]);
-  const narrow = arenaBoundsForAspect(1);
-  assert.deepEqual(read(new DataView(packSimParams({ arenaBounds: narrow }))), [3.5, 0, 12.5, 9]);
+  assert.deepEqual(read(new DataView(packSimParams({}))), [0, 0, WORLD_WIDTH, WORLD_HEIGHT]);
+  assert.deepEqual(read(new DataView(packSimParams({ worldBounds: WORLD_BOUNDS }))), [0, 0, 16, 9]);
+  const narrow = centeredViewBounds(1);
+  assert.deepEqual(read(new DataView(packSimParams({ worldBounds: narrow }))), [3.5, 0, 12.5, 9]);
   // The bounds leave every earlier field where it was.
-  const view = new DataView(packSimParams({ arenaBounds: { minX: 1.25, minY: 0.5, maxX: 14.75, maxY: 8.5 }, projectileDt: 0.125 }));
+  const view = new DataView(packSimParams({ worldBounds: { minX: 1.25, minY: 0.5, maxX: 14.75, maxY: 8.5 }, projectileDt: 0.125 }));
   assert.deepEqual(read(view), [1.25, 0.5, 14.75, 8.5]);
   assert.equal(view.getFloat32(236, true), 0.125);
 });
 
-test('validatedArenaBounds accepts rectangles inside the world and rejects the rest', () => {
-  assert.deepEqual(validatedArenaBounds(FULL_ARENA_BOUNDS), { ...FULL_ARENA_BOUNDS });
-  assert.deepEqual(validatedArenaBounds({ minX: 2, minY: 1, maxX: 6, maxY: 4 }), { minX: 2, minY: 1, maxX: 6, maxY: 4, width: 4, height: 3 });
+test('validatedWorldBounds accepts rectangles inside the world and rejects the rest', () => {
+  assert.deepEqual(validatedWorldBounds(WORLD_BOUNDS), { ...WORLD_BOUNDS });
+  assert.deepEqual(validatedWorldBounds({ minX: 2, minY: 1, maxX: 6, maxY: 4 }), { minX: 2, minY: 1, maxX: 6, maxY: 4, width: 4, height: 3 });
   for (const bounds of [
     undefined, {}, { minX: 0, minY: 0, maxX: Number.NaN, maxY: 9 }, { minX: 0, minY: 0, maxX: Infinity, maxY: 9 },
     { minX: 4, minY: 0, maxX: 4, maxY: 9 }, { minX: 0, minY: 5, maxX: 16, maxY: 2 },
     { minX: -0.5, minY: 0, maxX: 16, maxY: 9 }, { minX: 0, minY: 0, maxX: 16.5, maxY: 9 }, { minX: 0, minY: 0, maxX: 16, maxY: 9.5 },
   ]) {
-    assert.throws(() => validatedArenaBounds(bounds), RangeError, JSON.stringify(bounds));
+    assert.throws(() => validatedWorldBounds(bounds), RangeError, JSON.stringify(bounds));
   }
 });

@@ -4,6 +4,7 @@ import { PROJECTILE_VIEW_BYTES, packProjectileView } from '../../src/render/proj
 import { MAXIMUM_PICKUPS, PICKUP_VIEW_BYTES, packPickupView } from '../../src/render/pickups.js';
 import { PROJECTILE_KINDS, WEAPON_HUES, WEAPON_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { Viewport } from '../../src/render/viewport.js';
+import { WORLD_BOUNDS } from '../../src/sim/layout.js';
 import { SWARM_VIEW_BYTES, packSwarmView } from '../../src/render/swarm.js';
 import { SWARM_SHIP_SIZE } from '../../src/game/player-swarm.js';
 
@@ -26,7 +27,7 @@ test('every weapon has a distinct hue', () => {
 });
 
 test('packProjectileView puts one weapon hue per projectile kind after the world view', () => {
-  const view = packProjectileView({ viewport, time: 2 });
+  const view = packProjectileView({ viewport, time: 2, worldBounds: WORLD_BOUNDS });
   assert.equal(view.byteLength, PROJECTILE_VIEW_BYTES);
   assert.equal(view[6], 2);
   const hueOf = (kind) => view[8 + kind];
@@ -38,13 +39,13 @@ test('packProjectileView puts one weapon hue per projectile kind after the world
   assert.equal(hueOf(PROJECTILE_KINDS.beam), hue('beam'));
 });
 
-test('packProjectileView ends with the arena bounds of the viewport', () => {
+test('packProjectileView ends with the world bounds it is given', () => {
   const tall = new Viewport();
   tall.setCanvasSize(900, 1600);
-  const view = packProjectileView({ viewport: tall, time: 0 });
-  const bounds = tall.arenaBounds;
+  const bounds = { minX: 1, minY: 2, maxX: 7, maxY: 8 };
+  const view = packProjectileView({ viewport: tall, time: 0, worldBounds: bounds });
   assert.deepEqual(Array.from(view.slice(16, 20)), Array.from(new Float32Array([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY])));
-  assert.deepEqual(Array.from(packProjectileView({ viewport, time: 0 }).slice(16, 20)), [0, 0, 16, 9]);
+  assert.deepEqual(Array.from(packProjectileView({ viewport, time: 0, worldBounds: WORLD_BOUNDS }).slice(16, 20)), [0, 0, 16, 9]);
 });
 
 test('packPickupView packs x, y, hue and fade per pickup and caps at 32', () => {

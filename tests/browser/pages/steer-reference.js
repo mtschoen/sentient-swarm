@@ -2,7 +2,7 @@
 // neighbor-cap gate in steer-check.js. It walks the GPU's own grid from the same step
 // (cellCounts, cellOffsets, sortedIndices), so the within-cell order the atomic scatter produced
 // is reproduced exactly. maximumSamples Infinity gives the uncapped average over every neighbor.
-import { ARENA_HEIGHT, ARENA_WIDTH } from '/src/sim/layout.js';
+import { WORLD_HEIGHT, WORLD_WIDTH } from '/src/sim/layout.js';
 
 const MINIMUM_LENGTH = 0.000001;
 
@@ -14,8 +14,8 @@ function clamp(value, minimum, maximum) {
 // returns [x, y]. Returns the averaged separation vector [x, y] for agent index.
 export function separationAverage({ index, positionOf, grid, radius, maximumSamples }) {
   const [x, y] = positionOf(index);
-  const homeColumn = Math.min(Math.floor(clamp(x, 0, ARENA_WIDTH) / grid.cellSize), grid.columns - 1);
-  const homeRow = Math.min(Math.floor(clamp(y, 0, ARENA_HEIGHT) / grid.cellSize), grid.rows - 1);
+  const homeColumn = Math.min(Math.floor(clamp(x, 0, WORLD_WIDTH) / grid.cellSize), grid.columns - 1);
+  const homeRow = Math.min(Math.floor(clamp(y, 0, WORLD_HEIGHT) / grid.cellSize), grid.rows - 1);
   const starts = [];
   const counts = [];
   let total = 0;

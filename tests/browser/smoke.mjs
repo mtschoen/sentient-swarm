@@ -288,14 +288,14 @@ async function checkSweep(page) {
 // stays at least half as bright as it is near the ship (the beam core is far brighter than the fan).
 async function measureBeamReach(captured) {
   const { arenaRect } = captured;
-  const { arenaWidth, arenaBounds, pixelsPerWorldUnit } = window.__murmuration.arenaRect();
+  const { coarseCellSize, worldBounds, viewBounds, pixelsPerWorldUnit } = window.__murmuration.arenaRect();
   const spawn = window.__smokeSweptSpawn;
   const toEdge = (origin, direction) => {
     let nearest = Infinity;
-    if (direction.x > 0) nearest = Math.min(nearest, (arenaBounds.maxX - origin.x) / direction.x);
-    if (direction.x < 0) nearest = Math.min(nearest, (arenaBounds.minX - origin.x) / direction.x);
-    if (direction.y > 0) nearest = Math.min(nearest, (arenaBounds.maxY - origin.y) / direction.y);
-    if (direction.y < 0) nearest = Math.min(nearest, (arenaBounds.minY - origin.y) / direction.y);
+    if (direction.x > 0) nearest = Math.min(nearest, (worldBounds.maxX - origin.x) / direction.x);
+    if (direction.x < 0) nearest = Math.min(nearest, (worldBounds.minX - origin.x) / direction.x);
+    if (direction.y > 0) nearest = Math.min(nearest, (worldBounds.maxY - origin.y) / direction.y);
+    if (direction.y < 0) nearest = Math.min(nearest, (worldBounds.minY - origin.y) / direction.y);
     return nearest;
   };
   const direction = { x: spawn.velocityX, y: spawn.velocityY };
@@ -309,8 +309,8 @@ async function measureBeamReach(captured) {
   const context = canvas.getContext('2d');
   context.drawImage(image, 0, 0);
   const luminanceAt = (distance) => {
-    const x = Math.round(arenaRect.x + (spawn.x + direction.x * distance - arenaBounds.minX) * pixelsPerWorldUnit);
-    const y = Math.round(arenaRect.y + (spawn.y + direction.y * distance - arenaBounds.minY) * pixelsPerWorldUnit);
+    const x = Math.round(arenaRect.x + (spawn.x + direction.x * distance - viewBounds.minX) * pixelsPerWorldUnit);
+    const y = Math.round(arenaRect.y + (spawn.y + direction.y * distance - viewBounds.minY) * pixelsPerWorldUnit);
     const [red, green, blue] = context.getImageData(x, y, 1, 1).data;
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
   };
@@ -323,7 +323,7 @@ async function measureBeamReach(captured) {
   for (let distance = 0.5; distance <= fullReach; distance += sampleStep) {
     if (luminanceAt(distance) >= threshold) drawnReach = distance;
   }
-  return { scale: spawn.lifetime, killReach, fullReach, drawnReach, coarseCell: arenaWidth / 64 };
+  return { scale: spawn.lifetime, killReach, fullReach, drawnReach, coarseCell: coarseCellSize };
 }
 
 // Replaces navigator.getGamepads, before any page script runs, with one standard pad whose axes
@@ -368,8 +368,8 @@ async function checkPlay(page, frames) {
   const shipBox = await evaluateWithin(page, 'placing the ship box', ({ playerX, playerY, size }) => {
     const rect = window.__murmuration.arenaRect();
     return {
-      x: Math.round(rect.x + ((playerX - rect.arenaBounds.minX) / rect.arenaBounds.width) * rect.width - size / 2),
-      y: Math.round(rect.y + ((playerY - rect.arenaBounds.minY) / rect.arenaBounds.height) * rect.height - size / 2),
+      x: Math.round(rect.x + ((playerX - rect.viewBounds.minX) / rect.viewBounds.width) * rect.width - size / 2),
+      y: Math.round(rect.y + ((playerY - rect.viewBounds.minY) / rect.viewBounds.height) * rect.height - size / 2),
       width: size,
       height: size,
     };

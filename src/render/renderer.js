@@ -168,7 +168,7 @@ export class Renderer {
     this.trails.draw(scenePass, previousIndex, decay);
     this.gates.encode(scenePass, simulation, time);
     this.glyphs.draw(scenePass, { simulation, viewport, settings, alpha, time, emissionScale, interpolate });
-    if (scene?.projectiles) this.projectileRenderer.encode(scenePass, sceneTime, scene.projectiles);
+    if (scene?.projectiles) this.projectileRenderer.encode(scenePass, sceneTime, scene.projectiles, simulation.worldBounds);
     if (scene?.pickups) this.pickupRenderer.encode(scenePass, scene.pickups, sceneTime);
     this.particles.encode(scenePass, simulation.particlePool, emissionScale);
     if (scene?.ship) this.ship.encode(scenePass, { ...scene.ship, time: sceneTime });

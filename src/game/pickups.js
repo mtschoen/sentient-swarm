@@ -1,7 +1,7 @@
 // Pickup director: rotates the offered pickup type (the weapons, then the time warp) and spawns
 // pickups on milestones and the recovery guard.
 import { PICKUP_TYPE_NAMES } from './weaponTypes.js';
-import { FULL_ARENA_BOUNDS } from '../sim/layout.js';
+import { WORLD_BOUNDS } from '../sim/layout.js';
 
 const PLACEMENT_ATTEMPTS = 16;
 const DENSITY_CANDIDATES = 8;
@@ -14,7 +14,7 @@ export class PickupDirector {
     fadeSeconds = 10,
     minimumDistance = 3,
     maximumDistance = 5,
-    bounds = FULL_ARENA_BOUNDS,
+    bounds = WORLD_BOUNDS,
     random = Math.random,
   } = {}) {
     if (!(rotationSeconds > 0)) throw new Error(`rotationSeconds must be above 0, got ${rotationSeconds}`);

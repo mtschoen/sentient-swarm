@@ -19,11 +19,11 @@
 // lane the player is shooting open does not refill from its far end; a gate that stays in the lane
 // for AIM_LANE_CLOSE_SECONDS closes, so a new one opens elsewhere. The first fill ignores the lane.
 // Time is the summed deltaSeconds of update (injected), randomness the injected random.
-// Bounds: gates place, drift and bounce inside context.bounds (the playable arena, a
-// sub-rectangle of the world from arenaBoundsForAspect; FULL_ARENA_BOUNDS by default).
+// Bounds: gates place, drift and bounce inside context.bounds (the playable world bounds,
+// Game.worldBounds; WORLD_BOUNDS by default).
 // The shader side (spawn.wgsl) samples each new agent's position from the emitting gates, weighted
 // by emission and by speciesBias toward the gate's favored species; see spawnGates.
-import { FULL_ARENA_BOUNDS, SPECIES_COUNT } from './layout.js';
+import { WORLD_BOUNDS, SPECIES_COUNT } from './layout.js';
 
 export const MAXIMUM_SPAWN_GATES = 4;
 // Seconds a gate takes to fade open and to fade closed; it emits only while fully open.
@@ -134,13 +134,13 @@ export class SpawnDirector {
   }
 
   // options: playerX, playerY (world units, the bounds center when omitted), safeDistance (the
-  // minimum spawn distance from the player, SpawnPressure.spawnDistanceFraction times the bounds
+  // minimum spawn distance from the player, SpawnPressure.spawnDistanceFraction times the view
   // width), filling (SpawnPressure's first fill), shares (species shares, for each new gate's
   // favored species), continuous (no waves; see the header), aimX and aimY (the player's aim, a
   // unit vector or zero for none), bounds (the playable arena { minX, minY, maxX, maxY, width,
-  // height }, FULL_ARENA_BOUNDS when omitted).
+  // height }, WORLD_BOUNDS when omitted).
   update(deltaSeconds, {
-    bounds = FULL_ARENA_BOUNDS, playerX = (bounds.minX + bounds.maxX) / 2, playerY = (bounds.minY + bounds.maxY) / 2,
+    bounds = WORLD_BOUNDS, playerX = (bounds.minX + bounds.maxX) / 2, playerY = (bounds.minY + bounds.maxY) / 2,
     safeDistance = 0, filling = false, shares = [], continuous = false, aimX = 0, aimY = 0,
   } = {}) {
     const context = { playerX, playerY, safeDistance, shares, aimX, aimY, bounds };
@@ -251,7 +251,7 @@ export class SpawnDirector {
     }
     const speed = this.schedule.driftSpeed * deltaSeconds;
     const inset = WALL_INSET + gate.radius;
-    const { minX, minY, maxX, maxY } = context.bounds ?? FULL_ARENA_BOUNDS;
+    const { minX, minY, maxX, maxY } = context.bounds ?? WORLD_BOUNDS;
     gate.x += driftX * speed;
     gate.y += driftY * speed;
     if (gate.x < minX + inset || gate.x > maxX - inset) gate.driftX = -gate.driftX;
@@ -296,7 +296,7 @@ export class SpawnDirector {
   // safe radius plus the gate radius) beat unplaceable ones; among them far from the player and
   // apart from the other gates scores higher. With no placeable draw the farthest one wins.
   placeGate(context) {
-    const { playerX, playerY, safeDistance, bounds = FULL_ARENA_BOUNDS } = context;
+    const { playerX, playerY, safeDistance, bounds = WORLD_BOUNDS } = context;
     const inset = WALL_INSET + this.schedule.gateRadius;
     let best = null;
     let bestScore = -Infinity;
@@ -320,7 +320,7 @@ export class SpawnDirector {
 
   // A point in the band of depth WALL_BAND_DEPTH inside the inset along a wall of bounds; the band
   // never passes the middle of the bounds' shorter side.
-  wallBandPoint(inset, { minX, minY, maxX, maxY } = FULL_ARENA_BOUNDS) {
+  wallBandPoint(inset, { minX, minY, maxX, maxY } = WORLD_BOUNDS) {
     const width = maxX - minX;
     const height = maxY - minY;
     const depth = Math.max(0, Math.min(WALL_BAND_DEPTH, Math.min(width, height) / 2 - inset));

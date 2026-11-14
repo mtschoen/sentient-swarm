@@ -9,7 +9,7 @@
 import { createGpuContext } from '/src/gpu/device.js';
 import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
-import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, ARENA_HEIGHT, ARENA_WIDTH, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SHADER_CONSTANTS, gridDimensions } from '/src/sim/layout.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, WORLD_HEIGHT, WORLD_WIDTH, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SHADER_CONSTANTS, gridDimensions } from '/src/sim/layout.js';
 import { SIM_PARAMS_BYTES, packSimParams } from '/src/sim/params.js';
 import { SPECIES_NAMES, defaultMatrix, defaultSpecies, densityScaleFor, packSpeciesTable } from '/src/sim/species.js';
 import { SpatialGrid } from '/src/sim/grid.js';
@@ -19,7 +19,7 @@ import { separationAverage } from './steer-reference.js';
 
 const NEIGHBOR_RADIUS = 0.1;
 const STEP_SECONDS = 1 / 60;
-const PLAYER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
+const PLAYER = [WORLD_WIDTH / 2, WORLD_HEIGHT / 2];
 const STEPS_PER_SUBMIT = 20;
 const CHASER = SPECIES_NAMES.indexOf('Chaser');
 const LATTICE = SPECIES_NAMES.indexOf('Lattice');
@@ -67,7 +67,7 @@ function unpackAgents(bytes) {
 }
 
 function uniformPositions(count, random) {
-  return Array.from({ length: count }, () => [random() * ARENA_WIDTH, random() * ARENA_HEIGHT]);
+  return Array.from({ length: count }, () => [random() * WORLD_WIDTH, random() * WORLD_HEIGHT]);
 }
 
 function distanceToPlayer(agent) {
@@ -88,7 +88,7 @@ function validityFailure(agents) {
   for (const [index, agent] of agents.entries()) {
     if ((agent.flags & AGENT_FLAG_ALIVE) === 0) return `agent ${index} is no longer alive`;
     if (!Number.isFinite(agent.x) || !Number.isFinite(agent.y)) return `agent ${index} position is not finite`;
-    if (agent.x < 0 || agent.x > ARENA_WIDTH || agent.y < 0 || agent.y > ARENA_HEIGHT) {
+    if (agent.x < 0 || agent.x > WORLD_WIDTH || agent.y < 0 || agent.y > WORLD_HEIGHT) {
       return `agent ${index} left the arena at (${agent.x}, ${agent.y})`;
     }
   }
@@ -97,7 +97,7 @@ function validityFailure(agents) {
 
 // Mean nearest-neighbor distance by bucketing into a CPU grid of NEIGHBOR_RADIUS cells.
 function meanNearestNeighborDistance(agents) {
-  const columns = Math.ceil(ARENA_WIDTH / NEIGHBOR_RADIUS);
+  const columns = Math.ceil(WORLD_WIDTH / NEIGHBOR_RADIUS);
   const buckets = new Map();
   const keyOf = (column, row) => column + row * columns;
   const cellOf = (agent) => [Math.floor(agent.x / NEIGHBOR_RADIUS), Math.floor(agent.y / NEIGHBOR_RADIUS)];
@@ -291,7 +291,7 @@ async function checkDenseCell(gpu, common) {
     cellOrigin[1] + (0.05 + 0.9 * random()) * NEIGHBOR_RADIUS,
   ]);
   harness.seed(packAgents(positions, CHASER, random), defaultSpecies());
-  const coarseCell = Math.floor(cellOrigin[0] / (ARENA_WIDTH / COARSE_COLUMNS)) + Math.floor(cellOrigin[1] / (ARENA_HEIGHT / COARSE_ROWS)) * COARSE_COLUMNS;
+  const coarseCell = Math.floor(cellOrigin[0] / (WORLD_WIDTH / COARSE_COLUMNS)) + Math.floor(cellOrigin[1] / (WORLD_HEIGHT / COARSE_ROWS)) * COARSE_COLUMNS;
   const fieldProblem = await fieldFailure(harness, count, coarseCell);
   if (fieldProblem) return { pass: false, detail: `dense cell field: ${fieldProblem}` };
   await harness.device.queue.onSubmittedWorkDone();
@@ -323,7 +323,7 @@ const LATTICE_SAMPLE_INTERVAL = 60;
 const LATTICE_STEPS = 600;
 
 async function checkLatticeSpacing(gpu, common) {
-  const coarseCellArea = (ARENA_WIDTH / COARSE_COLUMNS) * (ARENA_HEIGHT / COARSE_ROWS);
+  const coarseCellArea = (WORLD_WIDTH / COARSE_COLUMNS) * (WORLD_HEIGHT / COARSE_ROWS);
   const expectedSpacing = Math.sqrt(coarseCellArea / defaultSpecies()[LATTICE].targetDensity);
   const seedSpacing = SEED_SPACING_FACTOR * expectedSpacing;
   const side = 48;
@@ -504,8 +504,8 @@ async function checkNoClump(gpu, common, count, label, peakReference = count / (
   const near = agents.filter((agent) => distanceToPlayer(agent) < CLUMP_RADIUS).length / count;
   const cells = new Float64Array(COARSE_COLUMNS * COARSE_ROWS);
   agents.forEach((agent) => {
-    const column = Math.min(COARSE_COLUMNS - 1, Math.floor(agent.x / (ARENA_WIDTH / COARSE_COLUMNS)));
-    const row = Math.min(COARSE_ROWS - 1, Math.floor(agent.y / (ARENA_HEIGHT / COARSE_ROWS)));
+    const column = Math.min(COARSE_COLUMNS - 1, Math.floor(agent.x / (WORLD_WIDTH / COARSE_COLUMNS)));
+    const row = Math.min(COARSE_ROWS - 1, Math.floor(agent.y / (WORLD_HEIGHT / COARSE_ROWS)));
     cells[column + row * COARSE_COLUMNS] += 1;
   });
   const nearBySpecies = SPECIES_NAMES.map((name, species) => {
@@ -514,7 +514,7 @@ async function checkNoClump(gpu, common, count, label, peakReference = count / (
   }).join(' ');
   const average = count / cells.length;
   const peak = Math.max(...cells);
-  const cellOf = (agent) => Math.min(COARSE_COLUMNS - 1, Math.floor(agent.x / (ARENA_WIDTH / COARSE_COLUMNS))) + Math.min(COARSE_ROWS - 1, Math.floor(agent.y / (ARENA_HEIGHT / COARSE_ROWS))) * COARSE_COLUMNS;
+  const cellOf = (agent) => Math.min(COARSE_COLUMNS - 1, Math.floor(agent.x / (WORLD_WIDTH / COARSE_COLUMNS))) + Math.min(COARSE_ROWS - 1, Math.floor(agent.y / (WORLD_HEIGHT / COARSE_ROWS))) * COARSE_COLUMNS;
   // Informational, never asserted: share of agents in a cell denser than GROUP_DENSITY_FACTOR times the average.
   const grouped = agents.filter((agent) => cells[cellOf(agent)] > GROUP_DENSITY_FACTOR * average).length / count;
   if (informational) {

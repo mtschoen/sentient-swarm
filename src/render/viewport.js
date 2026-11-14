@@ -1,12 +1,13 @@
-import { ARENA_WIDTH, ARENA_HEIGHT, FULL_ARENA_BOUNDS, arenaBoundsForAspect } from '../sim/layout.js';
+import { WORLD_HEIGHT, WORLD_WIDTH, boundsAround, viewSizeForAspect } from '../sim/layout.js';
 
-// Maps the playable arena (the largest rectangle of the canvas aspect centered in the 16 by 9 world,
-// `arenaBounds`) onto the whole canvas, so the game fills the window at any aspect between 1:4 and
-// 4:1 (beyond that it letterboxes), and converts between screen, world and clip space.
+// Maps the view (what the camera shows: a rectangle of the canvas aspect, viewSizeForAspect in
+// world.js, centered on the camera) onto the whole canvas, so the game fills the window at any
+// aspect between 1:4 and 4:1 (beyond that it letterboxes), and converts between screen, world and
+// clip space. The camera (setCamera: center and zoom, from Camera.sample in src/game/camera.js)
+// drives the transform; it starts at the world center. The lab's inspect zoom multiplies the
+// camera zoom about the view center.
 export class Viewport {
-  constructor({ arenaWidth = ARENA_WIDTH, arenaHeight = ARENA_HEIGHT } = {}) {
-    this.arenaWidth = arenaWidth;
-    this.arenaHeight = arenaHeight;
+  constructor() {
     this.canvasWidth = 1;
     this.canvasHeight = 1;
     this.devicePixelRatio = 1;
@@ -14,7 +15,11 @@ export class Viewport {
     // The right-button inspect zoom is a lab feature (owner ruling R7): off in play, where the right
     // button only bombs; the lab turns it on (setInspectZoomEnabled).
     this.inspectZoomEnabled = false;
-    this.arenaBounds = FULL_ARENA_BOUNDS;
+    this.cameraX = WORLD_WIDTH / 2;
+    this.cameraY = WORLD_HEIGHT / 2;
+    this.cameraZoom = 1;
+    this.viewSize = viewSizeForAspect(16 / 9);
+    this.viewBounds = boundsAround(this.cameraX, this.cameraY, this.viewSize.width, this.viewSize.height);
     this.arenaRectDevicePixels = { x: 0, y: 0, width: 1, height: 1 };
   }
 
@@ -25,11 +30,12 @@ export class Viewport {
     this.canvasWidth = canvasWidth;
     this.canvasHeight = canvasHeight;
     this.devicePixelRatio = devicePixelRatio > 0 ? devicePixelRatio : 1;
-    const bounds = arenaBoundsForAspect(canvasWidth / canvasHeight);
-    this.arenaBounds = bounds;
-    const scale = Math.min(canvasWidth / bounds.width, canvasHeight / bounds.height);
-    const width = Math.min(canvasWidth, Math.max(1, Math.round(bounds.width * scale)));
-    const height = Math.min(canvasHeight, Math.max(1, Math.round(bounds.height * scale)));
+    const view = viewSizeForAspect(canvasWidth / canvasHeight);
+    this.viewSize = view;
+    this.viewBounds = boundsAround(this.cameraX, this.cameraY, view.width, view.height);
+    const scale = Math.min(canvasWidth / view.width, canvasHeight / view.height);
+    const width = Math.min(canvasWidth, Math.max(1, Math.round(view.width * scale)));
+    const height = Math.min(canvasHeight, Math.max(1, Math.round(view.height * scale)));
     this.arenaRectDevicePixels = {
       x: Math.floor((canvasWidth - width) / 2),
       y: Math.floor((canvasHeight - height) / 2),
@@ -38,15 +44,17 @@ export class Viewport {
     };
   }
 
-  // Device pixels per world unit at zoom 1.
-  get pixelsPerWorldUnit() {
-    return this.arenaRectDevicePixels.width / this.arenaBounds.width;
+  // The camera's center in world units and its zoom (1 shows viewSize; a zoom of 0 or less is 1).
+  setCamera({ centerX, centerY, zoom = 1 }) {
+    this.cameraX = centerX;
+    this.cameraY = centerY;
+    this.cameraZoom = zoom > 0 ? zoom : 1;
+    this.viewBounds = boundsAround(centerX, centerY, this.viewSize.width, this.viewSize.height);
   }
 
-  // The whole 16 by 9 world in device pixels; it exceeds the canvas when the bounds are a sub-rectangle.
-  get worldRectDevicePixels() {
-    const scale = this.pixelsPerWorldUnit;
-    return { width: this.arenaWidth * scale, height: this.arenaHeight * scale };
+  // Device pixels per world unit at zoom 1.
+  get pixelsPerWorldUnit() {
+    return this.arenaRectDevicePixels.width / this.viewSize.width;
   }
 
   // Turning the zoom off also drops a zoom held at that moment.
@@ -55,30 +63,32 @@ export class Viewport {
     if (!this.inspectZoomEnabled) this.inspectZoom = 1;
   }
 
-  // A zoom of 0 or less (never set by the app) is treated as 1 rather than dividing by it.
+  // The camera zoom times the inspect zoom; an inspect zoom of 0 or less (never set by the app)
+  // is treated as 1 rather than dividing by it.
   get effectiveZoom() {
-    return this.inspectZoom > 0 ? this.inspectZoom : 1;
+    return this.cameraZoom * (this.inspectZoom > 0 ? this.inspectZoom : 1);
   }
 
   // CSS pixels relative to the canvas to world units: the exact inverse of worldToClip, including
-  // inspectZoom about the arena center. The arena is drawn centered on the canvas center, so this
-  // maps through clip space rather than through the floored arenaRect origin.
+  // the zoom about the view center. The view is drawn centered on the canvas center, so this maps
+  // through clip space rather than through the floored arenaRect origin.
   screenToWorld(cssX, cssY) {
     const rect = this.arenaRectDevicePixels;
+    const bounds = this.viewBounds;
     const clipX = ((cssX * this.devicePixelRatio) / this.canvasWidth) * 2 - 1;
     const clipY = 1 - ((cssY * this.devicePixelRatio) / this.canvasHeight) * 2;
     const normalizedX = clipX / ((rect.width / this.canvasWidth) * this.effectiveZoom);
     const normalizedY = clipY / ((rect.height / this.canvasHeight) * this.effectiveZoom);
     return {
-      x: this.arenaBounds.minX + (normalizedX / 2 + 0.5) * this.arenaBounds.width,
-      y: this.arenaBounds.minY + (0.5 - normalizedY / 2) * this.arenaBounds.height,
+      x: bounds.minX + (normalizedX / 2 + 0.5) * bounds.width,
+      y: bounds.minY + (0.5 - normalizedY / 2) * bounds.height,
     };
   }
 
   // World y grows downward (like screen y); clip y grows upward.
   worldToClip(x, y) {
     const rect = this.arenaRectDevicePixels;
-    const bounds = this.arenaBounds;
+    const bounds = this.viewBounds;
     const normalizedX = ((x - bounds.minX) / bounds.width - 0.5) * 2;
     const normalizedY = (0.5 - (y - bounds.minY) / bounds.height) * 2;
     return {

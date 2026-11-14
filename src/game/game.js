@@ -72,7 +72,8 @@ import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS, PlayerSwarm, SWARM_SHIP_RADIU
 import { SwarmFire } from './swarm-fire.js';
 import { SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../sim/spawner.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, FULL_ARENA_BOUNDS, SPECIES_COUNT } from '../sim/layout.js';
+import { SPECIES_COUNT, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, boundsAround, viewSizeForAspect } from '../sim/layout.js';
+import { Camera } from './camera.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 const NO_AIM = Object.freeze({ x: 0, y: 0 });
@@ -145,16 +146,21 @@ export class Game {
     this.watchPressure = null;
     // The gate table for the next simulation step (null while Dying and Respawning).
     this.stepGates = null;
-    // The playable rectangle inside the 16 by 9 world (setArenaBounds); the whole world until set.
-    this.arenaBounds = FULL_ARENA_BOUNDS;
-    this.player = new PlayerShip({ bounds: this.arenaBounds });
+    // The view's size in world units (setView, from Viewport.viewSize on every resize) and the
+    // playable rectangle inside the world: the view's size centered in the world.
+    this.viewSize = viewSizeForAspect(WORLD_WIDTH / WORLD_HEIGHT);
+    this.worldBounds = WORLD_BOUNDS;
+    // The renderer draws around this camera (Viewport.setCamera with camera.sample); it stays on
+    // the world center.
+    this.camera = new Camera({ centerX: WORLD_WIDTH / 2, centerY: WORLD_HEIGHT / 2 });
+    this.player = new PlayerShip({ bounds: this.worldBounds });
     this.weapons = new WeaponState({ random });
-    this.pickups = new PickupDirector({ random, bounds: this.arenaBounds });
+    this.pickups = new PickupDirector({ random, bounds: this.worldBounds });
     this.score = new ScoreKeeper({ capacity });
     this.awards = new Awards();
     this.run = createRunState();
     // The player swarm replaces the ship: the ship's position is the controlled point it seeks.
-    this.swarm = new PlayerSwarm({ random, bounds: this.arenaBounds });
+    this.swarm = new PlayerSwarm({ random, bounds: this.worldBounds });
     this.initialSwarmShips = INITIAL_SWARM_SHIPS;
     this.swarm.reset(this.player.position.x, this.player.position.y, this.initialSwarmShips);
     this.swarmFire = new SwarmFire();
@@ -290,18 +296,22 @@ export class Game {
 
   // The playable rectangle's share of the world's area.
   areaFraction() {
-    return (this.arenaBounds.width * this.arenaBounds.height) / (ARENA_WIDTH * ARENA_HEIGHT);
+    return (this.worldBounds.width * this.worldBounds.height) / (WORLD_WIDTH * WORLD_HEIGHT);
   }
 
-  // The playable arena for the canvas aspect (Viewport.arenaBounds, on every resize): the ship,
-  // pickups, spawn gates and the simulation's walls follow it, and spawn pressure holds the same
-  // density by scaling the alive target with the area.
-  setArenaBounds(bounds) {
-    this.arenaBounds = bounds;
+  // The view's { width, height } for the canvas aspect (Viewport.viewSize, on every resize). The
+  // playable rectangle is that size centered in the world: the ship, pickups, spawn gates and the
+  // simulation's walls follow it, spawn pressure holds the same density by scaling the alive target
+  // with its area, and spawns keep their distance as a fraction of the view width.
+  setView({ width, height }) {
+    this.viewSize = { width, height };
+    const bounds = boundsAround(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, width, height);
+    this.worldBounds = bounds;
+    this.simulation.setSpawnViewWidth(width);
     this.player.setBounds(bounds);
     this.swarm.setBounds(bounds);
     this.pickups.setBounds(bounds);
-    this.simulation.setArenaBounds(bounds);
+    this.simulation.setWorldBounds(bounds);
     const fraction = this.areaFraction();
     this.spawnPressure.setAreaFraction(fraction);
     this.watchPressure?.setAreaFraction(fraction);
@@ -524,8 +534,8 @@ export class Game {
     this.spawnDirector.update(deltaSeconds, {
       playerX: this.player.position.x,
       playerY: this.player.position.y,
-      safeDistance: pressure.spawnDistanceFraction * this.arenaBounds.width,
-      bounds: this.arenaBounds,
+      safeDistance: pressure.spawnDistanceFraction * this.viewSize.width,
+      bounds: this.worldBounds,
       filling: pressure.filling,
       shares: this.simulation.shares,
       // The Ready arena (before a run) trickles from every gate; waves start with the run.

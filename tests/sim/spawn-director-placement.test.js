@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SpawnDirector, inAimLane } from '../../src/sim/spawn-director.js';
-import { ARENA_HEIGHT, ARENA_WIDTH, arenaBoundsForAspect } from '../../src/sim/layout.js';
+import { WORLD_HEIGHT, WORLD_WIDTH } from '../../src/sim/layout.js';
+import { centeredViewBounds } from './centered-view-bounds.js';
 
 // Gate selection favors the far side of the arena from the player (R14, C0b2). The director takes
 // no density input: favoring dense coarse cells is the GPU spawn's density bias (spawn.wgsl), whose
@@ -72,7 +73,7 @@ test('placeGate prefers the far side: with the player in a corner the average pl
     const director = new SpawnDirector({ random: seededRandom(1000 + trial) });
     const point = director.placeGate(corner);
     placedDistance += Math.hypot(point.x - corner.playerX, point.y - corner.playerY);
-    uniformDistance += Math.hypot(uniform() * ARENA_WIDTH - corner.playerX, uniform() * ARENA_HEIGHT - corner.playerY);
+    uniformDistance += Math.hypot(uniform() * WORLD_WIDTH - corner.playerX, uniform() * WORLD_HEIGHT - corner.playerY);
   }
   assert.ok(placedDistance / trials > uniformDistance / trials * 1.3, `placed ${placedDistance / trials} uniform ${uniformDistance / trials}`);
 });
@@ -84,8 +85,8 @@ test('placeGate returns placeable points outside the safe radius and inside the 
     const point = director.placeGate(context);
     const radius = director.schedule.gateRadius;
     assert.ok(Math.hypot(point.x - context.playerX, point.y - context.playerY) >= context.safeDistance + radius, `trial ${trial}`);
-    assert.ok(point.x >= 0.15 + radius - 1e-9 && point.x <= ARENA_WIDTH - 0.15 - radius + 1e-9);
-    assert.ok(point.y >= 0.15 + radius - 1e-9 && point.y <= ARENA_HEIGHT - 0.15 - radius + 1e-9);
+    assert.ok(point.x >= 0.15 + radius - 1e-9 && point.x <= WORLD_WIDTH - 0.15 - radius + 1e-9);
+    assert.ok(point.y >= 0.15 + radius - 1e-9 && point.y <= WORLD_HEIGHT - 0.15 - radius + 1e-9);
   }
 });
 
@@ -121,9 +122,9 @@ test('wallBandPoint covers the top, bottom, left and right walls within the band
     const point = new SpawnDirector({ random: () => draws[call++] }).wallBandPoint(inset);
     const sides = {
       top: point.y <= inset + 1.2 + 1e-9,
-      bottom: point.y >= ARENA_HEIGHT - inset - 1.2 - 1e-9,
+      bottom: point.y >= WORLD_HEIGHT - inset - 1.2 - 1e-9,
       left: point.x <= inset + 1.2 + 1e-9,
-      right: point.x >= ARENA_WIDTH - inset - 1.2 - 1e-9,
+      right: point.x >= WORLD_WIDTH - inset - 1.2 - 1e-9,
     };
     assert.ok(sides[expected[index]], `${expected[index]}: ${JSON.stringify(point)}`);
   });
@@ -140,7 +141,7 @@ test('pickSpecies follows the shares, and falls back to a uniform draw when all 
 
 test('wallBandPoint and placeGate stay inside narrow bounds, on every wall of the bounds', () => {
   const inset = 0.95;
-  for (const bounds of [arenaBoundsForAspect(0.5), arenaBoundsForAspect(4)]) {
+  for (const bounds of [centeredViewBounds(0.5), centeredViewBounds(4)]) {
     const director = new SpawnDirector({ random: seededRandom(31) });
     const sides = new Set();
     const bandDepth = Math.min(1.2, Math.min(bounds.width, bounds.height) / 2 - inset);

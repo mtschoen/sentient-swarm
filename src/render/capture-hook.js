@@ -1,5 +1,6 @@
 // Smoke-test readback of a composited frame, published as window.__murmuration.capture.
 import { meanLuminance } from './capture.js';
+import { COARSE_CELL_SIZE, WORLD_HEIGHT, WORLD_WIDTH } from '../sim/layout.js';
 
 // Frames rendered with a capture's overrides before the capture, so earlier trails fade (at a trailDecay
 // of 0.9, 0.9^30 is 4 percent; at the default 0.6 nothing visible is left).
@@ -45,12 +46,16 @@ function waitAnimationFrames(count) {
 // call order, so overlapping calls cannot save and restore each other's overrides. The arena rect
 // is the one the captured frame was drawn with.
 export function installCaptureHook({ viewport, renderer }) {
-  // The arena rect in device pixels plus the world size, the playable bounds and the scale in world units, to place capture regions.
+  // The arena rect in device pixels (where the view is drawn) plus the world size, the view bounds
+  // (the world rectangle the camera shows, mapped onto the arena rect), the simulation's playable
+  // world bounds and the scale in world units, to place capture regions.
   window.__murmuration.arenaRect = () => ({
     ...viewport.arenaRectDevicePixels,
-    arenaWidth: viewport.arenaWidth,
-    arenaHeight: viewport.arenaHeight,
-    arenaBounds: { ...viewport.arenaBounds },
+    worldWidth: WORLD_WIDTH,
+    worldHeight: WORLD_HEIGHT,
+    coarseCellSize: COARSE_CELL_SIZE,
+    viewBounds: { ...viewport.viewBounds },
+    worldBounds: { ...renderer.simulation.worldBounds },
     pixelsPerWorldUnit: viewport.pixelsPerWorldUnit,
   });
   let queue = Promise.resolve();

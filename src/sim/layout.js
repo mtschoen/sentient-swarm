@@ -1,12 +1,11 @@
-// CPU-side layout constants shared by every simulation shader and buffer allocation.
+// CPU-side layout constants shared by every simulation shader and buffer allocation. The world's
+// size and the derived coarse field and grid sizes live in world.js and are re-exported here.
 import { PROJECTILE_KINDS } from '../game/weaponTypes.js';
+import { COARSE_COLUMNS, COARSE_ROWS, WORLD_HEIGHT, WORLD_WIDTH } from './world.js';
 
-export const ARENA_WIDTH = 16;
-export const ARENA_HEIGHT = 9;
+export * from './world.js';
 export const SPECIES_COUNT = 5;
 export const AGENT_STRIDE_BYTES = 32;
-export const COARSE_COLUMNS = 64;
-export const COARSE_ROWS = 36;
 export const COARSE_CHANNELS = 8;
 export const MAXIMUM_NEIGHBOR_SAMPLES = 32;
 export const WORKGROUP_SIZE = 256;
@@ -20,38 +19,6 @@ export const AGENT_SPAWN_FRAMES_MASK = 0xff00;
 export const PROJECTILE_FLAG_ALIVE = 1;
 // Bit 1: a pulse ring made by a sidewinder detonation (drawn in the sidewinder hue).
 export const PROJECTILE_FLAG_MISSILE_RING = 2;
-
-// The playable arena for a canvas aspect (width over height; owner ruling 2026-11-08: the game
-// fills the window at any aspect, no letterbox): the largest rectangle of that aspect inside the
-// 16 by 9 world, centered in it. A 16:9 canvas plays the whole world; a narrower one plays a
-// centered column of the full height, a wider one a centered strip of the full width. Aspects
-// outside [MINIMUM_ARENA_ASPECT, MAXIMUM_ARENA_ASPECT] are clamped (the viewport letterboxes the
-// rest), so the arena never gets thinner than 2.25 world units. A non-positive or non-finite aspect
-// gives the whole world. Returns { minX, minY, maxX, maxY, width, height } in world units; the
-// world's coarse field and neighbor grid still cover the whole 16 by 9.
-export const MINIMUM_ARENA_ASPECT = 0.25;
-export const MAXIMUM_ARENA_ASPECT = 4;
-
-export function arenaBoundsForAspect(aspect) {
-  const fallback = ARENA_WIDTH / ARENA_HEIGHT;
-  const requested = Number.isFinite(aspect) && aspect > 0 ? aspect : fallback;
-  const ratio = Math.min(MAXIMUM_ARENA_ASPECT, Math.max(MINIMUM_ARENA_ASPECT, requested));
-  const width = Math.min(ARENA_WIDTH, ARENA_HEIGHT * ratio);
-  const height = Math.min(ARENA_HEIGHT, ARENA_WIDTH / ratio);
-  const minX = (ARENA_WIDTH - width) / 2;
-  const minY = (ARENA_HEIGHT - height) / 2;
-  return Object.freeze({ minX, minY, maxX: minX + width, maxY: minY + height, width, height });
-}
-
-// The whole world: what a 16:9 canvas plays, and the default wherever no bounds have been set.
-export const FULL_ARENA_BOUNDS = arenaBoundsForAspect(ARENA_WIDTH / ARENA_HEIGHT);
-
-export function gridDimensions(neighborRadius) {
-  const cellSize = neighborRadius;
-  const columns = Math.ceil(ARENA_WIDTH / cellSize);
-  const rows = Math.ceil(ARENA_HEIGHT / cellSize);
-  return { columns, rows, cellSize, cellCount: columns * rows };
-}
 
 export function agentBufferBytes(capacity) {
   return capacity * AGENT_STRIDE_BYTES;
@@ -89,6 +56,8 @@ export const SWARM_HIT_MASK_WORDS = MAXIMUM_SWARM_SHIPS / 32;
 export const SHADER_CONSTANTS = {
   WORKGROUP_SIZE,
   SPECIES_COUNT,
+  WORLD_WIDTH,
+  WORLD_HEIGHT,
   MAXIMUM_NEIGHBOR_SAMPLES,
   COARSE_COLUMNS,
   COARSE_ROWS,

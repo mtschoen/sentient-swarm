@@ -27,13 +27,13 @@
 //   then a pickup placed under the ship is collected; artifacts/pickup-blast.png is captured
 //   BLAST_CAPTURE_FRAMES later. The blast must kill (the alive total drops) without scoring.
 // All fail on console errors; the corridor check also fails when the ship died anyway.
-import { ARENA_HEIGHT, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT } from '../../src/sim/layout.js';
+import { WORLD_HEIGHT, COARSE_CHANNELS, COARSE_COLUMNS, COARSE_ROWS, SPECIES_COUNT } from '../../src/sim/layout.js';
 
 const MOVE_TO_WALL_FRAMES = 75;
 // --legacy-spawn: the Plan A spawn for comparison: anywhere in the arena (a band of half the
 // arena height), refilling as fast as the ramp allows, no density bias.
 const LEGACY_RAMP = { refillFractionPerSecond: 1 };
-const LEGACY_SPAWN = { bandWidth: ARENA_HEIGHT / 2, densityBias: 0 };
+const LEGACY_SPAWN = { bandWidth: WORLD_HEIGHT / 2, densityBias: 0 };
 const CORRIDOR_SETTLE_FRAMES = 600;
 const CORRIDOR_FIRE_FRAMES = 60;
 const CORRIDOR_LATE_FRAMES = [60, 180];
@@ -66,7 +66,7 @@ const GATE_CLUSTER_MINIMUM_SHARE = 0.9;
 // flood run in the step after the hit is read).
 const DEATH_CAPTURE_FRAMES = 3;
 const FRAME_TIMEOUT_MILLISECONDS = 60_000;
-const CELL_HEIGHT = ARENA_HEIGHT / COARSE_ROWS;
+const CELL_HEIGHT = WORLD_HEIGHT / COARSE_ROWS;
 const CELL_WIDTH = 16 / COARSE_COLUMNS;
 
 // Mean total density (species channels) over the cells whose centers lie within halfHeight of

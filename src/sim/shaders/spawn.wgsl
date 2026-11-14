@@ -8,10 +8,11 @@
 // counter only dips below 0 between a failed subtraction and its give-back. A compare-exchange
 // retry loop was measured to give up under contention and leave much of the budget unspent.
 // The claimed agent lands in the wall band (owner ruling R13, task C0b): the strip of depth
-// params.spawnBandWidth along all four edges of the arena bounds (params.arenaBounds, a
-// sub-rectangle of the world), sampled uniformly by area (a band of half the bounds' shorter side
-// or more is the whole arena), at least the bounds width * params.spawnDistanceFraction
-// from the player (SpawnPressure ramps it from 0.4 down to the spec's quarter). It never lands in
+// params.spawnBandWidth along all four edges of the world bounds (params.worldBounds, the playable
+// rectangle inside the world), sampled uniformly by area (a band of half the bounds' shorter side
+// or more is the whole rectangle), at least params.spawnDistance world units from the player
+// (Simulation: SpawnPressure's fraction, ramped from 0.4 down to the spec's quarter, times the view
+// width). It never lands in
 // the interior, so space the player clears refills only by agents steering in from the walls;
 // integrate's wall margin pushes it inward and its own steering carries it in.
 // With probability params.spawnDensityBias the spawn takes the densest (coarse field total, the
@@ -89,8 +90,8 @@ fn bandDepth() -> f32 {
 // width, the left and right strips the height between them.
 fn bandPoint(randomState: ptr<function, u32>) -> vec2f {
   let depth = bandDepth();
-  let low = params.arenaBounds.xy;
-  let high = params.arenaBounds.zw;
+  let low = params.worldBounds.xy;
+  let high = params.worldBounds.zw;
   let size = boundsSize(params);
   let horizontalArea = 2.0 * size.x * depth;
   let verticalArea = 2.0 * depth * (size.y - 2.0 * depth);
@@ -108,8 +109,8 @@ fn bandPoint(randomState: ptr<function, u32>) -> vec2f {
 // A point in the band-deep square at the bounds corner farthest from the player.
 fn farCornerPoint(randomState: ptr<function, u32>) -> vec2f {
   let depth = bandDepth();
-  let low = params.arenaBounds.xy;
-  let high = params.arenaBounds.zw;
+  let low = params.worldBounds.xy;
+  let high = params.worldBounds.zw;
   let center = boundsCenter(params);
   let offset = vec2f(nextRandom(randomState), nextRandom(randomState)) * depth;
   let farX = params.playerPosition.x < center.x;
@@ -153,7 +154,7 @@ fn gatePoint(species: u32, biased: bool, total: f32, spread: f32, randomState: p
   let angle = nextRandom(randomState) * TAU;
   let reach = sqrt(nextRandom(randomState)) * row.z * spread;
   let direction = vec2f(cos(angle), sin(angle));
-  let position = clamp(row.xy + direction * reach, params.arenaBounds.xy + vec2f(GATE_WALL_MARGIN), params.arenaBounds.zw - vec2f(GATE_WALL_MARGIN));
+  let position = clamp(row.xy + direction * reach, params.worldBounds.xy + vec2f(GATE_WALL_MARGIN), params.worldBounds.zw - vec2f(GATE_WALL_MARGIN));
   return GateDraw(position, direction * (reach / max(row.z * spread, 0.001)));
 }
 
@@ -177,7 +178,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   }
 
   var randomState = pcgHash(slot ^ pcgHash(params.frameSequence));
-  let minimumDistance = boundsSize(params).x * params.spawnDistanceFraction;
+  let minimumDistance = params.spawnDistance;
   var position = vec2f(0.0, 0.0);
   var velocity = vec2f(0.0, 0.0);
   var found = 0u;

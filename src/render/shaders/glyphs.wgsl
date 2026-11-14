@@ -116,12 +116,12 @@ fn glyphVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
     return output;
   }
   let corner = quadCorner(vertexIndex);
-  var position = clampToArena(agent.position + agent.velocity * view.alpha * params.dt);
+  var position = clampToWorld(agent.position + agent.velocity * view.alpha * params.dt);
   if (view.interpolation > 0.5) {
     // A slot dead in the previous step has no earlier position; it starts where it is.
     let previous = previousAgents[instanceIndex];
     let start = select(agent.position, previous.position, isAlive(previous.flags));
-    position = clampToArena(mix(start, agent.position, view.alpha));
+    position = clampToWorld(mix(start, agent.position, view.alpha));
   }
   let forward = shipHeading(position, agent.velocity);
   let side = vec2f(-forward.y, forward.x);

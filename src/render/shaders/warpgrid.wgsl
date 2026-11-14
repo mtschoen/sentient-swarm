@@ -76,7 +76,7 @@ fn fieldCellIndex(column: i32, row: i32) -> u32 {
 // Bilinear over coarse cell centers: x the summed species density, y the threat. Both channel
 // vectors are interpolated first and the density summed once (interpolation is linear).
 fn sampleField(position: vec2f) -> vec2f {
-  let cellPosition = position / vec2f(ARENA_WIDTH, ARENA_HEIGHT) * vec2f(f32(COARSE_COLUMNS), f32(COARSE_ROWS)) - vec2f(0.5);
+  let cellPosition = position / vec2f(WORLD_WIDTH, WORLD_HEIGHT) * vec2f(f32(COARSE_COLUMNS), f32(COARSE_ROWS)) - vec2f(0.5);
   let base = floor(cellPosition);
   let fraction = cellPosition - base;
   let column = i32(base.x);
@@ -134,9 +134,9 @@ fn warpVertex(@builtin(vertex_index) vertexIndex: u32) -> WarpVaryings {
     let vertical = segment - horizontalSegments;
     lattice = vec2u(vertical / view.rows, vertical % view.rows + end);
   }
-  let position = vec2f(lattice) / vec2f(f32(view.columns), f32(view.rows)) * vec2f(ARENA_WIDTH, ARENA_HEIGHT);
+  let position = vec2f(lattice) / vec2f(f32(view.columns), f32(view.rows)) * vec2f(WORLD_WIDTH, WORLD_HEIGHT);
 
-  let cellSize = vec2f(ARENA_WIDTH / f32(COARSE_COLUMNS), ARENA_HEIGHT / f32(COARSE_ROWS));
+  let cellSize = vec2f(WORLD_WIDTH / f32(COARSE_COLUMNS), WORLD_HEIGHT / f32(COARSE_ROWS));
   let gradient = vec2f(
     potentialAt(position + vec2f(cellSize.x, 0.0)) - potentialAt(position - vec2f(cellSize.x, 0.0)),
     potentialAt(position + vec2f(0.0, cellSize.y)) - potentialAt(position - vec2f(0.0, cellSize.y)),
@@ -149,7 +149,7 @@ fn warpVertex(@builtin(vertex_index) vertexIndex: u32) -> WarpVaryings {
   // Border lines stay on the arena edge, and a shockwave cannot push inner lines past it into
   // the letterbox: they pile up against the wall instead.
   let onBorder = vec2<bool>(lattice.x == 0u || lattice.x == view.columns, lattice.y == 0u || lattice.y == view.rows);
-  let displaced = clamp(position + select(displacement, vec2f(0.0), onBorder), vec2f(0.0), vec2f(ARENA_WIDTH, ARENA_HEIGHT));
+  let displaced = clamp(position + select(displacement, vec2f(0.0), onBorder), vec2f(0.0), vec2f(WORLD_WIDTH, WORLD_HEIGHT));
 
   let threat = sampleField(position).y;
   let ripple = 0.6 + 0.4 * sin(view.time * RIPPLE_RATE - threat * RIPPLE_WAVENUMBER);

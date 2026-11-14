@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PickupDirector } from '../../src/game/pickups.js';
-import { arenaBoundsForAspect } from '../../src/sim/layout.js';
+import { centeredViewBounds } from '../sim/centered-view-bounds.js';
 
 const STEP = 1 / 60;
 const WIDTH = 16;
@@ -268,7 +268,7 @@ test('the rotation moving on does not retype a pickup already on the field', () 
 });
 
 test('pickups spawn inside narrow bounds, and setBounds changes where they may land', () => {
-  const bounds = arenaBoundsForAspect(1);
+  const bounds = centeredViewBounds(1);
   const director = new PickupDirector({ bounds, random: sequenceRandom() });
   for (let index = 0; index < 40; index += 1) director.spawn(8, 4.5);
   assert.ok(director.pickups.every((pickup) => pickup.x >= bounds.minX && pickup.x <= bounds.maxX && pickup.y >= bounds.minY && pickup.y <= bounds.maxY));

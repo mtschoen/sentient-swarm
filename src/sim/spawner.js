@@ -3,10 +3,11 @@
 // The ramp: rampProgress = (elapsed / rampSeconds) ^ curveExponent, clamped to [0, 1]. The alive
 // target is lerp(floorFraction, ceilingFraction, rampProgress) of capacity and the seek scale (a
 // multiplier on every species' seek weight, SimParams.seekScale) is lerp(seekFloorFraction, 1,
-// rampProgress); the minimum spawn distance from the player (SimParams.spawnDistanceFraction, of the
-// arena width) is lerp(spawnDistanceStartFraction, 0.25, rampProgress), never under the spec's
-// quarter. The defaults ease in (exponent 2) from 1 percent to 10 percent over 120 seconds, with
-// seek at 10 percent and spawns 0.4 of the arena width away at the start. The 10 percent ceiling is
+// rampProgress); the minimum spawn distance from the player (spawnDistanceFraction, of the view
+// width; Simulation packs it as SimParams.spawnDistance in world units) is
+// lerp(spawnDistanceStartFraction, 0.25, rampProgress), never under the spec's quarter. The
+// defaults ease in (exponent 2) from 1 percent to 10 percent over 120 seconds, with seek at 10
+// percent and spawns 0.4 of the view width away at the start. The 10 percent ceiling is
 // owner ruling R37 (2026-11-08): above about a tenth of capacity the swarm fills the arena edge to
 // edge at the species' comfort densities and reads as fog; at a tenth it packs into a shape with
 // empty space around it. Count alone does not set
