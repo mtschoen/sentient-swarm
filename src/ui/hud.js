@@ -41,7 +41,7 @@ const groupDigits = (value) => Math.round(value).toLocaleString('en-US');
 // The rail turrets (owner ruling R29), for example RAIL x3, with the tier numeral above tier 1.
 function turretText(count, tier) {
   if (!(count > 0)) return '';
-  return tier > 1 ? `RAIL x${count} ${tierNumeral(tier)}` :`RAIL x${count}`;
+  return tier > 1 ? `RAIL x${count} ${tierNumeral(tier)}` : `RAIL x${count}`;
 }
 
 const PAUSE_BUTTON_SIZE_CSS_PIXELS = 34;

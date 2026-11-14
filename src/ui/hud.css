@@ -27,9 +27,12 @@
 .hud-icons { display: flex; flex-direction: column; gap: 2px; font-size: 18px; }
 /* Seat rows (two-player runs only, hud-seat.js): under the icons, so no existing readout moves. The
    block carries the panel backdrop; each row takes its seat color. */
-.hud-seats { display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 16px; white-space: nowrap; }
+.hud-seats { display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 16px; max-width: 100%; }
 .hud-seats[hidden] { display: none; }
-.hud-top .hud-seats { flex-direction: row; gap: 8px; }
+/* Each row has a fixed width (ch, sized for P2 + life icon + 256 + SIDEWINDERS III) so neither row moves when the
+   other's text changes; in a narrow band the text wraps inside it instead of being clipped. */
+.hud-seat { width: 26ch; max-width: 100%; box-sizing: border-box; text-align: left; font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 6px currentColor; }
 .hud-lives { color: #19e6ff; text-shadow: 0 0 8px #19e6ff; }
 .hud-bombs { color: #ff8a1f; text-shadow: 0 0 8px #ff8a1f; }
 
@@ -38,6 +41,9 @@
 .hud-bands .hud-score { font-size: var(--hud-score-size, 28px); }
 .hud-bands .hud-multiplier { font-size: var(--hud-multiplier-size, 54px); }
 .hud-bands .hud-weapon { font-size: var(--hud-weapon-size, 20px); }
+
+/* A narrow band wraps the longest row onto three lines, so every row reserves three and none moves the other. */
+.hud-bands .hud-seat { min-height: 48px; }
 
 /* Narrow bands (phone landscape): a compact row along the arena top edge. */
 .hud-top { padding: 4px 8px; gap: 2px; flex-direction: row; flex-wrap: wrap; align-items: baseline; }
