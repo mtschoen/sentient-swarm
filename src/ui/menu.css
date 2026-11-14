@@ -25,7 +25,7 @@
   color: #cfe8ff; font: 800 clamp(18px, 6vw, 32px)/1.4 system-ui, sans-serif; text-align: center; text-transform: uppercase; padding: 2rem; }
 .rotate-overlay-message { text-shadow: 0 0 10px #19e6ff; }
 
-/* Press to join (join-banner.js): seat 2 invitation under the title list; its color is set in script. */
-.join-banner { max-width: min(560px, 86vw); text-align: center; font-size: clamp(11px, 2.4vmin, 15px); font-weight: 700;
+/* Press to join (join-banner.js): seat 2 invitation above the source link, out of the flex flow so the list never moves (a click on the arena center must keep landing where it did); its color is set in script. */
+.join-banner { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 44px); transform: translateX(-50%); width: min(560px, 86vw); text-align: center; font-size: clamp(11px, 2.4vmin, 15px); font-weight: 700;
   letter-spacing: 0.08em; line-height: 1.4; text-shadow: 0 0 10px currentColor; pointer-events: none; }
 .join-banner[hidden] { display: none; }

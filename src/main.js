@@ -33,6 +33,7 @@ import { createMenu, createPauseMenu } from './ui/menu.js';
 import { createRotateOverlay } from './ui/rotateOverlay.js';
 import { createFullscreenController } from './ui/fullscreen.js';
 import { createMenuInput } from './input/menuInput.js';
+import { createCoopJoin } from './ui/coop-join.js';
 import { createRotateBackHandler, createSettingsOpener, routeMenuActions, routeSettingsKey } from './ui/menuRouting.js';
 
 const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
@@ -137,13 +138,15 @@ async function boot() {
   let liveSettings = settings;
   const rumble = createRumble({ isEnabled: () => liveSettings.rumble });
   const lifeWatcher = createLifeWatcher(rumble);
+  // Press-to-join state; seat 2's pad also picks the rumble target (coopJoin is created with the menus).
+  let coopJoin = null;
   game = await Game.create({
     gpu,
     simulation,
     renderer,
     input,
     capacity: simulation.capacity,
-    effects: withHaptics(audio.cues, undefined, rumble),
+    effects: withHaptics(audio.cues, undefined, rumble, { padForSeat: (seat) => coopJoin?.padForSeat(seat) }),
     frameTimer,
   });
   showProgress('game', 1, 1);
@@ -208,6 +211,13 @@ async function boot() {
   }));
   window.addEventListener('gamepadconnected', (event) => {
     hud.showToast(`Gamepad connected: ${String(event.gamepad?.id ?? 'controller').slice(0, GAMEPAD_TOAST_MAXIMUM_ID_LENGTH)}`);
+    if (coopJoin?.handleConnect(event.gamepad?.index)) hud.showToast('Player 2 controller reconnected');
+  });
+  // Seat 2's pad leaving mid-run pauses under the pause menu; the same pad returning (any index) reclaims the seat.
+  window.addEventListener('gamepaddisconnected', (event) => {
+    if (!coopJoin?.handleDisconnect(event.gamepad?.index)) return;
+    pauseForMenu();
+    hud.showToast('Player 2 controller disconnected');
   });
   window.__murmuration.settings = settingsPanel;
 
@@ -252,7 +262,11 @@ async function boot() {
     openPanel: () => settingsPanel.open(),
   });
   // The lab mode (task C6b) is created with the menus below; the title menu's Lab button enters it.
-  const openLab = () => lab.enter();
+  // The lab is solo: leaving the title for it drops a joined seat 2.
+  const openLab = () => {
+    coopJoin.reset();
+    lab.enter();
+  };
   // On a phone or any touch-first device (a foldable or tablet does not report itself as mobile)
   // the run plays fullscreen (fullscreen.js): entered inside the gesture that starts, resumes or
   // restarts it, left when the title menu shows (render below). The pause menu and game over stay
@@ -269,6 +283,7 @@ async function boot() {
     fullscreen.enter();
     audio.unlock();
     audio.restartRun();
+    game.setPlayerCount(coopJoin.playerCount);
     game.start();
     menu.hide();
   };
@@ -311,6 +326,7 @@ async function boot() {
         return;
       }
       game.quitToTitle();
+      coopJoin.reset();
       menu.show();
     },
   });
@@ -319,6 +335,8 @@ async function boot() {
   const rotateOverlay = createRotateOverlay({ isMobile: detectMobile() });
   document.getElementById('rotate-overlay').append(rotateOverlay.element);
   const menuInput = createMenuInput();
+  coopJoin = createCoopJoin({ input, menuInput, hud, menuElement: menu.element });
+  window.__murmuration.coop = coopJoin;
   let pausedByRotate = false;
   let rotateShowing = false;
   // Settings opened over the rotate overlay: rotating back keeps the run paused under the pause menu.
@@ -374,6 +392,7 @@ async function boot() {
     // The title menu is never fullscreen, whichever way it came up (quit, leaving the lab).
     if (menu.visible) fullscreen.exit();
     const warming = !warmUp.done;
+    coopJoin.update({ titleOpen: menu.visible && !warming });
     game.startsOnGesture = !menu.visible && !warming;
     // Gamepad edges and key presses are consumed every frame so none go stale; only a free screen
     // acts on them, and none does while the loading screen is up.
