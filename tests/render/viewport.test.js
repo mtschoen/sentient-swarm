@@ -191,3 +191,22 @@ test('the camera zoom multiplies the inspect zoom, and a zoom of 0 or less is 1'
   viewport.setCamera({ centerX: 8, centerY: 4.5, zoom: 0 });
   assert.equal(viewport.effectiveZoom, 4);
 });
+
+test('visibleBounds equals viewBounds at zoom 1 and doubles both sides at camera zoom 0.5', () => {
+  const viewport = oneScreenViewport();
+  assert.deepEqual({ ...viewport.visibleBounds }, { ...viewport.viewBounds });
+  viewport.setCamera({ centerX: 16, centerY: 9, zoom: 0.5 });
+  assert.equal(viewport.visibleBounds.width, viewport.viewBounds.width * 2);
+  assert.equal(viewport.visibleBounds.height, viewport.viewBounds.height * 2);
+  assert.equal(viewport.visibleBounds.minX, 16 - viewport.viewBounds.width);
+  assert.equal(viewport.visibleBounds.minY, 9 - viewport.viewBounds.height);
+});
+
+test('at camera zoom 0.5 screenToWorld maps the arena corner to the visibleBounds corner', () => {
+  const viewport = new Viewport();
+  viewport.setCanvasSize(1600, 900, 1);
+  viewport.setCamera({ centerX: 16, centerY: 9, zoom: 0.5 });
+  const corner = viewport.screenToWorld(0, 0);
+  assert.ok(Math.abs(corner.x - viewport.visibleBounds.minX) < 1e-9);
+  assert.ok(Math.abs(corner.y - viewport.visibleBounds.minY) < 1e-9);
+});

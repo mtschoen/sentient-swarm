@@ -69,6 +69,12 @@ export class Viewport {
     return this.cameraZoom * (this.inspectZoom > 0 ? this.inspectZoom : 1);
   }
 
+  // The world rectangle on screen: the view around the camera scaled by the effective zoom
+  // (viewBounds stays the unzoomed rectangle the transforms scale about).
+  get visibleBounds() {
+    return boundsAround(this.cameraX, this.cameraY, this.viewSize.width / this.effectiveZoom, this.viewSize.height / this.effectiveZoom);
+  }
+
   // CSS pixels relative to the canvas to world units: the exact inverse of worldToClip, including
   // the zoom about the view center. The view is drawn centered on the canvas center, so this maps
   // through clip space rather than through the floored arenaRect origin.

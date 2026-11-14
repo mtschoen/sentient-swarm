@@ -353,7 +353,7 @@ async function boot() {
     game.render(alpha, deltaSeconds);
     const state = game.state;
     hud.update(state);
-    edgeIndicators.update(edgeIndicatorTargets(game.pickups.pickups, game.simulation.spawnGates?.gates ?? []), viewport.viewBounds, cssArenaRect());
+    edgeIndicators.update(edgeIndicatorTargets(game.pickups.pickups, game.simulation.spawnGates?.gates ?? []), viewport.visibleBounds, cssArenaRect());
     touchOverlay.update(state);
     fireDebug?.update(fireLog);
     lifeWatcher.update(state);

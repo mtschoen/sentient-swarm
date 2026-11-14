@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAMERA_DEAD_ZONE_FRACTION, CAMERA_OVERSHOOT_FRACTION, CAMERA_SMOOTH_SECONDS, Camera, criticallyDampedStep } from '../../src/game/camera.js';
+import { CAMERA_DEAD_ZONE_FRACTION, CAMERA_FIT_MARGIN, CAMERA_OVERSHOOT_FRACTION, CAMERA_SMOOTH_SECONDS, CAMERA_ZOOM_SMOOTH_SECONDS, MINIMUM_CAMERA_ZOOM, Camera, criticallyDampedStep, fitZoom, framingCenter } from '../../src/game/camera.js';
 
 const STEP = 1 / 60;
 const BOUNDS = { minX: 0, minY: 0, maxX: 32, maxY: 18 };
@@ -136,4 +136,79 @@ test('invalid smooth times and dead zones throw RangeError', () => {
   assert.throws(() => new Camera({ smoothSeconds: 0 }), RangeError);
   assert.throws(() => new Camera({ deadZoneFraction: 0.5 }), RangeError);
   assert.throws(() => new Camera({ deadZoneFraction: -0.1 }), RangeError);
+});
+
+test('the zoom constants are 0.5, 0.5 s and 2.5 units', () => {
+  assert.equal(MINIMUM_CAMERA_ZOOM, 0.5);
+  assert.equal(CAMERA_ZOOM_SMOOTH_SECONDS, 0.5);
+  assert.equal(CAMERA_FIT_MARGIN, 2.5);
+});
+
+test('fitZoom is 1 for no focus, one focus and focuses that fit inside the margin', () => {
+  assert.equal(fitZoom([], 16, 9), 1);
+  assert.equal(fitZoom([{ x: 5, y: 5 }], 16, 9), 1);
+  assert.equal(fitZoom([{ x: 5, y: 5 }, { x: 7, y: 6 }], 16, 9), 1);
+});
+
+test('two focuses 20 apart on a 16 by 9 view fit at 16 / 25 = 0.64', () => {
+  assert.equal(fitZoom([{ x: 6, y: 9 }, { x: 26, y: 9 }], 16, 9), 16 / 25);
+});
+
+test('opposite world corners stop at MINIMUM_CAMERA_ZOOM', () => {
+  assert.equal(fitZoom([{ x: 0, y: 0 }, { x: 32, y: 18 }], 16, 9), 0.5);
+});
+
+test('framingCenter is the bounding-box center', () => {
+  assert.deepEqual(framingCenter([{ x: 2, y: 10 }, { x: 8, y: 4 }, { x: 4, y: 6 }]), { x: 5, y: 7 });
+});
+
+test('with targetZoom 1 the camera matches the zoom-free path exactly', () => {
+  const plain = new Camera({ centerX: 8, centerY: 4.5 });
+  const zoomed = new Camera({ centerX: 8, centerY: 4.5 });
+  for (let index = 0; index < 120; index += 1) {
+    const focusX = 8 + index * 0.15;
+    const focusY = 4.5 + Math.sin(index / 10) * 3;
+    plain.update(STEP, { focusX, focusY, ...VIEW });
+    zoomed.update(STEP, { focusX, focusY, ...VIEW, targetZoom: 1 });
+    assert.equal(zoomed.centerX, plain.centerX);
+    assert.equal(zoomed.centerY, plain.centerY);
+    assert.equal(zoomed.zoom, 1);
+    assert.deepEqual(zoomed.sample(0.5), plain.sample(0.5));
+  }
+});
+
+test('the zoom eases toward its target without overshoot', () => {
+  const camera = new Camera({ centerX: 16, centerY: 9 });
+  let previous = camera.zoom;
+  let atHalfSecond = 0;
+  for (let index = 1; index <= 300; index += 1) {
+    camera.update(STEP, { focusX: 16, focusY: 9, ...VIEW, targetZoom: 0.5 });
+    assert.ok(camera.zoom <= previous, 'monotonic');
+    assert.ok(camera.zoom >= 0.5, 'no overshoot');
+    previous = camera.zoom;
+    if (index === 30) atHalfSecond = (1 - camera.zoom) / 0.5;
+  }
+  assert.ok(Math.abs(atHalfSecond - (1 - 3 * Math.exp(-2))) < 0.01, `about 60 percent, got ${atHalfSecond}`);
+  assert.ok(Math.abs(camera.zoom - 0.5) < 1e-3);
+});
+
+test('at zoom 0.5 a 16 by 9 view centers on the world', () => {
+  const camera = new Camera();
+  camera.cut(5, 5, { ...VIEW, zoom: 0.5 });
+  assert.equal(camera.centerX, 16);
+  assert.equal(camera.centerY, 9);
+});
+
+test('cut with a zoom sets it at once; sample extrapolates and clamps the zoom to [0.5, 1]', () => {
+  const camera = new Camera();
+  camera.cut(16, 9, { ...VIEW, zoom: 0.7 });
+  assert.equal(camera.zoom, 0.7);
+  assert.equal(camera.sample(0).zoom, 0.7);
+  camera.update(STEP, { focusX: 16, focusY: 9, ...VIEW, targetZoom: 0.5 });
+  const sampled = camera.sample(1).zoom;
+  assert.ok(sampled < camera.zoom && sampled >= 0.5);
+  camera.zoomVelocity = -1000;
+  assert.equal(camera.sample(1).zoom, 0.5);
+  camera.zoomVelocity = 1000;
+  assert.equal(camera.sample(1).zoom, 1);
 });
