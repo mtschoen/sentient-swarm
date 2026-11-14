@@ -10,6 +10,7 @@
 //   C. ?swarm=1, seat 1 invulnerable, seat 2 parked: seat 2 goes down, then seat 1 fires and 100 kills
 //      revive it beside seat 1, then with contact back on and no input the run ends.
 //   D. the HUD with two seat rows at 844 by 390: artifacts/coop-hud-844x390.png.
+//   E. the title at 844 by 390: the join banner overlaps no button, the title or the link.
 // The pages get no user gesture the audio could unlock on, and the browser is launched muted.
 // Usage: SMOKE_PORT=5198 node tests/browser/coop.mjs
 // Exit codes: 0 ok, 1 failure.
@@ -274,6 +275,31 @@ async function runD(browser, server) {
   await finish('D', page, context);
 }
 
+async function runE(browser, server) {
+  // The title at phone size, with seat 2's pad present: the join banner, invite then joined text,
+  // overlaps no menu button, the title or the source link.
+  const { context, page } = await openPage(browser, server, { viewport: PHONE_VIEWPORT });
+  await addPad(page, 0);
+  await addPad(page, 1);
+  await waitFrames(page, SEARCH_FRAMES);
+  const overlaps = () => page.evaluate(() => {
+    const banner = document.querySelector('.join-banner');
+    const bannerBox = banner.getBoundingClientRect();
+    if (banner.hidden || bannerBox.height === 0) return ['the banner is not showing'];
+    const others = document.querySelectorAll('.menu-title-screen button, .menu-title-screen a, .menu-title-screen .menu-title');
+    return [...others].filter((element) => {
+      const box = element.getBoundingClientRect();
+      return box.left < bannerBox.right && box.right > bannerBox.left && box.top < bannerBox.bottom && box.bottom > bannerBox.top;
+    }).map((element) => element.textContent);
+  });
+  expect((await overlaps()).length === 0, `E: the invite banner overlaps ${await overlaps()}`);
+  await tap(page, 1, 0);
+  expect(await page.evaluate(() => window.__murmuration.coop.playerCount) === 2, 'E: pad 1 did not join');
+  expect((await overlaps()).length === 0, `E: the joined banner overlaps ${await overlaps()}`);
+  console.log('coop E: ok');
+  await finish('E', page, context);
+}
+
 async function run() {
   const server = await startServer();
   let browser = null;
@@ -284,6 +310,7 @@ async function run() {
     await runB(browser, server);
     await runC(browser, server);
     await runD(browser, server);
+    await runE(browser, server);
   } catch (error) {
     failure = error;
   } finally {
