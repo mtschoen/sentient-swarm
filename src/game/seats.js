@@ -3,6 +3,7 @@
 // and where each seat starts a run. A seat is live while it is not down and still has ships.
 
 import { SWARM_SHIP_RADIUS } from './player-swarm.js';
+import { REVIVE_SHIPS, revivePoint } from './seat-revival.js';
 
 // Two seats start this far either side of the bounds center on x.
 export const SEAT_START_OFFSET = 1.5;
@@ -85,7 +86,7 @@ export function uploadSwarms(game) {
     return;
   }
   for (const seat of game.seats) {
-    game.simulation.setSwarmShips(seat.swarm.contactShips(sequence), SWARM_SHIP_RADIUS, { seat: seat.index, invulnerable: game.debugInvulnerableSeats.has(seat.index) });
+    game.simulation.setSwarmShips(seat.swarm.contactShips(sequence), SWARM_SHIP_RADIUS, { seat: seat.index, invulnerable: game.debugInvulnerableSeats.has(seat.index) || seat.invulnerableSeconds > 0 });
   }
 }
 
@@ -148,9 +149,30 @@ export function applySwarmHits(game, stats) {
 // A wiped seat while the other lives: out of the run with no weapons, a shockwave at its last ship.
 function seatGoesDown(game, seat, last) {
   seat.down = true;
+  game.revival.down(seat.index);
   seat.weapons.dropAll();
   game.score.recordHit();
   game.effects?.seatDown?.(seat.index);
   game.queueImpulse(last.x, last.y, 1, true);
   game.projectiles.setBeam(null, seat.index);
+}
+
+// Scored kills count toward every down seat's revive; a seat that reaches the count comes back with
+// REVIVE_SHIPS ships beside the first live seat, with a small shockwave. Needs a live seat to stand beside.
+export function reviveSeats(game, kills) {
+  const survivor = liveSeats(game.seats)[0];
+  if (survivor === undefined || kills <= 0) return;
+  for (const index of game.revival.addKills(kills)) {
+    const seat = game.seats[index];
+    const point = revivePoint(survivor.point, game.worldBounds, seat.player.radius);
+    seat.revive(point, REVIVE_SHIPS);
+    game.queueImpulse(point.x, point.y, REVIVE_IMPULSE_STRENGTH, false);
+  }
+}
+
+const REVIVE_IMPULSE_STRENGTH = 0.5;
+
+// Counts every seat's revive immunity down by game time (after the step's contact upload).
+export function tickInvulnerability(seats, deltaSeconds) {
+  for (const seat of seats) seat.tickInvulnerability(deltaSeconds);
 }

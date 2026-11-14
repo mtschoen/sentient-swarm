@@ -84,8 +84,9 @@ import { SpawnPressure } from '../sim/spawner.js';
 import { createWatchPressure, moveWatchPoint } from './watch.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
 import { MAXIMUM_PLAYER_SEATS, SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
-import { Camera, bombRadiusForView, framingCenter } from './camera.js';
-import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, seatStarts, uploadSwarms } from './seats.js';
+import { Camera, bombRadiusForView, fitZoom, framingCenter } from './camera.js';
+import { SeatRevival } from './seat-revival.js';
+import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, reviveSeats, seatStarts, tickInvulnerability, uploadSwarms } from './seats.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
@@ -164,6 +165,8 @@ export class Game {
     // The seat whose swarm was wiped last (where the death flood appears), and seats a debug hook made invulnerable.
     this.lastWipedSeat = null;
     this.debugInvulnerableSeats = new Set();
+    // The revive counts of a down seat; seat.down mirrors it (set together in seats.js).
+    this.revival = new SeatRevival({ seatCount: MAXIMUM_PLAYER_SEATS });
     this.pickups = new PickupDirector({ random, bounds: this.worldBounds });
     this.score = new ScoreKeeper({ capacity });
     this.awards = new Awards();
@@ -235,7 +238,7 @@ export class Game {
       score: this.score.score,
       multiplier: this.score.multiplier,
       ...this.seats[0].hudFields(),
-      seats: this.seats.map((seat) => seat.stateEntry()),
+      seats: this.seats.map((seat, index) => seat.stateEntry(this.revival.progress(index))),
       bombs: this.run.bombs,
       timeWarp: this.timeWarp.fraction,
       offeredType: this.pickups.offeredType,
@@ -337,16 +340,19 @@ export class Game {
 
   // The camera's view: { centerX, centerY, width, height } in world units.
   get view() {
-    return { centerX: this.camera.centerX, centerY: this.camera.centerY, width: this.viewSize.width, height: this.viewSize.height };
+    return { centerX: this.camera.centerX, centerY: this.camera.centerY, width: this.viewSize.width / this.camera.zoom, height: this.viewSize.height / this.camera.zoom };
   }
 
   // What the camera frames: the swarm (cameraFocus) unless watching, where it holds still so the
   // pointer-driven point cannot drag it. cut (run start, respawn, quit) jumps there with no easing.
   followCamera(deltaSeconds, { cut = false } = {}) {
-    const focus = framingCenter(framedFocuses(this.seats));
+    // framedFocuses is never empty, so neither the center nor the zoom sees an empty list.
+    const focuses = framedFocuses(this.seats);
+    const focus = framingCenter(focuses);
     const view = { viewWidth: this.viewSize.width, viewHeight: this.viewSize.height, bounds: this.worldBounds };
-    if (cut) this.camera.cut(focus.x, focus.y, view);
-    else if (!this.watching) this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view });
+    const targetZoom = fitZoom(focuses, view.viewWidth, view.viewHeight);
+    if (cut) this.camera.cut(focus.x, focus.y, { ...view, zoom: targetZoom });
+    else if (!this.watching) this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view, targetZoom });
   }
 
   get watching() {
@@ -381,6 +387,7 @@ export class Game {
     this.awards = new Awards();
     this.pickups.reset();
     this.lastWipedSeat = null;
+    this.revival.reset();
     const starts = seatStarts(this.seats.length, this.worldBounds);
     this.seats.forEach((seat, index) => seat.reset(this.initialSwarmShips, starts[index]));
     this.followCamera(0, { cut: true });
@@ -487,6 +494,7 @@ export class Game {
       uploadSwarms(this);
       this.stepSimulation(simulationSeconds, spawnPerSpecies, this.stepGates, projectileSeconds);
     }
+    tickInvulnerability(seats, deltaSeconds);
     this.simulation.pollDensity();
     const frames = this.simulation.readAllStats();
     frames.forEach((stats) => this.processStats(stats));
@@ -577,6 +585,7 @@ export class Game {
         this.score.recordKills(stats.killsSinceLastRead);
         // Kills grow every swarm still in the run; award lives are superseded by it, bombs stay.
         for (const seat of this.seats) if (!seat.down) seat.swarm.addKills(stats.killsSinceLastRead);
+        reviveSeats(this, stats.killsSinceLastRead);
         const earned = this.awards.update(this.score.score);
         for (let index = 0; index < earned.bombs; index += 1) this.run.addBomb();
       }
@@ -659,7 +668,8 @@ export class Game {
   setInitialSwarmShips(count) {
     if (!(Number.isInteger(count) && count >= 1 && count <= MAXIMUM_SWARM_SHIPS)) throw new RangeError(`initial swarm ships must be an integer in [1, ${MAXIMUM_SWARM_SHIPS}], got ${count}`);
     this.initialSwarmShips = count;
-    this.seats.forEach((seat) => seat.swarm.reset(seat.point.x, seat.point.y, count));
+    // A down seat stays empty until a revive refills it.
+    this.seats.forEach((seat) => { if (!seat.down) seat.swarm.reset(seat.point.x, seat.point.y, count); });
   }
 
   // The pickup blast radius in world units (the lab sets it); 0 turns the blast off.

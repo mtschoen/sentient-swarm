@@ -8,10 +8,12 @@ import { WeaponState } from './weapons.js';
 import { blendedPoint } from './swarm-blend.js';
 import { cameraFocus as focusOf } from './camera.js';
 import { SEAT_COLORS } from './seat-colors.js';
+import { REVIVE_INVULNERABLE_SECONDS } from './seat-revival.js';
 import { WORLD_BOUNDS } from '../sim/layout.js';
 
 // A swarm ship collects pickups this close (the point collects within the director's own reach).
 export const SWARM_PICKUP_RADIUS = 0.2;
+const TIME_EPSILON = 1e-9;
 const NO_AIM = Object.freeze({ x: 0, y: 0 });
 const NO_SWARM_HITS = Object.freeze([]);
 
@@ -27,6 +29,8 @@ export class PlayerSeat {
     this.firingHeld = false;
     this.bombHeld = false;
     this.down = false;
+    // Game seconds of contact immunity left after a revive (the contact upload reads it).
+    this.invulnerableSeconds = 0;
   }
 
   get point() {
@@ -76,8 +80,8 @@ export class PlayerSeat {
     };
   }
 
-  // This seat's entry in Game.state.seats (the revive counters are filled in by the revive rules).
-  stateEntry() {
+  // This seat's entry in Game.state.seats; progress is the seat's { kills, needed } toward a revive.
+  stateEntry(progress = { kills: 0, needed: 0 }) {
     const { weapons } = this;
     return {
       ships: this.swarm.aliveCount,
@@ -87,8 +91,8 @@ export class PlayerSeat {
       railTurrets: weapons.railTurrets,
       railTier: weapons.railTier,
       down: this.down,
-      reviveKills: 0,
-      reviveKillsNeeded: 0,
+      reviveKills: progress.kills,
+      reviveKillsNeeded: progress.needed,
     };
   }
 
@@ -129,6 +133,20 @@ export class PlayerSeat {
     this.swarm.reset(point.x, point.y, initialShips);
     this.swarmFire.reset();
     this.down = false;
+    this.invulnerableSeconds = 0;
+  }
+
+  // Back in the run at point with ships ships, immune to contact for REVIVE_INVULNERABLE_SECONDS.
+  revive(point, ships) {
+    this.reset(ships, point);
+    this.invulnerableSeconds = REVIVE_INVULNERABLE_SECONDS;
+  }
+
+  tickInvulnerability(deltaSeconds) {
+    if (this.invulnerableSeconds <= 0) return;
+    const remaining = this.invulnerableSeconds - deltaSeconds;
+    // Summed frame deltas leave float dust; anything under a nanosecond is spent.
+    this.invulnerableSeconds = remaining < TIME_EPSILON ? 0 : remaining;
   }
 
   // Stick or touch aim wins while it is pushed; otherwise the mouse aims from the ship to the

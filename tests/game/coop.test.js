@@ -343,3 +343,114 @@ test('debugInvulnerable(true, 0) marks only seat 1 invulnerable in its upload', 
   game.update(STEP);
   assert.equal(simulation.swarmUploads.at(-2).invulnerable, false);
 });
+
+// A two-seat run with seat 2 wiped (down) and seat 1 alive.
+async function startWithSeatTwoDown() {
+  const harness = await startTwoSeats();
+  updateWithStats(harness.game, harness.simulation, SECOND_WIPE);
+  return harness;
+}
+
+test('a downed seat respawns with 12 ships beside the survivor after 100 more kills', async () => {
+  const { game, simulation } = await startWithSeatTwoDown();
+  const second = game.seats[1];
+  assert.equal(second.down, true);
+  assert.equal(second.aliveCount, 0);
+  updateWithStats(game, simulation, { killsSinceLastRead: 60 });
+  assert.equal(second.down, true);
+  assert.deepEqual({ kills: game.state.seats[1].reviveKills, needed: game.state.seats[1].reviveKillsNeeded }, { kills: 60, needed: 100 });
+  game.takeImpulses();
+  updateWithStats(game, simulation, { killsSinceLastRead: 40 });
+  assert.equal(second.down, false);
+  assert.equal(second.aliveCount, 12);
+  assert.ok(Math.abs(second.point.x - game.seats[0].point.x - 0.6) < 1e-9 || Math.abs(second.point.x - game.seats[0].point.x + 0.6) < 1e-9);
+  assert.equal(second.point.y, game.seats[0].point.y);
+  assert.ok(game.takeImpulses().some((impulse) => impulse.strength === 0.5));
+  assert.equal(game.state.seats[1].down, false);
+});
+
+test('a down seat stays without ships when the initial swarm size changes, until it is revived', async () => {
+  const { game } = await startWithSeatTwoDown();
+  game.setInitialSwarmShips(20);
+  assert.equal(game.seats[1].aliveCount, 0);
+  assert.equal(game.seats[0].aliveCount, 20);
+});
+
+test('a revived seat is invulnerable for 2 s of game time, then armed', async () => {
+  const { game, simulation } = await startWithSeatTwoDown();
+  updateWithStats(game, simulation, { killsSinceLastRead: 100 });
+  const before = simulation.swarmUploads.length;
+  runFor(game, 2.5);
+  const uploads = simulation.swarmUploads.slice(before).filter((upload) => upload.seat === 1);
+  assert.ok(uploads.slice(0, 120).every((upload) => upload.invulnerable === true));
+  assert.ok(uploads.slice(120).every((upload) => upload.invulnerable === false));
+  assert.equal(uploads[0].ships.filter((ship) => ship.alive).length, 12);
+  assert.ok(simulation.swarmUploads.slice(before).filter((upload) => upload.seat === 0).every((upload) => upload.invulnerable === false));
+});
+
+test('stats frames from before the revive kill none of the revived ships', async () => {
+  const { game, simulation } = await startWithSeatTwoDown();
+  const revivedFrame = simulation.frameSequence + 1;
+  updateWithStats(game, simulation, { killsSinceLastRead: 100 });
+  assert.equal(game.seats[1].aliveCount, 12);
+  // A frame from the step the revive happened in, and an older one, both carry seat 2's old hits.
+  simulation.scriptedStats.push(stats({ frameSequence: revivedFrame, ...SECOND_WIPE }));
+  game.update(STEP);
+  assert.equal(game.seats[1].aliveCount, 12);
+  assert.equal(game.seats[1].down, false);
+  assert.equal(game.state.phase, 'playing');
+});
+
+test('both seats wiped in one stats frame end the run', async () => {
+  const { game, simulation } = await startTwoSeats();
+  updateWithStats(game, simulation, { swarmHitMask: SWARM_WIPE_MASK, ...SECOND_WIPE });
+  assert.equal(game.state.phase, 'dying');
+  assert.equal(game.seats[1].down, false);
+  game.update(STEP);
+  assert.equal(simulation.playerStates.at(-1).x, game.seats[1].point.x);
+});
+
+test('a seat wiped while the other is down ends the run', async () => {
+  const { game, simulation } = await startWithSeatTwoDown();
+  updateWithStats(game, simulation, { swarmHitMask: SWARM_WIPE_MASK });
+  assert.equal(game.state.phase, 'dying');
+  game.update(STEP);
+  assert.equal(simulation.playerStates.at(-1).x, game.seats[0].point.x);
+});
+
+test('the camera never frames an empty list when no seat is live', async () => {
+  const { game, simulation } = await startWithSeatTwoDown();
+  updateWithStats(game, simulation, { swarmHitMask: SWARM_WIPE_MASK });
+  runFor(game, 1);
+  assert.ok(Number.isFinite(game.camera.centerX) && Number.isFinite(game.camera.centerY) && Number.isFinite(game.camera.zoom));
+});
+
+test('the camera zooms out as the seats separate, never below 0.5, and back toward 1 when one is down', async () => {
+  const { game, simulation } = await startTwoSeats();
+  const [first, second] = game.seats;
+  first.player.positionX = 4;
+  second.player.positionX = 18;
+  runFor(game, 4);
+  const near = game.camera.zoom;
+  assert.ok(near < 1 && near > 0.5, `zoom ${near}`);
+  first.player.positionX = 2;
+  second.player.positionX = 30;
+  runFor(game, 4);
+  assert.ok(game.camera.zoom >= 0.5 && game.camera.zoom < near);
+  assert.ok(Math.abs(game.view.width - game.viewSize.width / game.camera.zoom) < 1e-9);
+  updateWithStats(game, simulation, SECOND_WIPE);
+  runFor(game, 4);
+  assert.ok(game.camera.zoom > 0.95, `zoom ${game.camera.zoom}`);
+});
+
+test('a solo camera keeps zoom exactly 1 and the spawn director gets the unzoomed view', async () => {
+  const { game, input } = await createGame();
+  const views = [];
+  const update = game.spawnDirector.update.bind(game.spawnDirector);
+  game.spawnDirector.update = (deltaSeconds, options) => { views.push(options.view); update(deltaSeconds, options); };
+  input.state.move = { x: 1, y: 0 };
+  runFor(game, 3);
+  assert.equal(game.camera.zoom, 1);
+  assert.ok(views.length > 0);
+  assert.ok(views.every((view) => view.width === game.viewSize.width && view.height === game.viewSize.height));
+});
