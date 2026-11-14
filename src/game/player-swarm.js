@@ -19,8 +19,8 @@
 // objects, so a step allocates nothing.
 import { FULL_ARENA_BOUNDS, MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { faceStep } from './swarm-facing.js';
-import { FISH_FEEL } from './swarm-feel.js';
-import { SWARM_CRUISE_SPEED, flockStep, temperamentFor } from './swarm-flocking.js';
+import { FISH_FEEL, FOLLOW_SMOOTH_SECONDS } from './swarm-feel.js';
+import { SWARM_CRUISE_SPEED, SWARM_MAXIMUM_SPEED, flockStep, temperamentFor } from './swarm-flocking.js';
 
 export { MAXIMUM_SWARM_SHIPS };
 export const INITIAL_SWARM_SHIPS = 12;
@@ -64,7 +64,11 @@ export class PlayerSwarm {
     this.targetX = (bounds.minX + bounds.maxX) / 2;
     this.targetY = (bounds.minY + bounds.maxY) / 2;
     // Reused flockStep context.
-    this.context = { targetX: 0, targetY: 0, firing: false, aimX: 0, aimY: 0, time: 0, aliveCount: 0, bounds, margin: SWARM_SHIP_RADIUS, feel: FISH_FEEL };
+    this.context = { targetX: 0, targetY: 0, firing: false, aimX: 0, aimY: 0, time: 0, aliveCount: 0, bounds, margin: SWARM_SHIP_RADIUS, feel: FISH_FEEL, carryX: 0, carryY: 0 };
+    // The point's velocity, smoothed over FOLLOW_SMOOTH_SECONDS: the follow dial's share of it
+    // carries the flock (flockStep's carry).
+    this.pointVelocityX = 0;
+    this.pointVelocityY = 0;
   }
 
   // The swarm feel dials (src/game/swarm-feel.js, experiment): { alignment, tightness, buzz }; the
@@ -121,6 +125,8 @@ export class PlayerSwarm {
     this.killCredit = 0;
     this.targetX = x;
     this.targetY = y;
+    this.pointVelocityX = 0;
+    this.pointVelocityY = 0;
     for (let index = 0; index < Math.min(count, MAXIMUM_SWARM_SHIPS); index += 1) this.spawnShip(x, y);
   }
 
@@ -151,10 +157,25 @@ export class PlayerSwarm {
   // and turns the ships toward the aim.
   update(deltaSeconds, targetX, targetY, controls = NO_AIM) {
     if (!(deltaSeconds > 0)) return;
+    // The point's velocity from its movement this step, capped at the ships' top speed so a point
+    // that jumps does not fling the flock.
+    let velocityX = (targetX - this.targetX) / deltaSeconds;
+    let velocityY = (targetY - this.targetY) / deltaSeconds;
+    const speed = Math.hypot(velocityX, velocityY);
+    if (speed > SWARM_MAXIMUM_SPEED) {
+      velocityX *= SWARM_MAXIMUM_SPEED / speed;
+      velocityY *= SWARM_MAXIMUM_SPEED / speed;
+    }
+    const blend = 1 - Math.exp(-deltaSeconds / FOLLOW_SMOOTH_SECONDS);
+    this.pointVelocityX += (velocityX - this.pointVelocityX) * blend;
+    this.pointVelocityY += (velocityY - this.pointVelocityY) * blend;
     this.targetX = targetX;
     this.targetY = targetY;
     this.time += deltaSeconds;
     const context = this.context;
+    const follow = context.feel.follow ?? 0;
+    context.carryX = this.pointVelocityX * follow;
+    context.carryY = this.pointVelocityY * follow;
     context.targetX = targetX;
     context.targetY = targetY;
     context.firing = controls.firing;

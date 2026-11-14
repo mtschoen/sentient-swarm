@@ -40,7 +40,7 @@ test('the group shows each dial value and the query string for the current value
   const { slider, readout, query } = setup();
   assert.equal(slider('tightness').value, String(BEES_FEEL.tightness));
   assert.equal(readout('alignment').textContent, '0.10');
-  assert.equal(query.textContent, '?swarmAlignment=0.1&swarmTightness=2&swarmBuzz=1.5');
+  assert.equal(query.textContent, '?swarmAlignment=0.1&swarmTightness=2&swarmBuzz=1.5&swarmFollow=1');
 });
 
 test('moving a slider updates the live feel object, the readout, the query and calls onChange', () => {
@@ -49,7 +49,7 @@ test('moving a slider updates the live feel object, the readout, the query and c
   slider('buzz').fire('input');
   assert.equal(feel.buzz, 2.5);
   assert.equal(readout('buzz').textContent, '2.50');
-  assert.match(query.textContent, /swarmBuzz=2\.5$/);
+  assert.match(query.textContent, /swarmBuzz=2\.5&/);
   assert.equal(changes.length, 1);
 });
 
@@ -57,7 +57,7 @@ test('the fish and bees buttons reset every dial in the same live object', () =>
   const { feel, changes, button, query } = setup();
   button('Fish (current)').fire('click');
   assert.deepEqual(feel, { ...FISH_FEEL });
-  assert.equal(query.textContent, '?swarmAlignment=1&swarmTightness=0&swarmBuzz=0');
+  assert.equal(query.textContent, '?swarmAlignment=1&swarmTightness=0&swarmBuzz=0&swarmFollow=0');
   button('Bees (default)').fire('click');
   assert.deepEqual(feel, { ...BEES_FEEL });
   assert.equal(changes.length, 2);

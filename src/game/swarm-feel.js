@@ -1,23 +1,29 @@
-// Swarm feel dials (EXPERIMENT, meant to be deleted once the liked values are baked in): three live
-// multipliers on the player swarm's flocking, so the owner can tune "bees, not fish" on a phone.
+// Swarm feel dials (EXPERIMENT, meant to be deleted once the liked values are baked in): four live
+// dials on the player swarm's flocking, so the owner can tune "bees, not fish" on a phone.
 //   alignment: scales the neighbour-alignment term. 0 = none (no schooling), 1 = today's value.
 //   tightness: a harmonic well toward the controlled point (desired speed grows linearly with the
 //              distance, TIGHTNESS_WELL_RATE * tightness per second) and the roaming waypoints'
 //              reach shrunk by 1 / (1 + tightness). 0 = today's leash and roaming only.
 //   buzz:      a per-ship jittering velocity (a fresh random direction several times a second,
-//              smoothly blended, independent per slot) of buzz * BUZZ_SPEED_SHARE * cruise speed.
-//              0 = today's slow wander only.
+//              smoothly blended, independent per slot) of buzz * BUZZ_SPEED_SHARE * cruise speed,
+//              added to the ship's movement directly: as a steering input the steering response
+//              and the acceleration cap smoothed it away. 0 = today's slow wander only.
+//   follow:    the share of the controlled point's velocity that carries the flock. 0 = today: the
+//              ships chase a moving point, all flat out along one line, so no other dial shows
+//              while the point moves. 1 = the flock flies in the point's frame and behaves around
+//              a moving point as around a still one.
 // FISH_FEEL reproduces the behaviour before the dials. BEES_FEEL is the spike's default.
 // Pure: parsing, formatting and the noise are functions of their arguments (the noise of the time).
 import { slotHash } from './swarm-hash.js';
 
-export const FISH_FEEL = Object.freeze({ alignment: 1, tightness: 0, buzz: 0 });
-export const BEES_FEEL = Object.freeze({ alignment: 0.1, tightness: 2, buzz: 1.5 });
+export const FISH_FEEL = Object.freeze({ alignment: 1, tightness: 0, buzz: 0, follow: 0 });
+export const BEES_FEEL = Object.freeze({ alignment: 0.1, tightness: 2, buzz: 1.5, follow: 1 });
 
 export const FEEL_DIALS = Object.freeze([
   { key: 'alignment', label: 'Alignment', parameter: 'swarmAlignment', minimum: 0, maximum: 2, step: 0.05 },
   { key: 'tightness', label: 'Tightness', parameter: 'swarmTightness', minimum: 0, maximum: 4, step: 0.05 },
   { key: 'buzz', label: 'Buzz', parameter: 'swarmBuzz', minimum: 0, maximum: 3, step: 0.05 },
+  { key: 'follow', label: 'Follow', parameter: 'swarmFollow', minimum: 0, maximum: 1, step: 0.05 },
 ]);
 
 // Well strength per unit of tightness, in 1/s: at tightness 1 a ship 1 unit from the point wants to
@@ -25,6 +31,9 @@ export const FEEL_DIALS = Object.freeze([
 export const TIGHTNESS_WELL_RATE = 3;
 // Buzz 1 adds a velocity of this share of the ship's cruise speed, at a random direction.
 export const BUZZ_SPEED_SHARE = 0.8;
+// Seconds over which the point's velocity is smoothed before it carries the flock, so the flock
+// leans into a start and a stop instead of moving as one rigid body.
+export const FOLLOW_SMOOTH_SECONDS = 0.06;
 // How many times per second a ship's buzz direction is redrawn (per slot, within this range).
 export const BUZZ_MINIMUM_HERTZ = 3;
 export const BUZZ_MAXIMUM_HERTZ = 7;

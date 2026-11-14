@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BEES_FEEL, BUZZ_SPEED_SHARE, FEEL_DIALS, FISH_FEEL, TIGHTNESS_WELL_RATE, buzzDirection, feelFromSearch, feelToSearch,
+  BEES_FEEL, BUZZ_SPEED_SHARE, FEEL_DIALS, FISH_FEEL, FOLLOW_SMOOTH_SECONDS, TIGHTNESS_WELL_RATE, buzzDirection, feelFromSearch, feelToSearch,
   feelToSearchMerged, roamScaleFor,
 } from '../../src/game/swarm-feel.js';
 import { FULL_ARENA_BOUNDS } from '../../src/sim/layout.js';
@@ -37,7 +37,8 @@ function stepVelocity(slots, feel, overrides) {
 }
 
 test('the bees default leans away from fish on every dial; fish is the behaviour before the dials', () => {
-  assert.deepEqual({ ...FISH_FEEL }, { alignment: 1, tightness: 0, buzz: 0 });
+  assert.deepEqual({ ...FISH_FEEL }, { alignment: 1, tightness: 0, buzz: 0, follow: 0 });
+  assert.ok(BEES_FEEL.follow > FISH_FEEL.follow);
   assert.ok(BEES_FEEL.alignment < FISH_FEEL.alignment);
   assert.ok(BEES_FEEL.tightness > FISH_FEEL.tightness);
   assert.ok(BEES_FEEL.buzz > FISH_FEEL.buzz);
@@ -45,15 +46,15 @@ test('the bees default leans away from fish on every dial; fish is the behaviour
 
 test('feelFromSearch reads the dials, clamps them and ignores malformed values', () => {
   assert.deepEqual(feelFromSearch(''), { ...BEES_FEEL });
-  assert.deepEqual(feelFromSearch('?swarmAlignment=0&swarmTightness=1.5&swarmBuzz=1'), { alignment: 0, tightness: 1.5, buzz: 1 });
-  assert.deepEqual(feelFromSearch('?swarmAlignment=99&swarmTightness=-3&swarmBuzz=2'), { alignment: 2, tightness: 0, buzz: 2 });
+  assert.deepEqual(feelFromSearch('?swarmAlignment=0&swarmTightness=1.5&swarmBuzz=1&swarmFollow=0.5'), { alignment: 0, tightness: 1.5, buzz: 1, follow: 0.5 });
+  assert.deepEqual(feelFromSearch('?swarmAlignment=99&swarmTightness=-3&swarmBuzz=2&swarmFollow=7'), { alignment: 2, tightness: 0, buzz: 2, follow: 1 });
   assert.deepEqual(feelFromSearch('?swarmAlignment=abc&swarmTightness=&swarmBuzz=Infinity'), { ...BEES_FEEL });
-  assert.deepEqual(feelFromSearch('?swarmBuzz=0.5', FISH_FEEL), { alignment: 1, tightness: 0, buzz: 0.5 });
+  assert.deepEqual(feelFromSearch('?swarmBuzz=0.5', FISH_FEEL), { alignment: 1, tightness: 0, buzz: 0.5, follow: 0 });
 });
 
 test('feelToSearch round trips through feelFromSearch, and the merged form keeps other parameters', () => {
-  const feel = { alignment: 0.35, tightness: 2.75, buzz: 0.05 };
-  assert.equal(feelToSearch(feel), '?swarmAlignment=0.35&swarmTightness=2.75&swarmBuzz=0.05');
+  const feel = { alignment: 0.35, tightness: 2.75, buzz: 0.05, follow: 0.6 };
+  assert.equal(feelToSearch(feel), '?swarmAlignment=0.35&swarmTightness=2.75&swarmBuzz=0.05&swarmFollow=0.6');
   assert.deepEqual(feelFromSearch(feelToSearch(feel)), feel);
   const merged = feelToSearchMerged('?probe=off&swarmBuzz=3&swarm=12', feel);
   assert.deepEqual(feelFromSearch(merged), feel);
@@ -165,14 +166,19 @@ test('tightness shrinks the swarm: a tight swarm settles closer to the point tha
   assert.ok(tight < loose * 0.7, `tight ${tight} loose ${loose}`);
 });
 
-test('buzz moves ships independently: neighbours get different velocity kicks, scaled by the dial', () => {
+test('buzz moves ships independently: neighbours get different kicks, scaled by the dial, past the steering', () => {
+  // The kick is the buzz's own movement in one step, as a velocity; the steered velocity is untouched.
   const kickFor = (slot, buzz) => {
     const slots = [ship(slot, 8, 4.5, 0, 0.01)];
     flockStep(slots, STEP, context({ alignment: 0, tightness: 0, buzz }, { time: 3.3 }));
     const calm = [ship(slot, 8, 4.5, 0, 0.01)];
     flockStep(calm, STEP, context({ alignment: 0, tightness: 0, buzz: 0 }, { time: 3.3 }));
-    return { x: slots[0].velocityX - calm[0].velocityX, y: slots[0].velocityY - calm[0].velocityY };
+    assert.ok(Math.abs(slots[0].velocityX - calm[0].velocityX) < 1e-12 && Math.abs(slots[0].velocityY - calm[0].velocityY) < 1e-12);
+    return { x: (slots[0].x - calm[0].x) / STEP, y: (slots[0].y - calm[0].y) / STEP };
   };
+  const direction = buzzDirection(1, 3.3, { x: 0, y: 0 });
+  const expected = Math.hypot(direction.x, direction.y) * 2 * BUZZ_SPEED_SHARE * temperamentFor(1).cruiseSpeed;
+  assert.ok(Math.abs(Math.hypot(kickFor(1, 2).x, kickFor(1, 2).y) - expected) < 1e-9, 'the whole buzz velocity reaches the movement');
   const first = kickFor(1, 2);
   const second = kickFor(2, 2);
   assert.notDeepEqual(first, second);
@@ -200,4 +206,68 @@ test('at alignment 0 the staggered attack runs do not make the swarm fly in lock
     worst = Math.max(worst, Math.hypot(unitX, unitY) / swarm.aliveCount);
   }
   assert.ok(worst < 0.7, `worst polarization ${worst}`);
+});
+
+test('the carry moves the flock with the point and leaves the steering as it is around a still point', () => {
+  const make = () => [ship(0, 7.5, 4.2, 1, 0.5), ship(8, 7.6, 4.3, 0.5, 1)];
+  const still = make();
+  const carried = make();
+  // The point makes the same move as the carry, so the carried flock sees what the still one does.
+  flockStep(still, STEP, context(FISH_FEEL));
+  flockStep(carried, STEP, context(FISH_FEEL, { carryX: 6, carryY: -2, targetX: 8 + 6 * STEP, targetY: 4.5 - 2 * STEP }));
+  carried.forEach((entry, index) => {
+    assert.ok(Math.abs(entry.velocityX - still[index].velocityX) < 1e-12 && Math.abs(entry.velocityY - still[index].velocityY) < 1e-12);
+    assert.ok(Math.abs(entry.x - (still[index].x + 6 * STEP)) < 1e-12 && Math.abs(entry.y - (still[index].y - 2 * STEP)) < 1e-12);
+    assert.ok(Math.abs(entry.course - Math.atan2(entry.velocityY - 2, entry.velocityX + 6)) < 1e-12, 'the course is the whole movement');
+  });
+});
+
+// Mean distance of the ships from the point and their mean spread about their centroid, over the
+// last seconds of a run in which the point flies right at the player's speed.
+function chase(feel) {
+  const swarm = new PlayerSwarm({ random: sequenceRandom() });
+  swarm.setFeel(feel);
+  swarm.reset(2, 4.5, 24);
+  let pointX = 2;
+  let distance = 0;
+  let spread = 0;
+  let samples = 0;
+  for (let step = 0; step < 150; step += 1) swarm.update(STEP, pointX, 4.5);
+  for (let step = 0; step < 150; step += 1) {
+    pointX += 6 * STEP;
+    swarm.update(STEP, pointX, 4.5);
+    if (step < 60) continue;
+    const centroid = swarm.centroid;
+    for (const entry of swarm.ships) {
+      distance += Math.hypot(entry.x - pointX, entry.y - 4.5);
+      spread += Math.hypot(entry.x - centroid.x, entry.y - centroid.y);
+      samples += 1;
+    }
+  }
+  return { distance: distance / samples, spread: spread / samples };
+}
+
+test('follow keeps the flock around a moving point; without it the ships trail the point in a clump', () => {
+  const trailing = chase({ ...FISH_FEEL, follow: 0 });
+  const following = chase({ ...FISH_FEEL, follow: 1 });
+  assert.ok(trailing.distance > 1, `trailing distance ${trailing.distance}`);
+  assert.ok(following.distance < trailing.distance * 0.7, `following ${following.distance} trailing ${trailing.distance}`);
+  assert.ok(following.spread > trailing.spread * 1.5, `following spread ${following.spread} trailing ${trailing.spread}`);
+});
+
+test('on the move the tightness dial shows only with follow', () => {
+  const ratio = (follow) => chase({ ...FISH_FEEL, tightness: 4, follow }).distance / chase({ ...FISH_FEEL, follow }).distance;
+  assert.ok(ratio(0) > 0.95, `without follow ${ratio(0)}`);
+  assert.ok(ratio(1) < 0.9, `with follow ${ratio(1)}`);
+});
+
+test('a point that jumps carries the flock at no more than the ships\' top speed, and reset forgets the carry', () => {
+  const swarm = new PlayerSwarm({ random: sequenceRandom() });
+  swarm.setFeel({ ...FISH_FEEL, follow: 1 });
+  swarm.reset(4, 4.5, 6);
+  swarm.update(STEP, 14, 4.5);
+  assert.ok(swarm.context.carryX > 0 && swarm.context.carryX <= 11 * (1 - Math.exp(-STEP / FOLLOW_SMOOTH_SECONDS)) + 1e-9, `${swarm.context.carryX}`);
+  swarm.reset(4, 4.5, 6);
+  swarm.update(STEP, 4, 4.5);
+  assert.equal(swarm.context.carryX, 0);
 });

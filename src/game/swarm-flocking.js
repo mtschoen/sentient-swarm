@@ -100,6 +100,14 @@ export const SWARM_MAXIMUM_SPEED = 11;
 const REFERENCE_SHIPS = 12;
 // Swarm feel dials (src/game/swarm-feel.js, experiment): the context's feel scales alignment, adds a
 // harmonic well toward the point and shrinks the roaming reach, and adds a per-ship buzz velocity.
+// Two of them act outside the steering, because everything inside it is smoothed by the steering
+// response and the acceleration cap and, on the move, drowned by the chase of the point:
+// - the carry (context carryX, carryY: the point's velocity times the follow dial, from PlayerSwarm)
+//   is the velocity of the frame the ships flock in. A ship's velocityX and velocityY are its
+//   velocity in that frame and its position moves by velocity plus carry, so at follow 1 the flock
+//   behaves around a moving point as it does around a still one, and at 0 it trails the point.
+// - the buzz velocity is added to the movement directly, not to the desired velocity.
+// The course is the direction of the whole movement (velocity plus carry plus buzz).
 const buzzScratch = { x: 0, y: 0 };
 const TWO_PI = Math.PI * 2;
 const EPSILON = 1e-9;
@@ -145,19 +153,25 @@ export function homeRadiusFor(aliveCount) {
 
 // Advances every alive slot by deltaSeconds. slots carry x, y, velocityX, velocityY, course plus a
 // temperament; context: { targetX, targetY, firing, aimX, aimY (unit or zero), time, aliveCount,
-// bounds, margin }. The course is the velocity's direction; where the ship points (its heading) is
-// src/game/swarm-facing.js's.
-export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX, aimY, time, aliveCount, bounds, margin, feel = FISH_FEEL }) {
+// bounds, margin, feel, carryX, carryY }. The course is the direction the ship moves in; where it
+// points (its heading) is src/game/swarm-facing.js's.
+export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX, aimY, time, aliveCount, bounds, margin, feel = FISH_FEEL, carryX = 0, carryY = 0 }) {
   const home = homeRadiusFor(aliveCount);
   const neighborSquared = SWARM_NEIGHBOR_RADIUS * SWARM_NEIGHBOR_RADIUS;
   const cohesionSquared = SWARM_COHESION_RADIUS * SWARM_COHESION_RADIUS;
   const roamScale = roamScaleFor(feel.tightness);
+  // With a carry or a buzz the course is no longer the direction of the ship's own velocity.
+  const offCourse = carryX !== 0 || carryY !== 0 || feel.buzz > 0;
   const attacking = firing && (aimX !== 0 || aimY !== 0);
-  // Velocities as of the start of the step, so alignment does not depend on slot order.
+  // Velocities as of the start of the step, so alignment does not depend on slot order. The carry
+  // moves every ship here, before any ship steers, so each one sees its neighbours and the point
+  // in the same frame (the point has already made this step's move).
   for (const ship of slots) {
     if (!ship.alive) continue;
     ship.previousVelocityX = ship.velocityX;
     ship.previousVelocityY = ship.velocityY;
+    ship.x += carryX * deltaSeconds;
+    ship.y += carryY * deltaSeconds;
   }
   for (const ship of slots) {
     if (!ship.alive) continue;
@@ -259,15 +273,10 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
         desiredY += averageY * weight;
       }
     }
+    const ownCourse = offCourse ? Math.atan2(ship.velocityY, ship.velocityX) : ship.course;
     const swing = ship.wander * (0.7 * Math.sin(time * ship.wanderRateOne + ship.wanderPhaseOne) + 0.3 * Math.sin(time * ship.wanderRateTwo + ship.wanderPhaseTwo));
-    desiredX += Math.cos(ship.course + swing * 1.5) * SWARM_WANDER * maximumSpeed;
-    desiredY += Math.sin(ship.course + swing * 1.5) * SWARM_WANDER * maximumSpeed;
-    if (feel.buzz > 0) {
-      buzzDirection(ship.slot, time, buzzScratch);
-      const buzz = feel.buzz * BUZZ_SPEED_SHARE * ship.cruiseSpeed;
-      desiredX += buzzScratch.x * buzz;
-      desiredY += buzzScratch.y * buzz;
-    }
+    desiredX += Math.cos(ownCourse + swing * 1.5) * SWARM_WANDER * maximumSpeed;
+    desiredY += Math.sin(ownCourse + swing * 1.5) * SWARM_WANDER * maximumSpeed;
     if (attacking) {
       const proximity = Math.max(0, 1 - reach / SWARM_ATTACK_REACH) * attackTurn(time, ship.attackPhase);
       desiredX += aimX * SWARM_ATTACK * proximity * maximumSpeed;
@@ -285,16 +294,24 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     let speed = Math.hypot(ship.velocityX, ship.velocityY);
     const floor = SWARM_SPEED_FLOOR * ship.cruiseSpeed;
     if (speed < EPSILON) {
-      ship.velocityX = Math.cos(ship.course) * floor;
-      ship.velocityY = Math.sin(ship.course) * floor;
+      ship.velocityX = Math.cos(ownCourse) * floor;
+      ship.velocityY = Math.sin(ownCourse) * floor;
       speed = floor;
     }
     const clamped = Math.min(maximumSpeed, Math.max(floor, speed));
     ship.velocityX *= clamped / speed;
     ship.velocityY *= clamped / speed;
-    ship.course = Math.atan2(ship.velocityY, ship.velocityX);
-    ship.x = clampTo(ship.x + ship.velocityX * deltaSeconds, bounds.minX + margin, bounds.maxX - margin);
-    ship.y = clampTo(ship.y + ship.velocityY * deltaSeconds, bounds.minY + margin, bounds.maxY - margin);
+    let movementX = ship.velocityX;
+    let movementY = ship.velocityY;
+    if (feel.buzz > 0) {
+      buzzDirection(ship.slot, time, buzzScratch);
+      const buzz = feel.buzz * BUZZ_SPEED_SHARE * ship.cruiseSpeed;
+      movementX += buzzScratch.x * buzz;
+      movementY += buzzScratch.y * buzz;
+    }
+    ship.course = Math.atan2(movementY + carryY, movementX + carryX);
+    ship.x = clampTo(ship.x + movementX * deltaSeconds, bounds.minX + margin, bounds.maxX - margin);
+    ship.y = clampTo(ship.y + movementY * deltaSeconds, bounds.minY + margin, bounds.maxY - margin);
   }
 }
 
