@@ -12,6 +12,8 @@ import { LabMode } from './ui/lab.js';
 import { capacityOptionsUpTo, pinnedCapacityFromSearch, probeDisabledFromSearch } from './ui/panelModel.js';
 import { feelFromSearch, feelToSearchMerged } from './game/swarm-feel.js';
 import { createSwarmFeelGroup } from './ui/swarm-feel-panel.js';
+import { FireLog } from './game/fire-log.js';
+import { createFireDebug } from './ui/fire-debug.js';
 import { PRESETS } from './settings/presets.js';
 import { FrameTimeProbe } from './settings/probe.js';
 import { SettingsStore } from './settings/storage.js';
@@ -192,6 +194,16 @@ async function boot() {
   });
   settingsPanel.element.querySelector('.settings-header').after(swarmFeelGroup.element);
   window.__murmuration.swarmFeel = swarmFeel;
+  // ?debug=fire shows the fire log on screen: why the swarm went silent while fire was held.
+  let fireLog = null;
+  let fireDebug = null;
+  if (new URLSearchParams(location.search).get('debug') === 'fire') {
+    fireLog = new FireLog({ touchEvent: () => input.touch.lastEvent });
+    game.setFireLog(fireLog);
+    fireDebug = createFireDebug();
+    document.body.append(fireDebug.element);
+    window.__murmuration.fireLog = fireLog;
+  }
   hud.settingsButton.addEventListener('click', () => openSettings());
   // O toggles the panel. Escape (and the gamepad's back and Options) close it through the menu
   // action path in render (menuRouting.js), so that press never also pauses or resumes the run.
@@ -346,6 +358,7 @@ async function boot() {
     const state = game.state;
     hud.update(state);
     touchOverlay.update(state);
+    fireDebug?.update(fireLog);
     lifeWatcher.update(state);
     const isGameOver = state.phase === 'gameOver';
     if (isGameOver && !gameOverShown) hud.showGameOver(state.score, restartFromGameOver);

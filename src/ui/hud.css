@@ -77,3 +77,8 @@
   font-size: 13px; color: #05060a; background: #7dff6b; box-shadow: 0 0 14px #7dff6b; text-transform: none; white-space: nowrap; }
 .hud-toast-show { animation: hud-toast-fade 3.2s ease-out forwards; }
 @keyframes hud-toast-fade { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+
+/* The fire log (?debug=fire, src/ui/fire-debug.js): display only, never takes a touch. */
+.fire-debug { position: fixed; left: 50%; top: 44px; transform: translateX(-50%); margin: 0; padding: 4px 8px; max-width: 96vw;
+  font: 10px/1.35 ui-monospace, Consolas, monospace; color: #dff; background: rgba(0, 0, 0, 0.6); border-radius: 4px;
+  white-space: pre-wrap; pointer-events: none; z-index: 50; }

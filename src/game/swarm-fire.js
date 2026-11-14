@@ -21,6 +21,9 @@
 // - Rail turrets: each turret volley fires once from one ship in rotation, at full size, in the
 //   turrets' own directions around the aim (the turrets belong to the swarm as a whole).
 // - Beam: one beam from the swarm centroid along the aim (the projectile system has one beam slot).
+// - report describes the newest distribute for the fire log (src/game/fire-log.js): the ships, how
+//   many point inside the cone, how many are off cooldown, the ship shots fired and the aggregate
+//   rate the law gives (0 while nothing is due to fire).
 import { MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { perShipInterval } from './swarm-fire-rate.js';
 import { swarmShotRecipe } from './swarm-shots.js';
@@ -38,6 +41,7 @@ export class SwarmFire {
     this.random = random;
     this.cooldowns = new Float64Array(MAXIMUM_SWARM_SHIPS);
     this.scheduled = new Uint8Array(MAXIMUM_SWARM_SHIPS);
+    this.report = { ships: 0, inCone: 0, ready: 0, fired: 0, shotsPerSecond: 0 };
     this.reset();
   }
 
@@ -54,6 +58,12 @@ export class SwarmFire {
   distribute(fire, ships, origin, centroid, { firing, aimX, aimY, deltaSeconds, kind, tier }) {
     const result = { spawns: [], turretSpawns: [], beam: null };
     const count = ships.length;
+    const report = this.report;
+    report.ships = count;
+    report.inCone = 0;
+    report.ready = 0;
+    report.fired = 0;
+    report.shotsPerSecond = 0;
     if (count === 0) return result;
     if (!firing) this.scheduled.fill(0);
     const recipe = firing ? swarmShotRecipe(kind, tier) : null;
@@ -87,18 +97,24 @@ export class SwarmFire {
       this.scheduled[ship.slot] = 1;
       this.cooldowns[ship.slot] = slotHash(ship.slot, 21);
     }
+    const report = this.report;
+    report.shotsPerSecond = inverseSum / interval;
     const start = this.rotation % count;
     let last = -1;
     for (let visited = 0; visited < count; visited += 1) {
       const index = (start + visited) % count;
       const ship = ships[index];
-      if (this.cooldowns[ship.slot] > 0) continue;
+      const ready = this.cooldowns[ship.slot] <= 0;
       let offset = ship.heading - aimAngle;
       offset -= 2 * Math.PI * Math.round(offset / (2 * Math.PI));
-      if (Math.abs(offset) > SWARM_FIRE_CONE_RADIANS) continue;
+      const inCone = Math.abs(offset) <= SWARM_FIRE_CONE_RADIANS;
+      if (ready) report.ready += 1;
+      if (inCone) report.inCone += 1;
+      if (!ready || !inCone) continue;
       if (spawns.length + recipe.pelletCount > MAXIMUM_SWARM_SPAWNS_PER_UPDATE) break;
       this.cooldowns[ship.slot] += 1;
       this.appendShot(spawns, ship, recipe);
+      report.fired += 1;
       last = index;
     }
     if (last >= 0) this.rotation = (last + 1) % count;

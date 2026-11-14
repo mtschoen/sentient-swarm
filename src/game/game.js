@@ -160,6 +160,7 @@ export class Game {
     this.initialSwarmShips = INITIAL_SWARM_SHIPS;
     this.swarm.reset(this.player.position.x, this.player.position.y, this.initialSwarmShips);
     this.swarmFire = new SwarmFire();
+    this.fireLog = null;
     // Reused each update: the swarm's attack-run controls (firing, unit aim).
     this.swarmControls = { firing: false, aimX: 0, aimY: 0 };
     this.latestStats = null;
@@ -446,6 +447,11 @@ export class Game {
       kind: firedKind,
       tier: firedTier,
     });
+    // The fire log (?debug=fire, main.js): why the swarm is silent while fire is held.
+    this.fireLog?.sample(deltaSeconds, {
+      phase: this.run.phase, inputFiring: controls.firing, armed: firedKind, report: this.swarmFire.report,
+      aimX: swarmControls.aimX, aimY: swarmControls.aimY, moveX: inputState.move.x, moveY: inputState.move.y,
+    });
     swarmShots.spawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
     swarmShots.turretSpawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
     this.projectiles.setBeam(fire.expired ? null : swarmShots.beam);
@@ -666,6 +672,11 @@ export class Game {
   // Swarm feel dials (experiment): { alignment, tightness, buzz }, read live by the swarm's steering.
   setSwarmFeel(feel) {
     this.swarm.setFeel(feel);
+  }
+
+  // A FireLog (src/game/fire-log.js) sampled every update, or null for none.
+  setFireLog(fireLog) {
+    this.fireLog = fireLog;
   }
 
   setInitialSwarmShips(count) {

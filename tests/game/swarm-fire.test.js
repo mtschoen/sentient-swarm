@@ -196,3 +196,22 @@ test('fire held through a weapon change follows the new weapon\'s law at once: n
   const expected = aggregateShotsPerSecond(BASE_SHOTS_PER_SECOND, 0.4, 60) * 0.5;
   assert.ok(Math.abs(total(base) / expected - 1) < 0.15, `${total(base)} base shots in the half second after pulse, law ${expected}`);
 });
+
+test('the report counts the ships, those in the cone, those off cooldown, the shots and the law\'s rate', () => {
+  const fire = new SwarmFire({ random: seededRandom() });
+  const ships = shipsHeading(12, (index) => (index < 4 ? 0 : Math.PI));
+  let fired = 0;
+  for (let step = 0; step < 60; step += 1) {
+    fire.distribute(NO_FIRE, ships, ORIGIN, ORIGIN, AIM_RIGHT);
+    fired += fire.report.fired;
+    assert.equal(fire.report.ships, 12);
+    assert.equal(fire.report.inCone, 4);
+  }
+  assert.ok(fired > 0);
+  assert.ok(fire.report.ready >= 8, 'the ships outside the cone stay off cooldown');
+  assert.ok(Math.abs(fire.report.shotsPerSecond - BASE_SHOTS_PER_SECOND) < 1e-9, `${fire.report.shotsPerSecond}`);
+  fire.distribute(NO_FIRE, ships, ORIGIN, ORIGIN, { ...AIM_RIGHT, kind: 'beam' });
+  assert.deepEqual(fire.report, { ships: 12, inCone: 0, ready: 0, fired: 0, shotsPerSecond: 0 });
+  fire.distribute(NO_FIRE, [], ORIGIN, ORIGIN, AIM_RIGHT);
+  assert.equal(fire.report.ships, 0);
+});

@@ -183,3 +183,26 @@ test('dispose removes every canvas listener and the window blur listener, and to
   assert.equal(source.touching, false);
   assert.equal(source.origins.move, null);
 });
+
+test('lastEvent names what happened to a stick last: start, ignored, end, cancel and blur', () => {
+  const canvas = createFakeCanvas();
+  const windowObject = new EventTarget();
+  canvas.ownerDocument.defaultView = windowObject;
+  const source = createTouchSource(canvas);
+  assert.deepEqual(source.lastEvent, { type: 'none', role: 'none', sequence: 0 });
+  canvas.dispatchEvent(touchEvent('touchstart', [{ identifier: 1, clientX: 800, clientY: 250 }]));
+  assert.deepEqual(source.lastEvent, { type: 'start', role: 'aim', sequence: 1 });
+  canvas.dispatchEvent(touchEvent('touchstart', [{ identifier: 2, clientX: 900, clientY: 250 }]));
+  assert.deepEqual(source.lastEvent, { type: 'ignored', role: 'aim', sequence: 2 });
+  canvas.dispatchEvent(touchEvent('touchcancel', [{ identifier: 1, clientX: 800, clientY: 250 }]));
+  assert.deepEqual(source.lastEvent, { type: 'cancel', role: 'aim', sequence: 3 });
+  assert.equal(source.firing, false);
+  canvas.dispatchEvent(touchEvent('touchstart', [{ identifier: 3, clientX: 100, clientY: 250 }]));
+  canvas.dispatchEvent(touchEvent('touchend', [{ identifier: 3, clientX: 100, clientY: 250 }]));
+  assert.deepEqual(source.lastEvent, { type: 'end', role: 'move', sequence: 5 });
+  windowObject.dispatchEvent(new Event('blur'));
+  assert.equal(source.lastEvent.sequence, 5, 'a blur with no touch down is not an event');
+  canvas.dispatchEvent(touchEvent('touchstart', [{ identifier: 4, clientX: 800, clientY: 250 }]));
+  windowObject.dispatchEvent(new Event('blur'));
+  assert.deepEqual(source.lastEvent, { type: 'blur', role: 'all', sequence: 7 });
+});

@@ -3,6 +3,9 @@
 // start a stick: the bomb button, the HUD buttons and the display-only HUD panels carry the mark. A
 // HUD panel is a full-width strip (the whole letterbox band, or half the arena width along the top
 // edge) with auto height, not just its text.
+// lastEvent names the newest thing that happened to a stick, for the fire log (?debug=fire): start,
+// end, cancel (a touchcancel: the browser or the system took the touch away), blur, or ignored (a
+// touch on a half whose stick is already held); sequence counts them.
 export const STICK_RADIUS = 60;
 
 export function createTouchSource(canvas) {
@@ -17,12 +20,16 @@ export function createTouchSource(canvas) {
     // The settings panel's stick dead zone (a fraction of the radius) and radius in pixels.
     radius: STICK_RADIUS,
     deadZone: 0,
+    lastEvent: { type: 'none', role: 'none', sequence: 0 },
     setTuning,
     pressBomb,
     releaseBomb,
     consumeBomb,
     dispose,
   };
+  function note(type, role) {
+    source.lastEvent = { type, role, sequence: source.lastEvent.sequence + 1 };
+  }
   function setTuning({ deadZone = source.deadZone, radius = source.radius }) {
     source.deadZone = deadZone;
     source.radius = radius;
@@ -80,7 +87,11 @@ export function createTouchSource(canvas) {
       if (isExclusive(touch)) continue;
       const position = localPosition(touch);
       const role = position.x < canvas.clientWidth / 2 ? 'move' : 'aim';
-      if (roleInUse(role)) continue;
+      if (roleInUse(role)) {
+        note('ignored', role);
+        continue;
+      }
+      note('start', role);
       active.set(touch.identifier, { role, originX: position.x, originY: position.y });
       source.origins[role] = { x: position.x, y: position.y };
       if (role === 'aim') source.firing = true;
@@ -102,6 +113,7 @@ export function createTouchSource(canvas) {
       const entry = active.get(touch.identifier);
       if (!entry) continue;
       active.delete(touch.identifier);
+      note(event.type === 'touchcancel' ? 'cancel' : 'end', entry.role);
       source[entry.role] = { x: 0, y: 0 };
       source.origins[entry.role] = null;
       if (entry.role === 'aim') source.firing = false;
@@ -112,6 +124,7 @@ export function createTouchSource(canvas) {
   // A blurred window may never deliver the touchend: every touch, both sticks and the bomb button
   // let go, so nothing stays held (keyboard.js and pointer.js do the same).
   function onBlur() {
+    if (active.size > 0) note('blur', 'all');
     active.clear();
     source.move = { x: 0, y: 0 };
     source.aim = { x: 0, y: 0 };
