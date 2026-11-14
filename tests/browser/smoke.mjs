@@ -77,12 +77,14 @@ const PLAY_SHIP_CAPTURE_FRAMES = 60;
 const PLAY_MINIMUM_FIRST_DEATH_FRAMES = 300;
 const PLAY_LATE_RUN_FRAMES = 1800;
 const PLAY_LATE_CHECK_FRAMES = 900;
-const PLAY_TUNNEL_SETTLE_FRAMES = 60;
+const PLAY_TUNNEL_SAMPLES = 16;
+const PLAY_TUNNEL_SAMPLE_FRAMES = 15;
+const PLAY_TUNNEL_MINIMUM_CROWD = 0.05;
 const PLAY_TUNNEL_HALF_HEIGHT = 0.3;
 const PLAY_TUNNEL_START_OFFSET = 1;
-// The tunnel ends one unit short of the right edge of a 16-unit view centered on the ship.
+// The lanes run from 1 to 7 units from the player (the world is 32 units wide).
 const PLAY_TUNNEL_END_OFFSET = 7;
-const PLAY_TUNNEL_MAXIMUM_RATIO = 0.5;
+const PLAY_TUNNEL_MAXIMUM_RATIO = 0.35;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
 async function writeDataUrl(name, dataUrl) {
@@ -389,8 +391,8 @@ async function checkPlay(page, frames) {
   await page.waitForFunction((target) => window.__murmuration.frame >= target, firing + frames, { timeout: PLAY_TIMEOUT_MILLISECONDS });
   const stats = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
   const firstDeathFrame = await evaluateWithin(page, 'reading the first death', () => window.__smokeFirstDeathFrame);
+  const tunnel = await measureTunnel(page);
   await setSticks(page, [0, 0, 0, 0]);
-  const tunnel = await measureTunnel(page, stats);
   console.log(firstDeathFrame === null
     ? `smoke: play first death: none in ${frames} frames of fire`
     : `smoke: play first death at fire frame ${firstDeathFrame - firing} (${((firstDeathFrame - firing) / 60).toFixed(1)} s at 60 Hz)`);
@@ -412,27 +414,47 @@ async function checkPlay(page, frames) {
   return null;
 }
 
-// The base gun's tunnel (owner ruling R19) 1 s after the fire stops: the C0b corridor metric along
-// the ship's row must be under half the control rows'; the idle ship is invulnerable meanwhile.
+// The base gun's tunnel (owner ruling R19), measured in the 32 by 18 world with the follow camera and
+// the 12-ship swarm: while the fire is still held, the coarse-field density of a lane along the aim
+// (right of the player, the aim of --play) must be under PLAY_TUNNEL_MAXIMUM_RATIO of the density of
+// the mirror lane behind the player (same row, same distances, never fired into). Enemies seek the
+// player from everywhere, so without fire the two lanes see the same crowd; with fire the lane ahead
+// empties while the crowd keeps arriving behind. Both lanes are summed over PLAY_TUNNEL_SAMPLES field
+// reads (the crowd is lumpy, one read is noise), and the lane behind must hold at least
+// PLAY_TUNNEL_MINIMUM_CROWD, so a crowd too thin to judge fails instead of passing. The one-screen
+// version (corridor against control rows 1 s after the fire stops) no longer holds: the whole sector
+// ahead of the swarm is empty, so the control rows are empty too and the lane refills within a second.
 // Returns { failure }, null when it passes or when the ship died in the run (the clear voids it).
-async function measureTunnel(page, statsAtStop) {
-  await evaluateWithin(page, 'making the idle ship invulnerable', () => window.__murmuration.game.debugInvulnerable(true));
-  await waitForFrame(page, (await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame)) + PLAY_TUNNEL_SETTLE_FRAMES);
-  const field = Float32Array.from(await evaluateWithin(page, 'reading the coarse field', async () => Array.from(await window.__murmuration.game.simulation.readCoarseField())));
+async function measureTunnel(page) {
+  await evaluateWithin(page, 'making the swarm invulnerable', () => window.__murmuration.game.debugInvulnerable(true));
+  let ahead = 0;
+  let behind = 0;
+  for (let sample = 0; sample < PLAY_TUNNEL_SAMPLES; sample += 1) {
+    await waitForFrame(page, (await evaluateWithin(page, 'reading the frame', () => window.__murmuration.frame)) + PLAY_TUNNEL_SAMPLE_FRAMES);
+    const field = Float32Array.from(await evaluateWithin(page, 'reading the coarse field', async () => Array.from(await window.__murmuration.game.simulation.readCoarseField())));
+    const { playerX, playerY } = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
+    const lane = (sign) => corridorDensities(field, playerY, {
+      halfHeight: PLAY_TUNNEL_HALF_HEIGHT,
+      startX: sign > 0 ? playerX + PLAY_TUNNEL_START_OFFSET : playerX - PLAY_TUNNEL_END_OFFSET,
+      endX: sign > 0 ? playerX + PLAY_TUNNEL_END_OFFSET : playerX - PLAY_TUNNEL_START_OFFSET,
+    }).corridor;
+    ahead += lane(1);
+    behind += lane(-1);
+  }
   const after = await evaluateWithin(page, 'reading stats', () => window.__murmuration.stats);
   const died = await evaluateWithin(page, 'reading the first death', () => window.__smokeFirstDeathFrame !== null);
   await evaluateWithin(page, 'ending invulnerability', () => window.__murmuration.game.debugInvulnerable(false));
-  const densities = corridorDensities(field, statsAtStop.playerY, {
-    halfHeight: PLAY_TUNNEL_HALF_HEIGHT, startX: statsAtStop.playerX + PLAY_TUNNEL_START_OFFSET, endX: statsAtStop.playerX + PLAY_TUNNEL_END_OFFSET,
-  });
-  const text = `corridor ${densities.corridor.toFixed(3)}, control ${densities.control.toFixed(3)}, ratio ${densities.ratio.toFixed(3)}`;
+  const text = `lane ahead ${(ahead / PLAY_TUNNEL_SAMPLES).toFixed(3)}, lane behind ${(behind / PLAY_TUNNEL_SAMPLES).toFixed(3)}, ratio ${(ahead / behind).toFixed(3)}`;
   if (died || after.phase !== 'playing') {
-    console.log(`smoke: play tunnel ${PLAY_TUNNEL_SETTLE_FRAMES} frames after the fire: not measured, the ship died during the run (${text})`);
+    console.log(`smoke: play tunnel: not measured, the ship died during the run (${text})`);
     return { failure: null };
   }
-  console.log(`smoke: play tunnel ${PLAY_TUNNEL_SETTLE_FRAMES} frames after the fire: ${text}`);
-  if (!(densities.ratio < PLAY_TUNNEL_MAXIMUM_RATIO)) {
-    return { failure: `smoke: expected the base gun tunnel under ${PLAY_TUNNEL_MAXIMUM_RATIO} of the control density 1 s after the fire, got ${text}` };
+  console.log(`smoke: play tunnel over ${PLAY_TUNNEL_SAMPLES} reads while firing: ${text}`);
+  if (!(behind / PLAY_TUNNEL_SAMPLES >= PLAY_TUNNEL_MINIMUM_CROWD)) {
+    return { failure: `smoke: expected a crowd of at least ${PLAY_TUNNEL_MINIMUM_CROWD} behind the player to judge the base gun tunnel, got ${text}` };
+  }
+  if (!(ahead / behind < PLAY_TUNNEL_MAXIMUM_RATIO)) {
+    return { failure: `smoke: expected the base gun lane under ${PLAY_TUNNEL_MAXIMUM_RATIO} of the lane behind the player while firing, got ${text}` };
   }
   return { failure: null };
 }
