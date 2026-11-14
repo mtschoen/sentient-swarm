@@ -6,7 +6,8 @@
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
 
-const CHECK_TIMEOUT_MILLISECONDS = 60_000;
+// The software adapter in CI takes about 59 s for every case, (a) through (p).
+const CHECK_TIMEOUT_MILLISECONDS = 180_000;
 const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
 
