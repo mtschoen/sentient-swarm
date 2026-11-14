@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PlayerSwarm } from '../../src/game/player-swarm.js';
 import {
-  SWARM_FACING_CONE_SHARE, SWARM_FACING_LIMIT_RADIANS, SWARM_FACING_TURN_RADIANS_PER_SECOND, faceStep, facingFor, turnHeadingToward,
+  SWARM_FACING_CONE_SHARE, SWARM_FACING_LIMIT_RADIANS, SWARM_FACING_RETURN_RADIANS_PER_SECOND, SWARM_FACING_TURN_RADIANS_PER_SECOND, faceStep,
+  facingFor, turnHeadingToward,
   wrapAngle,
 } from '../../src/game/swarm-facing.js';
 import { SWARM_FIRE_CONE_RADIANS } from '../../src/game/swarm-fire.js';
@@ -81,7 +82,10 @@ test('faceStep turns alive ships toward the aim while firing and back to the cou
   const dead = { alive: false, course: 1, heading: 2 };
   const controls = { firing: true, aimX: 1, aimY: 0 };
   faceStep([ship, dead], STEP, controls);
-  close(ship.heading, Math.PI / 2 - SWARM_FACING_TURN_RADIANS_PER_SECOND * STEP, 'one step of the turn rate toward the aim');
+  close(ship.heading, Math.PI / 2 - SWARM_FACING_RETURN_RADIANS_PER_SECOND * STEP, 'outside the cone: one step of the return rate toward the aim');
+  const inside = { alive: true, course: 0.5, heading: 0.5 };
+  faceStep([inside], STEP, controls);
+  close(inside.heading, 0.5 - SWARM_FACING_TURN_RADIANS_PER_SECOND * STEP, 'inside the cone: one step of the turn rate');
   assert.equal(dead.heading, 2);
   for (let step = 0; step < 120; step += 1) faceStep([ship], STEP, controls);
   close(ship.heading, facingFor(Math.PI / 2, 0));
@@ -118,4 +122,26 @@ test('a swarm chasing a point that flees straight from the aim keeps ships facin
   assert.ok(fleeing / samples > 0.9, `share of ships flying away from the aim ${fleeing / samples}`);
   assert.ok(fewest >= 1, 'no ship faced the aim in some step');
   assert.ok(facing / samples > 0.9, `mean share facing the aim ${facing / samples}`);
+});
+
+// Seconds a 24-ship swarm, firing along +x until settled, needs after the aim swings by the given
+// angle until at least 90 percent of the ships point inside the fire cone again.
+function secondsToFaceAfterSwing(swingRadians) {
+  const swarm = new PlayerSwarm({ random: sequenceRandom() });
+  swarm.reset(8, 4.5, 24);
+  for (let step = 0; step < 120; step += 1) swarm.update(STEP, 8, 4.5, { firing: true, aimX: 1, aimY: 0 });
+  const controls = { firing: true, aimX: Math.cos(swingRadians), aimY: Math.sin(swingRadians) };
+  for (let step = 1; step <= 120; step += 1) {
+    swarm.update(STEP, 8, 4.5, controls);
+    const facing = swarm.ships.filter((ship) => Math.abs(wrapAngle(ship.heading - swingRadians)) <= SWARM_FIRE_CONE_RADIANS).length;
+    if (facing >= 0.9 * swarm.aliveCount) return step * STEP;
+  }
+  return Infinity;
+}
+
+test('after the aim swings, even right round, the swarm points inside the fire cone again within a tenth of a second', () => {
+  for (const degrees of [60, 90, 135, 180, -120]) {
+    const seconds = secondsToFaceAfterSwing(degrees * DEGREE);
+    assert.ok(seconds <= 0.1 + 1e-9, `a ${degrees} degree swing took ${seconds.toFixed(3)} s`);
+  }
 });

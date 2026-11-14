@@ -11,7 +11,10 @@
 // shipped limit that is the cone's edge, at a lower limit it is outside the cone and the ship does
 // not fire. Not firing, the heading is the course.
 // The heading turns toward that direction at most SWARM_FACING_TURN_RADIANS_PER_SECOND, by the
-// shorter way round (turnHeadingToward), so ships swing round instead of snapping.
+// shorter way round (turnHeadingToward), so ships swing round instead of snapping. A heading
+// outside the fire cone while firing turns at SWARM_FACING_RETURN_RADIANS_PER_SECOND instead: when
+// the player swings the aim every ship is outside the cone at once, and at the slow rate the whole
+// swarm fell silent for up to half a second per swing (fire in fits and starts).
 import { SWARM_FIRE_CONE_RADIANS } from './swarm-fire.js';
 
 // How far off its course a ship may point: 180 degrees less the fire cone, the least that lets a
@@ -26,6 +29,9 @@ export const SWARM_FACING_LIMIT_RADIANS = Math.PI - SWARM_FIRE_CONE_RADIANS;
 export const SWARM_FACING_CONE_SHARE = 0.9;
 // Three quarters of a revolution per second.
 export const SWARM_FACING_TURN_RADIANS_PER_SECOND = 1.5 * Math.PI;
+// Five revolutions per second: the furthest a heading can be from the cone (the facing limit, 145
+// degrees) takes 0.08 s.
+export const SWARM_FACING_RETURN_RADIANS_PER_SECOND = 10 * Math.PI;
 
 const TWO_PI = Math.PI * 2;
 
@@ -57,9 +63,11 @@ export function faceStep(slots, deltaSeconds, { firing, aimX, aimY }) {
   const aiming = firing && (aimX !== 0 || aimY !== 0);
   const aimAngle = aiming ? Math.atan2(aimY, aimX) : 0;
   const maximumStep = SWARM_FACING_TURN_RADIANS_PER_SECOND * deltaSeconds;
+  const returnStep = SWARM_FACING_RETURN_RADIANS_PER_SECOND * deltaSeconds;
   for (const ship of slots) {
     if (!ship.alive) continue;
     const desired = aiming ? facingFor(ship.course, aimAngle) : ship.course;
-    ship.heading = turnHeadingToward(ship.heading, desired, maximumStep);
+    const outside = aiming && Math.abs(wrapAngle(ship.heading - aimAngle)) > SWARM_FIRE_CONE_RADIANS;
+    ship.heading = turnHeadingToward(ship.heading, desired, outside ? returnStep : maximumStep);
   }
 }
