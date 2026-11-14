@@ -50,7 +50,7 @@ You start on the base gun: three energy balls in a spread with unlimited ammo. T
 | Sidewinders | Missiles that turn toward the densest part of the swarm | 2, 4, 6 missiles |
 | Rail (turrets) | See below: not an armed weapon | Rail tier 1, 2, 3 shots per turret volley |
 
-- Every shot pierces: it keeps going through the agents it kills.
+- Shots pierce: they keep going through the agents they kill. The pulse orb and the sidewinder instead burst into a ring on their first hit.
 - The arena offers one pickup type at a time, rotating every 20 seconds (the HUD shows the next type). Pickups appear when your multiplier steps up and at least every 10 seconds while you are on the base gun. An untouched pickup fades out after 10 seconds. Every pickup also fires a clearing blast: agents within 1.5 world units of the ship die, unscored like a bomb, with a shockwave.
 - Picking up the same armed type adds a tier (up to 3) and refills the charge. A different type drops you one tier (never below 1) and refills the charge.
 - A time warp pickup (a pale violet clock, one rotation slot in six) arms nothing either: for 6 seconds the swarm moves, spawns and dies at 0.3 speed while your ship, your fire and your shots keep full speed, with a cold tint, slower music and a WARP bar on the HUD; another time warp extends it and a death ends it.

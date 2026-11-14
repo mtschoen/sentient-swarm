@@ -17,6 +17,8 @@
 // velocity, radius RING_START_RADIUS, lifetime RING_LIFETIME and extra RING_GROWTH_SPEED. Each detonation adds 1 to stats ringsThisFrame; the one that took
 // count 0 also stores its position as f32 bits in lastRingX and lastRingY, so the pair is always
 // one ring's (the CPU turns it into one warp grid impulse per frame).
+// A pulseOrb that kills detonates at once in projectiles_collide.wgsl (it is a ring by the next
+// step); the detonations here are for an orb that met nothing.
 // A sidewinder's detonation ring is made by projectiles_collide.wgsl (MISSILE_RING_LIFETIME, the
 // missile flag); this pass grows and expires it like any ring. Ring constants are in common.wgsl.
 // Storage buffers: projectiles, field, stats = 3.

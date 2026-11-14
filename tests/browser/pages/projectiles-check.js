@@ -53,6 +53,10 @@
 //     one, then its slot becomes a pulse ring carrying the missile flag, counted once in stats
 //     ringsThisFrame at the missile's position; the ring grows past the base radius, kills an
 //     agent 0.8 away and spares one 3 away (m1). A sidewinder that hits nothing stays a sidewinder (m2).
+// (p) pulse orb first hit: an orb far under its density threshold whose segment reaches an agent
+//     kills exactly that one, then its slot becomes a full pulse ring (no missile flag) there,
+//     counted once in stats ringsThisFrame; the ring kills an agent 2 away (beyond a missile
+//     ring's reach) and spares one 4.5 away.
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
@@ -404,6 +408,24 @@ async function runMissileBlastCase(harness) {
   ]);
 }
 
+const ORB_BLAST_FRAMES = 40;
+
+async function runOrbFirstHitCase(harness) {
+  harness.seedPositions([[8, 4.5], [10, 4.5], [12.5, 4.5]]);
+  const slot = harness.projectiles.queueSpawn({ x: 7.97, y: 4.5, velocityX: SIDEWINDER_SPEED, velocityY: 0, radius: 0.05, lifetime: 2, kind: PROJECTILE_KINDS.pulseOrb, extra: 1000 });
+  const firstKills = await harness.step();
+  const blast = await harness.projectileSlot(slot);
+  const blastStats = harness.lastStats;
+  await harness.steps(ORB_BLAST_FRAMES);
+  const alive = await harness.aliveFlags();
+  return verdictLine([
+    [firstKills === 1, `(p) the orb kills ${firstKills} agent in its first step (need 1)`],
+    [blast.alive && blast.kind === PROJECTILE_KINDS.pulseRing && !blast.missileRing, `(p) slot became a full pulse ring (kind ${blast.kind}, missile flag ${blast.missileRing})`],
+    [blastStats.ringsThisFrame === 1 && Math.abs(blastStats.lastRingX - blast.position[0]) < 1e-5 && Math.abs(blast.position[0] - 8) < 0.1, `(p) stats ringsThisFrame ${blastStats.ringsThisFrame} at x ${blastStats.lastRingX.toFixed(3)} (need 1, at the hit)`],
+    [!alive[0] && !alive[1] && alive[2], `(p) alive flags ${alive.slice(0, 3).join(',')} (need false,false,true)`],
+  ]);
+}
+
 async function runMissileMissCase(harness) {
   harness.seedPositions([[12, 7]]);
   const slot = harness.projectiles.queueSpawn({ x: 3, y: 2, velocityX: SIDEWINDER_SPEED, velocityY: 0, radius: 0.02, lifetime: 1, kind: PROJECTILE_KINDS.sidewinder, extra: 2 });
@@ -684,7 +706,7 @@ async function runCheck() {
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const harness = new Harness(device, simulation, projectiles);
   const entries = [];
-  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runMissileBlastCase, runMissileMissCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase, runBeamReversalCase, runMixedBulletsCase]) {
+  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runMissileBlastCase, runOrbFirstHitCase, runMissileMissCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase, runBeamReversalCase, runMixedBulletsCase]) {
     entries.push(await run(harness));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${entries.map((entry) => entry.detail).join('; ')}` };
   }
