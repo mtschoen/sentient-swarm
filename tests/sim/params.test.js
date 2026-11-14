@@ -266,3 +266,11 @@ test('validatedWorldBounds accepts rectangles inside the world and rejects the r
     assert.throws(() => validatedWorldBounds(bounds), RangeError, JSON.stringify(bounds));
   }
 });
+
+test('packSimParams writes the second player at 68 and 72 and leaves 68 to 79 zero without one', () => {
+  const view = new DataView(packSimParams({ secondPlayerPosition: [20, 7] }));
+  assert.equal(view.getUint32(68, true), 1);
+  assert.deepEqual([view.getFloat32(72, true), view.getFloat32(76, true)], [20, 7]);
+  const solo = new DataView(packSimParams({ secondPlayerPosition: null }));
+  assert.deepEqual([68, 72, 76].map((offset) => solo.getUint32(offset, true)), [0, 0, 0]);
+});

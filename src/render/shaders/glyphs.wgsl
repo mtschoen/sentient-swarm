@@ -91,7 +91,7 @@ struct GlyphVaryings {
 // player and ships at HEADING_IDLE_SPEED or faster face where they travel, retreating ones too.
 fn shipHeading(position: vec2f, velocity: vec2f) -> vec2f {
   let speed = length(velocity);
-  let toPlayer = params.playerPosition - position;
+  let toPlayer = nearestPlayerPosition(position, params) - position;
   let travelAngle = select(0.0, atan2(velocity.y, velocity.x), speed > 1e-6);
   let playerAngle = select(travelAngle, atan2(toPlayer.y, toPlayer.x), length(toPlayer) > 1e-4);
   let travelWeight = smoothstep(0.0, HEADING_IDLE_SPEED, speed);

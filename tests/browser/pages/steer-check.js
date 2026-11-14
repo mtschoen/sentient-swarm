@@ -5,7 +5,8 @@
 // spacing its target density implies, (d) pressure keeps a large Chaser swarm from collapsing
 // into a ball while pressure 0 lets it collapse, (e) the neighbor cap bounds the fine pass: one
 // dense-cell step matches a CPU port of the capped sampling and differs from the uncapped one, (f) the default five-species mix does not pack into a clump around the player at full capacity, at a sparse
-// population and at the initial ramp.
+// population and at the initial ramp, (g) with a second player point, each of two Chaser groups seeks the
+// nearer point.
 import { createGpuContext } from '/src/gpu/device.js';
 import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
@@ -146,6 +147,8 @@ class Harness {
     this.agentsOut = createStorageBuffer(this.device, agentBytes, 'steer-check-agents-out');
     this.paramsBuffer = createUniformBuffer(this.device, SIM_PARAMS_BYTES, 'steer-check-params');
     this.speciesBuffer = createStorageBuffer(this.device, packSpeciesTable(defaultSpecies(), defaultMatrix()).byteLength, 'steer-check-species');
+    // [x, y] of a second seek point, set before initialize(), or null for one player.
+    this.secondPlayerPosition = null;
   }
 
   async initialize() {
@@ -153,6 +156,7 @@ class Harness {
     this.device.queue.writeBuffer(this.paramsBuffer, 0, packSimParams({
       dt: STEP_SECONDS,
       playerPosition: PLAYER,
+      secondPlayerPosition: this.secondPlayerPosition,
       worldBounds: ARENA_BOUNDS,
       neighborRadius: NEIGHBOR_RADIUS,
       gridColumns: this.dimensions.columns,
@@ -259,6 +263,37 @@ async function checkSeek(gpu, common) {
   return {
     pass: reduction >= 0.3 && pingPongProblem === null,
     detail: `seek mean distance ${initialMean.toFixed(3)} -> ${finalMean.toFixed(3)} (reduction ${(reduction * 100).toFixed(1)}%, need >= 30%), ping-pong ${pingPongProblem ?? 'valid with no bind group rebuilds'}`,
+  };
+}
+
+// (g) Two seek points P1 (3, 4.5) and P2 (13, 4.5): 200 Chasers seeded in a unit disc around (5, 4.5)
+// (group A) and 200 around (11, 4.5) (group B), 60 steps. Each group seeks its nearer point: A's mean x
+// ends below 4.7 and B's above 11.3 (with one point B would move left).
+async function checkNearestPlayer(gpu, common) {
+  const random = randomSource(7);
+  const firstPoint = [3, 4.5];
+  const secondPoint = [13, 4.5];
+  const groupSize = 200;
+  const disc = (center) => Array.from({ length: groupSize }, () => {
+    const angle = random() * Math.PI * 2;
+    const radius = Math.sqrt(random());
+    return [center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle)];
+  });
+  const positions = [...disc([5, 4.5]), ...disc([11, 4.5])];
+  const harness = new Harness(gpu, common, positions.length);
+  harness.secondPlayerPosition = secondPoint;
+  await harness.initialize();
+  harness.device.queue.writeBuffer(harness.paramsBuffer, 8, new Float32Array(firstPoint));
+  harness.seed(packAgents(positions, CHASER, random), defaultSpecies());
+  await harness.run(60);
+  const agents = await harness.readAgents();
+  const failure = validityFailure(agents);
+  if (failure) return { pass: false, detail: `nearest player: ${failure}` };
+  const meanA = mean(agents.slice(0, groupSize).map((agent) => agent.x));
+  const meanB = mean(agents.slice(groupSize).map((agent) => agent.x));
+  return {
+    pass: meanA < 4.7 && meanB > 11.3,
+    detail: `nearest player: group A mean x ${meanA.toFixed(2)} (need < 4.7), group B mean x ${meanB.toFixed(2)} (need > 11.3)`,
   };
 }
 
@@ -559,7 +594,7 @@ async function runCheck() {
   gpu.device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
   const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
   const results = [];
-  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp, infoNoClumpSparse, infoNoClumpInitialRamp]) {
+  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNearestPlayer, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp, infoNoClumpSparse, infoNoClumpInitialRamp]) {
     results.push(await check(gpu, common));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${results.map((result) => result.detail).join('; ')}` };
   }

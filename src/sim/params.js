@@ -131,9 +131,11 @@ const COMFORT_RADIUS_OFFSET = 228;
 // 1 (the default) applies the coarse-field pressure term in steer.wgsl, 0 leaves it out.
 const COARSE_FIELD_PRESSURE_OFFSET = 232;
 const VECTOR_FIELDS = { playerPosition: 8, debugKillPosition: 40 };
-// spawnPerSpecies0 at 48 and spawnPerSpecies1 at 64 (species 4 in .x); bytes 68 to 79 are reserved
-// padding that stays zero.
+// spawnPerSpecies0 at 48 and spawnPerSpecies1 at 64 (species 4, a u32); the second player's active
+// flag is at 68 and its position at 72; all three stay zero without a second player.
 const SPAWN_PER_SPECIES_OFFSET = 48;
+const SECOND_PLAYER_ACTIVE_OFFSET = 68;
+const SECOND_PLAYER_POSITION_OFFSET = 72;
 
 export function packSimParams(values) {
   const buffer = new ArrayBuffer(SIM_PARAMS_BYTES);
@@ -173,7 +175,13 @@ export function packSimParams(values) {
   });
   view.setUint32(SPAWN_GATE_COUNT_OFFSET, gates.length, true);
   view.setFloat32(SPAWN_GATE_SPECIES_BIAS_OFFSET, values.spawnGates?.speciesBias ?? 0, true);
-  // spawnPerSpecies0 holds species 0 to 3, spawnPerSpecies1.x holds species 4; the rest stays 0.
+  // spawnPerSpecies0 holds species 0 to 3, spawnPerSpecies1 holds species 4.
+  // secondPlayerPosition: [x, y] or none; bytes 68 to 79 stay zero without one.
+  if (values.secondPlayerPosition) {
+    view.setUint32(SECOND_PLAYER_ACTIVE_OFFSET, 1, true);
+    view.setFloat32(SECOND_PLAYER_POSITION_OFFSET, values.secondPlayerPosition[0], true);
+    view.setFloat32(SECOND_PLAYER_POSITION_OFFSET + 4, values.secondPlayerPosition[1], true);
+  }
   const spawnPerSpecies = values.spawnPerSpecies ?? [];
   if (spawnPerSpecies.length > SPECIES_COUNT) {
     throw new Error('spawnPerSpecies has ' + spawnPerSpecies.length + ' entries; at most ' + SPECIES_COUNT + ' species');

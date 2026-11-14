@@ -18,6 +18,8 @@
 // (j) the density readback (task C6a): after one step over a seeded cluster the first map matches the summed
 // species channels of the coarse field (readCoarseField), the second map arrives only on the 16th step, and a
 // capacity swap keeps sampling the same map;
+// (k) with a second player point at (24, 9) and the player at (8, 9), every agent spawned in one wall-band
+// step lies at least DEFAULT_SPAWN_DISTANCE from both points;
 // (h) main.js's cadence: one readStats per step with no await between steps, a 4-step frame every
 // CADENCE_BURST_INTERVAL frames, rAF between frames; stats then lag 2 or more steps (asserted, so
 // the check cannot fall back to the lag-1 case), and the peak alive / target ratio over the run,
@@ -448,10 +450,13 @@ async function runCheck() {
   const densityResult = await runDensityCheck(gpu);
   if (lostReason !== null) return { pass: false, detail: `device lost during the density check: ${lostReason}` };
   details.push(densityResult.detail);
+  const secondPlayerResult = await runSecondPlayerSpawnCheck(gpu);
+  if (lostReason !== null) return { pass: false, detail: `device lost during the second player check: ${lostReason}` };
+  details.push(secondPlayerResult.detail);
   const cadenceResult = await runCadenceCheck(gpu);
   if (lostReason !== null) return { pass: false, detail: `device lost during the cadence check: ${lostReason}` };
   details.push(cadenceResult.detail);
-  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass && swapKillResult.pass && gateResult.pass && densityResult.pass && cadenceResult.pass;
+  const pass = aliveOk && speciesOk && lagOk && placement.failure === undefined && grownOk && killResult.pass && shrinkResult.pass && swapKillResult.pass && gateResult.pass && secondPlayerResult.pass && densityResult.pass && cadenceResult.pass;
   return { pass, detail: details.join('; ') };
 }
 
@@ -478,6 +483,32 @@ async function runGateCheck(gpu) {
   }
   const pass = counts[0] === GATE_CHECK_SPAWNS && counts[1] === GATE_CHECK_SPAWNS && farthest <= GATE_EJECT_REACH;
   return { pass, detail: `${pass ? 'PASS' : 'FAIL'} gate spawns ${counts.join(' and ')} of ${GATE_CHECK_SPAWNS} per species, farthest ${Math.max(0, farthest).toFixed(4)} past its own gate's radius (need <= ${GATE_EJECT_REACH.toFixed(4)})` };
+}
+
+// (k) One wall-band spawn step with two players: no spawn lands inside the spawn distance of either.
+const SECOND_PLAYER_SPAWNS = 2000;
+async function runSecondPlayerSpawnCheck(gpu) {
+  const { device } = gpu;
+  const simulation = await Simulation.create(gpu, { capacity: GATE_CHECK_CAPACITY, shares: normalizeShares([1, 1, 1, 1, 1]) });
+  const first = [8, 9];
+  const second = [24, 9];
+  simulation.setPlayer(first[0], first[1]);
+  simulation.setSecondPlayer(second[0], second[1]);
+  const spawnPerSpecies = Uint32Array.from({ length: SPECIES_COUNT }, (unused, species) => (species === 0 ? SECOND_PLAYER_SPAWNS : 0));
+  await submitStep(device, simulation, spawnPerSpecies);
+  const view = new DataView(await readBuffer(device, simulation.agentsBuffer));
+  simulation.destroy();
+  let spawned = 0;
+  let closest = Infinity;
+  for (let base = 0; base < view.byteLength; base += AGENT_STRIDE_BYTES) {
+    if ((view.getUint32(base + AGENT_OFFSETS.flags, true) & AGENT_FLAG_ALIVE) === 0) continue;
+    const x = view.getFloat32(base + AGENT_OFFSETS.position, true);
+    const y = view.getFloat32(base + AGENT_OFFSETS.position + 4, true);
+    spawned += 1;
+    closest = Math.min(closest, Math.hypot(x - first[0], y - first[1]), Math.hypot(x - second[0], y - second[1]));
+  }
+  const pass = spawned > 0 && closest >= DEFAULT_SPAWN_DISTANCE;
+  return { pass, detail: `${pass ? 'PASS' : 'FAIL'} two-player spawns: ${spawned} spawned, closest to either player ${closest.toFixed(3)} (need >= ${DEFAULT_SPAWN_DISTANCE})` };
 }
 
 runCheck().then(

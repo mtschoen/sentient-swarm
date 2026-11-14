@@ -130,6 +130,8 @@ export class Simulation {
     this.statsBufferValue = createStorageBuffer(this.device, STATS_BYTES, 'stats');
     this.stagingRing = new StagingRing(this.device, STATS_BYTES);
     this.playerPosition = [WORLD_WIDTH / 2, WORLD_HEIGHT / 2];
+    // The second seek point ([x, y]) while a second player is live, else null.
+    this.secondPlayerPosition = null;
     // Contact is off until the first setPlayerState, so the Plan A demo's pointer never hits.
     this.playerContact = null;
     this.acknowledgedHitSequence = 0;
@@ -194,6 +196,15 @@ export class Simulation {
   // Moves the player (the seek target) without touching the contact state.
   setPlayer(x, y) {
     this.playerPosition = [x, y];
+  }
+
+  // The neutral swarm seeks, and spawns keep their distance from, the nearer of the two points.
+  setSecondPlayer(x, y) {
+    this.secondPlayerPosition = [x, y];
+  }
+
+  clearSecondPlayer() {
+    this.secondPlayerPosition = null;
   }
 
   // Moves the player and turns contact on with this radius and invulnerability; the game calls
@@ -432,6 +443,7 @@ export class Simulation {
       projectileDt: projectileDeltaSeconds,
       time: this.timeValue,
       playerPosition: this.playerPosition,
+      secondPlayerPosition: this.secondPlayerPosition,
       neighborRadius: this.neighborRadius,
       gridColumns: this.dimensions.columns,
       gridRows: this.dimensions.rows,
@@ -599,6 +611,7 @@ export class Simulation {
     next.frameSequenceValue = this.frameSequenceValue;
     next.timeValue = this.timeValue;
     next.setPlayer(...this.playerPosition);
+    next.secondPlayerPosition = this.secondPlayerPosition === null ? null : [...this.secondPlayerPosition];
     next.playerContact = this.playerContact === null ? null : { ...this.playerContact };
     next.acknowledgedHitSequence = this.acknowledgedHitSequence;
     next.swarmSeats = this.swarmSeats.map((seat) => ({ ...seat }));
