@@ -98,7 +98,7 @@ fn saturatedDirection(gradient: vec2f) -> vec2f {
 // Straight seek (orbitRadius 0) also fades by smoothstep over params.comfortRadius around the player;
 // orbit seek is unchanged.
 fn seekVelocity(position: vec2f, orbitRadius: f32, maximumSpeed: f32, maximumAcceleration: f32) -> vec2f {
-  let toPlayer = params.playerPosition - position;
+  let toPlayer = nearestPlayerPosition(position, params) - position;
   let distance = length(toPlayer);
   if (distance < MINIMUM_LENGTH) {
     return vec2f(0.0, 0.0);

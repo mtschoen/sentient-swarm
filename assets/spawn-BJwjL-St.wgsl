@@ -113,8 +113,9 @@ fn farCornerPoint(randomState: ptr<function, u32>) -> vec2f {
   let high = params.worldBounds.zw;
   let center = boundsCenter(params);
   let offset = vec2f(nextRandom(randomState), nextRandom(randomState)) * depth;
-  let farX = params.playerPosition.x < center.x;
-  let farY = params.playerPosition.y < center.y;
+  let players = playersCenter(params);
+  let farX = players.x < center.x;
+  let farY = players.y < center.y;
   return vec2f(select(low.x + offset.x, high.x - offset.x, farX), select(low.y + offset.y, high.y - offset.y, farY));
 }
 
@@ -192,7 +193,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
     for (var attempt = 0u; attempt < POSITION_ATTEMPTS && found == 0u; attempt = attempt + 1u) {
       let draw = gatePoint(species, biased, gateTotal, 1.0 + f32(attempt) * GATE_OVERFLOW_GROWTH, &randomState);
       let crowded = coarseDensity(draw.position) >= GATE_OVERFLOW_DENSITY && attempt + 1u < POSITION_ATTEMPTS;
-      if (!crowded && distance(draw.position, params.playerPosition) >= minimumDistance) {
+      if (!crowded && nearestPlayerDistance(draw.position, params) >= minimumDistance) {
         position = draw.position;
         velocity = draw.outward * GATE_EJECT_SPEED;
         found = 1u;
@@ -203,7 +204,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   var bestDensity = -1.0;
   for (var attempt = 0u; attempt < POSITION_ATTEMPTS && found < wanted; attempt = attempt + 1u) {
     let candidate = bandPoint(&randomState);
-    if (distance(candidate, params.playerPosition) >= minimumDistance) {
+    if (nearestPlayerDistance(candidate, params) >= minimumDistance) {
       found = found + 1u;
       let density = coarseDensity(candidate);
       if (density > bestDensity) {
@@ -214,7 +215,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   }
   if (found == 0u) {
     let candidate = farCornerPoint(&randomState);
-    if (distance(candidate, params.playerPosition) >= minimumDistance) {
+    if (nearestPlayerDistance(candidate, params) >= minimumDistance) {
       position = candidate;
       found = 1u;
     }

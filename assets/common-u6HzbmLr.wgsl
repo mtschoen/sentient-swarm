@@ -62,7 +62,9 @@ struct Agent {
 //  36 spawnDistance      f32 (minimum spawn distance from the player, world units)
 //  40 debugKillPosition  vec2f
 //  48 spawnPerSpecies0   vec4u (species 0 to 3)
-//  64 spawnPerSpecies1   vec4u (species 4 in .x, rest 0)
+//  64 spawnPerSpecies1   u32 (species 4)
+//  68 secondPlayerActive u32 (1: a second seek point is live; bytes 68 to 79 are zero without one)
+//  72 secondPlayerPosition vec2f
 //  80 debugKillRadius    f32
 //  84 frameSequence      u32
 //  88 sameSpeciesCohesion u32 (1: own-species gradient, 0: total-density gradient)
@@ -98,7 +100,9 @@ struct SimParams {
   spawnDistance: f32,
   debugKillPosition: vec2f,
   spawnPerSpecies0: vec4u,
-  spawnPerSpecies1: vec4u,
+  spawnPerSpecies1: u32,
+  secondPlayerActive: u32,
+  secondPlayerPosition: vec2f,
   debugKillRadius: f32,
   frameSequence: u32,
   sameSpeciesCohesion: u32,
@@ -122,6 +126,23 @@ struct SimParams {
   coarseFieldPressure: u32,
   projectileDt: f32,
   worldBounds: vec4f,
+}
+
+// The player the neutral swarm seeks and spawns keep away from: the nearer of the one or two live
+// players (ties go to playerPosition). Without a second player each is exactly the old expression.
+fn nearestPlayerPosition(position: vec2f, params: SimParams) -> vec2f {
+  let useSecond = params.secondPlayerActive != 0u
+    && distance(position, params.secondPlayerPosition) < distance(position, params.playerPosition);
+  return select(params.playerPosition, params.secondPlayerPosition, useSecond);
+}
+
+fn nearestPlayerDistance(position: vec2f, params: SimParams) -> f32 {
+  let first = distance(position, params.playerPosition);
+  return select(first, min(first, distance(position, params.secondPlayerPosition)), params.secondPlayerActive != 0u);
+}
+
+fn playersCenter(params: SimParams) -> vec2f {
+  return select(params.playerPosition, 0.5 * (params.playerPosition + params.secondPlayerPosition), params.secondPlayerActive != 0u);
 }
 
 // Bit 0 alive, bits 8..15 spawn-in frames remaining.
