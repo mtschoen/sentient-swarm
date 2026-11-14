@@ -1,5 +1,5 @@
 // World border (worldborder.wgsl): the world rectangle's edge as a bright line with a soft glow,
-// four instanced quads drawn into the warp grid layer's pass right after the grid. That layer is
+// one quad over the world rectangle drawn into the warp grid layer's pass right after the grid; the fragment shader lights the outline as a whole, so the corners are square and nothing is lit twice. That layer is
 // cleared every frame, is never copied forward by the trail decay (so the line cannot smear while
 // the camera moves) and feeds the bloom and the composite, so the line glows. The line's width and
 // glow are device pixels scaled by the device pixel ratio, not world units, so they read the same
@@ -13,8 +13,7 @@ const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
 export const BORDER_CORE_HALF_PIXELS = 1.5;
 export const BORDER_GLOW_PIXELS = 14;
 export const BORDER_VIEW_BYTES = 32;
-export const BORDER_EDGE_COUNT = 4;
-export const BORDER_VERTICES_PER_EDGE = 6;
+export const BORDER_VERTEX_COUNT = 6;
 
 // The BorderView bytes (see worldborder.wgsl) for the viewport's current camera and canvas;
 // fills target (a new Float32Array of 8 by default) and returns it.
@@ -66,7 +65,7 @@ export class WorldBorder {
     this.device.queue.writeBuffer(this.viewBuffer, 0, packWorldBorder(this.viewport, this.viewData));
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroupCache.get([this.viewBuffer]));
-    pass.draw(BORDER_VERTICES_PER_EDGE, BORDER_EDGE_COUNT);
+    pass.draw(BORDER_VERTEX_COUNT);
   }
 
   destroy() {

@@ -2,6 +2,10 @@
   color: #e8f6ff; text-transform: uppercase; user-select: none; }
 .hud-panel { position: absolute; box-sizing: border-box; padding: 10px 8px; display: flex; flex-direction: column; gap: 6px;
   text-shadow: 0 0 6px #19e6ff, 0 0 14px #19e6ff; overflow: hidden; }
+/* Backdrop (owner request after the world border's glow): each readout is a dark pill, drawn as a
+   background plus a 3px box-shadow rim so it grows outward without moving any layout (the panels'
+   padding holds the rim). Hidden rows (turrets, warp, charge) hide by visibility, backdrop included. */
+.hud-panel > * { background: rgba(0, 0, 0, 0.6); box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.6); border-radius: 4px; }
 .hud-left { align-items: flex-start; }
 .hud-right { align-items: flex-end; text-align: right; }
 .hud-score { font-size: 28px; letter-spacing: 1px; font-variant-numeric: tabular-nums; color: #19e6ff; }
@@ -52,9 +56,12 @@
 
 /* Pause button (hud.js): the one clickable element in the bands besides the game-over overlay. */
 .hud-pause { position: absolute; width: 34px; height: 34px; padding: 0; box-sizing: border-box; pointer-events: auto; cursor: pointer;
-  font: inherit; font-size: 13px; letter-spacing: 1px; color: #cfe8ff; background: rgba(25, 230, 255, 0.08);
+  font: inherit; font-size: 13px; letter-spacing: 1px; color: #cfe8ff; background: rgba(0, 0, 0, 0.65);
   border: 2px solid rgba(25, 230, 255, 0.4); border-radius: 6px; opacity: 0.7; touch-action: manipulation; }
 .hud-pause[hidden] { display: none; }
+
+/* The mute hint (audio-hook.js; its inline style holds the position and opacity): a backdrop while it has text. */
+#audio-hint:not(:empty) { background: rgba(0, 0, 0, 0.8); box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.8); border-radius: 4px; }
 
 /* Touch overlay (touchOverlay.js): floating stick visuals and the bomb button. */
 #touch-overlay { position: fixed; inset: 0; pointer-events: none; z-index: 6; font-family: system-ui, sans-serif; font-weight: 800; }

@@ -21,7 +21,7 @@ import { EffectsSynth } from './sfx.js';
 const MUTE_KEY_CODE = 'KeyM';
 const GESTURE_EVENTS = ['pointerdown', 'touchstart', 'touchend'];
 const HINT_STYLE = 'position:fixed;left:10px;bottom:8px;z-index:5;pointer-events:none;'
-  + 'color:#cfe8ff;opacity:0.55;font:12px/1.4 system-ui,sans-serif;';
+  + 'color:#cfe8ff;opacity:0.8;font:12px/1.4 system-ui,sans-serif;';
 
 function isTextEntry(target) {
   const tag = target?.tagName;

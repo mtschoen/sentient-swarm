@@ -17,5 +17,5 @@ input[type="checkbox"].settings-input { flex: 0 0 auto; width: 22px; height: 22p
   border-radius: 6px; cursor: pointer; }
 .settings-button { align-self: center; justify-self: start; }
 .settings-open { position: absolute; left: 8px; bottom: 30px; min-width: 44px; min-height: 36px; padding: 4px 10px; font: 700 12px system-ui, sans-serif;
-  color: #19e6ff; background: rgba(5, 6, 10, 0.55); border: 1px solid rgba(25, 230, 255, 0.6); border-radius: 6px; pointer-events: auto; cursor: pointer; }
+  color: #19e6ff; background: rgba(0, 0, 0, 0.65); border: 1px solid rgba(25, 230, 255, 0.6); border-radius: 6px; pointer-events: auto; cursor: pointer; }
 @media (max-width: 560px) { .settings-grid { grid-template-columns: 1fr; } }

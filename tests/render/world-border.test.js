@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  BORDER_CORE_HALF_PIXELS, BORDER_EDGE_COUNT, BORDER_GLOW_PIXELS, BORDER_VERTICES_PER_EDGE, BORDER_VIEW_BYTES, packWorldBorder,
+  BORDER_CORE_HALF_PIXELS, BORDER_GLOW_PIXELS, BORDER_VERTEX_COUNT, BORDER_VIEW_BYTES, packWorldBorder,
 } from '../../src/render/world-border.js';
 import { WORLD_HEIGHT, WORLD_WIDTH } from '../../src/sim/layout.js';
 import { Viewport } from '../../src/render/viewport.js';
@@ -42,13 +42,13 @@ test('a device pixel ratio below 1 is treated as 1 and the target is reused when
   assert.equal(target[6], BORDER_CORE_HALF_PIXELS);
 });
 
-test('the draw covers four edges of one quad each, matching the shader', () => {
-  assert.equal(BORDER_EDGE_COUNT, 4);
-  assert.equal(BORDER_VERTICES_PER_EDGE, 6);
+test('the draw is one quad of two triangles over the whole outline, matching the shader', () => {
+  assert.equal(BORDER_VERTEX_COUNT, 6);
   const source = readFileSync(new URL('../../src/render/shaders/worldborder.wgsl', import.meta.url), 'utf8');
   assert.match(source, /@vertex\s+fn borderVertex/);
   assert.match(source, /@fragment\s+fn borderFragment/);
   assert.match(source, /const CORNERS = array<vec2f, 6>/);
-  assert.match(source, /edge < 2u/);
-  assert.equal(source.includes('\u2014'), false, 'no em-dashes');
+  assert.equal(source.includes('instance_index'), false, 'no per-edge instances, so corners are never lit twice');
+  assert.match(source, /abs\(max\(beyond\.x, beyond\.y\)\)/, 'the core is the Chebyshev distance: square corners');
+  assert.equal(source.includes('—'), false, 'no em-dashes');
 });
