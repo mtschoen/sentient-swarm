@@ -1,4 +1,4 @@
-// Renderer: the warp grid into its own grid layer, then trails decay, spawn gates, glyphs, projectiles, pickups, particles and the ship into the
+// Renderer: the warp grid and the world border into their own grid layer, then trails decay, spawn gates, glyphs, projectiles, pickups, particles and the ship into the
 // current scene target, bloom, then composite (scene plus grid plus bloom) into the swapchain. Two
 // rgba16float scene targets at canvas device-pixel size ping-pong for trails, the decay reading the
 // previous one shifted by the camera's movement since the last frame (trailShift). The grid has its own
@@ -32,6 +32,7 @@ import { SwarmRenderer } from './swarm.js';
 import { SCENE_FORMAT, loadFullscreenHeader } from './render-shaders.js';
 import { TrailDecayPass, trailFrameFactors, trailOriginFor } from './trails.js';
 import { WORLD_WARP_LATTICE, WarpGrid } from './warpgrid.js';
+import { WorldBorder } from './world-border.js';
 
 export const DEFAULT_RENDER_SETTINGS = {
   shipArenaFraction: 0.018,
@@ -58,6 +59,7 @@ export class Renderer {
     const renderer = new Renderer(gpu, { simulation, viewport, common, fullscreenHeader, warpLattice });
     await trackEach([
       renderer.warpGrid.initialize(),
+      renderer.worldBorder.initialize(),
       renderer.trails.initialize(),
       renderer.gates.initialize(),
       renderer.glyphs.initialize(),
@@ -82,6 +84,7 @@ export class Renderer {
     this.settings = { ...DEFAULT_RENDER_SETTINGS };
     this.trails = new TrailDecayPass(gpu, { fullscreenHeader });
     this.warpGrid = new WarpGrid(gpu, { ...warpLattice, viewport, common });
+    this.worldBorder = new WorldBorder(gpu, { viewport, common });
     this.gates = new GateRenderer(gpu, { viewport, common });
     this.glyphs = new GlyphPass(gpu, { common });
     this.particles = new ParticleRenderer(gpu, { viewport, common });
@@ -173,6 +176,7 @@ export class Renderer {
       threatWeight: settings.warpThreatWeight,
       impulses: this.impulses.toUniformArray(time, this.impulseUniform),
     });
+    this.worldBorder.encode(gridPass);
     gridPass.end();
     const scenePass = encoder.beginRenderPass({
       label: 'scene',
@@ -231,7 +235,7 @@ export class Renderer {
   destroy() {
     this.destroySceneTextures();
     [this.glyphs, this.particles, this.warpGrid, this.projectileRenderer].forEach((pass) => pass.bindGroupCache.clear());
-    [this.warpGrid, this.trails, this.gates, this.glyphs, this.particles, this.projectileRenderer, this.pickupRenderer, this.ship, this.swarm, this.bloom, this.composite].forEach((pass) => pass.destroy());
+    [this.warpGrid, this.worldBorder, this.trails, this.gates, this.glyphs, this.particles, this.projectileRenderer, this.pickupRenderer, this.ship, this.swarm, this.bloom, this.composite].forEach((pass) => pass.destroy());
     this.frameCapture.destroy();
   }
 }
