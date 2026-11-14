@@ -82,8 +82,8 @@ const CAPSULE_CELL_BUDGET: u32 = 96u;
 const RING_MINIMUM_BAND: f32 = 0.08;
 const RING_CELL_BUDGET: u32 = 1024u;
 const BEAM_THREAT_UNITS: f32 = 4.0;
-// Collided cells per beam thread: 65536 for the workgroup, more than the whole grid at the default
-// cell size (14400 cells), so a sweep wide enough to cover half the arena is never cut short.
+// Collided cells per beam thread: 65536 for the workgroup, at least the whole grid at every preset
+// (MAXIMUM_GRID_CELLS in world.js), so a sweep across the world is never cut short.
 const BEAM_CELL_BUDGET: u32 = 256u;
 // The beam slot's previous direction is unit; anything shorter (a zero-filled slot) is a line.
 const BEAM_MINIMUM_PREVIOUS_LENGTH_SQUARED: f32 = 0.25;
@@ -383,8 +383,8 @@ fn rings(
 
 // Distance along direction from origin (inside the arena bounds) to the bounds edge.
 fn distanceToArenaEdge(origin: vec2f, direction: vec2f) -> f32 {
-  let low = params.arenaBounds.xy;
-  let high = params.arenaBounds.zw;
+  let low = params.worldBounds.xy;
+  let high = params.worldBounds.zw;
   let size = high - low;
   var nearest = size.x + size.y;
   if (direction.x > 0.0) { nearest = min(nearest, (high.x - origin.x) / direction.x); }
@@ -481,8 +481,8 @@ fn includeCorner(sector: BeamSector, corner: vec2f, bounds: vec4f) -> vec4f {
 // firstCell + cellStride, ... and colliding at most BEAM_CELL_BUDGET cells near the sector.
 fn collideSector(sector: BeamSector, firstCell: u32, cellStride: u32) {
   var bounds = vec4f(min(sector.origin, min(sector.startEnd, sector.finishEnd)), max(sector.origin, max(sector.startEnd, sector.finishEnd)));
-  let low = params.arenaBounds.xy;
-  let high = params.arenaBounds.zw;
+  let low = params.worldBounds.xy;
+  let high = params.worldBounds.zw;
   bounds = includeCorner(sector, low, bounds);
   bounds = includeCorner(sector, vec2f(high.x, low.y), bounds);
   bounds = includeCorner(sector, vec2f(low.x, high.y), bounds);

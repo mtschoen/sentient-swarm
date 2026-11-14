@@ -1,5 +1,5 @@
 // Integrate, in place, one thread per agent slot, after steer: position += velocity * dt; inside
-// params.wallMargin of an edge of the arena bounds (params.arenaBounds) the velocity gets a push
+// params.wallMargin of an edge of the arena bounds (params.worldBounds) the velocity gets a push
 // toward the arena center proportional to the penetration depth; the position is then clamped to
 // the bounds so nothing escapes. Spawn-in
 // frames count down by one. phase advances by dt * (2 + 0.5 * speed) radians and wraps at tau,
@@ -22,8 +22,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
     return;
   }
   agent.position = agent.position + agent.velocity * params.dt;
-  let lowPenetration = max(params.arenaBounds.xy + vec2f(params.wallMargin) - agent.position, vec2f(0.0));
-  let highPenetration = max(agent.position - (params.arenaBounds.zw - vec2f(params.wallMargin)), vec2f(0.0));
+  let lowPenetration = max(params.worldBounds.xy + vec2f(params.wallMargin) - agent.position, vec2f(0.0));
+  let highPenetration = max(agent.position - (params.worldBounds.zw - vec2f(params.wallMargin)), vec2f(0.0));
   agent.velocity = agent.velocity + (lowPenetration - highPenetration) * params.wallStiffness * params.dt;
   agent.position = clampToBounds(agent.position, params);
 

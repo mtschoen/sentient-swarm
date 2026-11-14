@@ -40,9 +40,9 @@ fn totalDensity(coordinate: vec2i) -> f32 {
   return low.x + low.y + low.z + low.w + high.x;
 }
 
-// Inside the arena bounds (params.arenaBounds), the playable part of the world.
+// Inside the arena bounds (params.worldBounds), the playable part of the world.
 fn isInsideArena(position: vec2f) -> bool {
-  return all(position >= params.arenaBounds.xy) && all(position <= params.arenaBounds.zw);
+  return all(position >= params.worldBounds.xy) && all(position <= params.worldBounds.zw);
 }
 
 // Rotates velocity toward the density gradient by at most maximumTurn radians. totalDensity clamps

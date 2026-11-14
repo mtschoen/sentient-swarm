@@ -11,8 +11,9 @@ const COARSE_CHANNELS: u32 = __COARSE_CHANNELS__u;
 const VECTORS_PER_CELL: u32 = COARSE_CHANNELS / 4u;
 const THREAT_FIXED_POINT_SCALE: f32 = 256.0;
 
-const ARENA_WIDTH: f32 = 16.0;
-const ARENA_HEIGHT: f32 = 9.0;
+// The world's size in world units (WORLD_WIDTH and WORLD_HEIGHT in src/sim/world.js).
+const WORLD_WIDTH: f32 = __WORLD_WIDTH__;
+const WORLD_HEIGHT: f32 = __WORLD_HEIGHT__;
 
 const TAU: f32 = 6.283185307;
 
@@ -58,7 +59,7 @@ struct Agent {
 //  24 gridRows           u32
 //  28 cellSize           f32
 //  32 capacity           u32
-//  36 spawnDistanceFraction f32 (minimum spawn distance from the player, of the arena bounds width)
+//  36 spawnDistance      f32 (minimum spawn distance from the player, world units)
 //  40 debugKillPosition  vec2f
 //  48 spawnPerSpecies0   vec4u (species 0 to 3)
 //  64 spawnPerSpecies1   vec4u (species 4 in .x, rest 0)
@@ -84,7 +85,7 @@ struct Agent {
 // 228 comfortRadius      f32 (straight seek fades to zero inside it; 0 turns the fade off)
 // 232 coarseFieldPressure u32 (1: steer applies the coarse-field pressure term, 0: it does not)
 // 236 projectileDt       f32 (the projectile step's dt: unscaled real time during a time warp)
-// 240 arenaBounds        vec4f (the playable arena inside the world: minX, minY, maxX, maxY)
+// 240 worldBounds        vec4f (the playable rectangle inside the world: minX, minY, maxX, maxY)
 struct SimParams {
   dt: f32,
   time: f32,
@@ -94,7 +95,7 @@ struct SimParams {
   gridRows: u32,
   cellSize: f32,
   capacity: u32,
-  spawnDistanceFraction: f32,
+  spawnDistance: f32,
   debugKillPosition: vec2f,
   spawnPerSpecies0: vec4u,
   spawnPerSpecies1: vec4u,
@@ -120,7 +121,7 @@ struct SimParams {
   comfortRadius: f32,
   coarseFieldPressure: u32,
   projectileDt: f32,
-  arenaBounds: vec4f,
+  worldBounds: vec4f,
 }
 
 // Bit 0 alive, bits 8..15 spawn-in frames remaining.
@@ -133,34 +134,34 @@ fn spawnFramesRemaining(flags: u32) -> u32 {
 }
 
 // The whole world, for cell indices; gameplay edges use clampToBounds.
-fn clampToArena(position: vec2f) -> vec2f {
-  return clamp(position, vec2f(0.0, 0.0), vec2f(ARENA_WIDTH, ARENA_HEIGHT));
+fn clampToWorld(position: vec2f) -> vec2f {
+  return clamp(position, vec2f(0.0, 0.0), vec2f(WORLD_WIDTH, WORLD_HEIGHT));
 }
 
-// The playable arena, a sub-rectangle of the world (the whole world at a 16:9 canvas).
+// The playable rectangle (params.worldBounds), inside the world.
 fn boundsSize(params: SimParams) -> vec2f {
-  return params.arenaBounds.zw - params.arenaBounds.xy;
+  return params.worldBounds.zw - params.worldBounds.xy;
 }
 
 fn boundsCenter(params: SimParams) -> vec2f {
-  return (params.arenaBounds.xy + params.arenaBounds.zw) * 0.5;
+  return (params.worldBounds.xy + params.worldBounds.zw) * 0.5;
 }
 
 fn clampToBounds(position: vec2f, params: SimParams) -> vec2f {
-  return clamp(position, params.arenaBounds.xy, params.arenaBounds.zw);
+  return clamp(position, params.worldBounds.xy, params.worldBounds.zw);
 }
 
 fn cellIndexFor(position: vec2f, params: SimParams) -> u32 {
-  let clamped = clampToArena(position);
+  let clamped = clampToWorld(position);
   let column = min(u32(clamped.x / params.cellSize), params.gridColumns - 1u);
   let row = min(u32(clamped.y / params.cellSize), params.gridRows - 1u);
   return column + row * params.gridColumns;
 }
 
 fn coarseCellIndexFor(position: vec2f) -> u32 {
-  let clamped = clampToArena(position);
-  let column = min(u32(clamped.x / ARENA_WIDTH * f32(COARSE_COLUMNS)), COARSE_COLUMNS - 1u);
-  let row = min(u32(clamped.y / ARENA_HEIGHT * f32(COARSE_ROWS)), COARSE_ROWS - 1u);
+  let clamped = clampToWorld(position);
+  let column = min(u32(clamped.x / WORLD_WIDTH * f32(COARSE_COLUMNS)), COARSE_COLUMNS - 1u);
+  let row = min(u32(clamped.y / WORLD_HEIGHT * f32(COARSE_ROWS)), COARSE_ROWS - 1u);
   return column + row * COARSE_COLUMNS;
 }
 
