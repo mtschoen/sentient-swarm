@@ -113,7 +113,7 @@ test('a flock around a still point keeps its centroid within the bound, never st
   const meanSpread = spreads.reduce((sum, value) => sum + value, 0) / spreads.length;
   assert.ok(meanSpread > 0.2, `mean heading spread ${meanSpread}`);
   const ship = swarm.slots.find((slot) => slot.alive);
-  assert.ok(Math.abs(Math.atan2(ship.velocityY, ship.velocityX) - ship.heading) < 1e-9, 'heading is the velocity');
+  assert.ok(Math.abs(Math.sin((ship.course - ship.heading) / 2)) < 0.5, 'heading follows the course');
   assert.equal(swarm.ships[0].heading, swarm.slots.find((slot) => slot.alive).heading);
 });
 
@@ -122,7 +122,7 @@ test('the temperament comes from the slot alone, not the random source, and diff
   const second = new PlayerSwarm({ random: () => 0.9 });
   first.reset(8, 4.5);
   second.reset(8, 4.5);
-  const character = (slot) => [slot.cruiseSpeed, slot.maximumTurn, slot.alignmentScale, slot.flockHold, slot.wander, slot.leash];
+  const character = (slot) => [slot.cruiseSpeed, slot.maximumTurn, slot.flockHold, slot.wander, slot.leash];
   assert.deepEqual(first.slots.slice(0, 12).map(character), second.slots.slice(0, 12).map(character));
   assert.equal(new Set(first.slots.slice(0, 12).map((slot) => slot.cruiseSpeed)).size, 12);
   assert.deepEqual(temperamentFor(5), temperamentFor(5));
@@ -138,22 +138,19 @@ test('the flock catches up after the point jumps', () => {
   assert.ok(centroidDistance(swarm, 11, 6) < homeRadiusFor(INITIAL_SWARM_SHIPS) + CENTROID_MARGIN, `centroid ${centroidDistance(swarm, 11, 6)} away`);
 });
 
-test('a point moving at the player speed is chased by a stretched stream that keeps up, then re-forms', () => {
+test('a point moving at the player speed is chased by a flock that keeps up, then settles', () => {
   const bounds = { minX: 0, maxX: 16, minY: 0, maxY: 9, width: 16, height: 9 };
   const swarm = new PlayerSwarm({ random: sequenceRandom(), bounds });
   swarm.reset(2, 4.5);
   hold(swarm, 2, 2, 4.5);
   let x = 2;
   let farthestCentroid = 0;
-  const ratios = [];
   for (let step = 0; step < 120; step += 1) {
     x += 6 * STEP;
     swarm.update(STEP, x, 4.5);
     farthestCentroid = Math.max(farthestCentroid, centroidDistance(swarm, x, 4.5));
-    if (step % 10 === 0) ratios.push(axisRatio(swarm.ships));
   }
   assert.ok(farthestCentroid < 1.5, `the centroid fell ${farthestCentroid} behind`);
-  assert.ok(Math.max(...ratios) > 1.5, `the flock stretched to ${Math.max(...ratios)}`);
   hold(swarm, 3, x, 4.5);
   assert.ok(centroidDistance(swarm, x, 4.5) < homeRadiusFor(INITIAL_SWARM_SHIPS) + CENTROID_MARGIN);
   hold(swarm, 5, 16, 9);

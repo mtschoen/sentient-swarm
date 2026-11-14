@@ -692,12 +692,6 @@ export class Game {
     for (let upgrade = 1; upgrade < tier; upgrade += 1) this.weapons.collect(type);
   }
 
-  // Ships every run starts with (the ?swarm= query parameter); the swarm resets to it now.
-  // Swarm feel dials (experiment): { alignment, tightness, buzz }, read live by the swarm's steering.
-  setSwarmFeel(feel) {
-    this.swarm.setFeel(feel);
-  }
-
   // A FireLog (src/game/fire-log.js) sampled every update, or null for none.
   setFireLog(fireLog) {
     this.fireLog = fireLog;

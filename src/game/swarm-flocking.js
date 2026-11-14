@@ -3,24 +3,23 @@
 // and speed; the controlled point anchors the seek targets and the leash. Every ship is its own agent; it never
 // stops (speed floor) and turns within its acceleration budget, so paths are arcs.
 //
-// What makes the Chaser's tendrils, and is kept here: alignment (average neighbour velocity, weight
-// above 1) outweighs seek, so ships follow the ships in front of them and queue into streams; the
-// steering acceleration is capped at maximumTurn times maximumSpeed, so a stream cannot turn sharply
-// and overshoots, loops and re-forms; seek brakes on arrival and fades to nothing inside the comfort
-// radius, so near its target only alignment and wander carry a ship through; separation is short
+// What is kept here: the steering acceleration is capped at maximumTurn times maximumSpeed, so a
+// ship cannot turn sharply and overshoots, loops and re-forms; seek brakes on arrival and fades to
+// nothing inside the comfort radius, so near its target only wander carries a ship through; separation is short
 // range and linear; cohesion fades as the neighbourhood fills and pressure pushes out of a crowd, so
 // dense knots spread into ribbons instead of a ball.
 //
 // Desired velocity, as in steer.wgsl (weights times directions of length at most 1 times the ship's
-// maximum speed, except alignment, which is a velocity):
+// maximum speed):
 //   seek toward the ship's roam group waypoint (arrival braking, comfort fade) * seek
 // + average separation within SWARM_NEIGHBOR_RADIUS (linear falloff) * separation * maximumSpeed
-// + average neighbour velocity within SWARM_NEIGHBOR_RADIUS * alignment
 // + cohesion toward the average position within SWARM_COHESION_RADIUS, faded by
 //   1 - neighbours / SWARM_COMFORT_NEIGHBORS (stands in for the coarse density gradient and fade)
 // - pressure away from that centre, pressure * (neighbours / comfort - 1) up to 2, when crowded
 //   (stands in for the coarse field pressure term);
 // the coarse field's matrix and flee terms are dropped (no other species, no threat field here).
+// The bee motion (src/game/swarm-motion.js) adds a harmonic well toward the point, a shrunk roaming
+// reach, the carry and the buzz.
 // Added for the player (not in the Chaser rules): roaming waypoints per slot group (below), a
 // per-slot wander, the leash (weight (distance /
 // home radius) squared toward the point: weak inside the home region, firm outside it), the attack
@@ -29,25 +28,22 @@
 // catch-up (maximum speed and acceleration grow by SWARM_CATCH_UP per home radius beyond the first)
 // and the speed floor. Steering = (desired - velocity) * SWARM_STEERING_RESPONSE, clamped to
 // maximumTurn * maximumSpeed; speed clamped to [floor, maximumSpeed].
-// Per-slot temperament (speed, turn, alignment, cohesion hold, wander, leash) comes from slotHash;
+// Per-slot temperament (speed, turn, cohesion hold, wander, leash) comes from slotHash;
 // the attack cycle's phase from attackPhaseFor.
 // Pure and allocation-free: no GPU, DOM, clock or random numbers; neighbours are an all-pairs loop
 // with a squared-distance early-out (65536 pairs at 256 ships), averaged, never summed.
 
 import { slotHash } from './swarm-hash.js';
-import { BUZZ_SPEED_SHARE, FISH_FEEL, TIGHTNESS_WELL_RATE, buzzDirection, roamScaleFor } from './swarm-feel.js';
+import { BUZZ_SPEED_SHARE, SWARM_BUZZ, SWARM_ROAM_SCALE, SWARM_TIGHTNESS, TIGHTNESS_WELL_RATE, buzzDirection } from './swarm-motion.js';
 
 export { slotHash };
 
-// Chaser row: seek 0.6, cohesion 0.5, alignment 1.4, separation 0.9, maximumSpeed 4.5,
+// Chaser row: seek 0.6, cohesion 0.5, alignment 1.4 (dropped), separation 0.9, maximumSpeed 4.5,
 // maximumTurn 0.9, pressure 0.6, flee 0.4 (dropped); steer.wgsl: STEERING_RESPONSE 4,
 // ARRIVAL_BRAKING 0.7, comfort radius 1, neighbour radius 0.1 (the default grid). Kept as is:
-// seek, cohesion, separation, pressure, the response and the braking. Alignment is raised to 2.2
-// (with the neighbour average capped at the ship's cruise speed): at 1.4 a 64 to 256 ship flock
-// settled into a round disc instead of streams.
+// seek, cohesion, separation, pressure, the response and the braking.
 export const SWARM_SEEK = 0.6;
 export const SWARM_COHESION = 0.5;
-export const SWARM_ALIGNMENT = 2.2;
 export const SWARM_SEPARATION = 0.9;
 export const SWARM_PRESSURE = 0.6;
 export const SWARM_STEERING_RESPONSE = 4;
@@ -58,7 +54,7 @@ export const SWARM_ARRIVAL_BRAKING = 0.7;
 // region rather than only circle it.
 export const SWARM_CRUISE_SPEED = 2.2;
 export const SWARM_MAXIMUM_TURN = 6;
-// Separation and alignment range; cohesion and pressure look further (the coarse field's stand-in).
+// Separation range; cohesion and pressure look further (the coarse field's stand-in).
 export const SWARM_NEIGHBOR_RADIUS = 0.3;
 export const SWARM_COHESION_RADIUS = 0.8;
 // Neighbours within the cohesion radius at which cohesion fades out and pressure starts.
@@ -98,14 +94,13 @@ export const SWARM_HOME_SPREAD = 0.6;
 // World units per second; the controlled point moves at 6.
 export const SWARM_MAXIMUM_SPEED = 11;
 const REFERENCE_SHIPS = 12;
-// Swarm feel dials (src/game/swarm-feel.js, experiment): the context's feel scales alignment, adds a
-// harmonic well toward the point and shrinks the roaming reach, and adds a per-ship buzz velocity.
-// Two of them act outside the steering, because everything inside it is smoothed by the steering
+// Bee motion (src/game/swarm-motion.js): a harmonic well toward the point, a shrunk roaming reach
+// and a per-ship buzz velocity. Two parts act outside the steering, because everything inside it is smoothed by the steering
 // response and the acceleration cap and, on the move, drowned by the chase of the point:
-// - the carry (context carryX, carryY: the point's velocity times the follow dial, from PlayerSwarm)
-//   is the velocity of the frame the ships flock in. A ship's velocityX and velocityY are its
-//   velocity in that frame and its position moves by velocity plus carry, so at follow 1 the flock
-//   behaves around a moving point as it does around a still one, and at 0 it trails the point.
+// - the carry (context carryX, carryY: the point's smoothed velocity, from PlayerSwarm) is the
+//   velocity of the frame the ships flock in. A ship's velocityX and velocityY are its velocity in
+//   that frame and its position moves by velocity plus carry, so the flock behaves around a moving
+//   point as it does around a still one.
 // - the buzz velocity is added to the movement directly, not to the desired velocity.
 // The course is the direction of the whole movement (velocity plus carry plus buzz).
 const buzzScratch = { x: 0, y: 0 };
@@ -119,7 +114,6 @@ export function temperamentFor(slot) {
   return {
     cruiseSpeed: SWARM_CRUISE_SPEED * (0.8 + 0.4 * slotHash(slot, 1)),
     maximumTurn: SWARM_MAXIMUM_TURN * (0.75 + 0.5 * slotHash(slot, 2)),
-    alignmentScale: 0.8 + 0.4 * slotHash(slot, 3),
     flockHold: 0.5 + 1 * slotHash(slot, 4),
     wander: 0.5 + 1 * slotHash(slot, 5),
     wanderRateOne: 0.35 + 0.5 * slotHash(slot, 6),
@@ -153,23 +147,17 @@ export function homeRadiusFor(aliveCount) {
 
 // Advances every alive slot by deltaSeconds. slots carry x, y, velocityX, velocityY, course plus a
 // temperament; context: { targetX, targetY, firing, aimX, aimY (unit or zero), time, aliveCount,
-// bounds, margin, feel, carryX, carryY }. The course is the direction the ship moves in; where it
+// bounds, margin, carryX, carryY }. The course is the direction the ship moves in; where it
 // points (its heading) is src/game/swarm-facing.js's.
-export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX, aimY, time, aliveCount, bounds, margin, feel = FISH_FEEL, carryX = 0, carryY = 0 }) {
+export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX, aimY, time, aliveCount, bounds, margin, carryX = 0, carryY = 0 }) {
   const home = homeRadiusFor(aliveCount);
   const neighborSquared = SWARM_NEIGHBOR_RADIUS * SWARM_NEIGHBOR_RADIUS;
   const cohesionSquared = SWARM_COHESION_RADIUS * SWARM_COHESION_RADIUS;
-  const roamScale = roamScaleFor(feel.tightness);
-  // With a carry or a buzz the course is no longer the direction of the ship's own velocity.
-  const offCourse = carryX !== 0 || carryY !== 0 || feel.buzz > 0;
   const attacking = firing && (aimX !== 0 || aimY !== 0);
-  // Velocities as of the start of the step, so alignment does not depend on slot order. The carry
-  // moves every ship here, before any ship steers, so each one sees its neighbours and the point
-  // in the same frame (the point has already made this step's move).
+  // The carry moves every ship here, before any ship steers, so each one sees its neighbours and the
+  // point in the same frame (the point has already made this step's move).
   for (const ship of slots) {
     if (!ship.alive) continue;
-    ship.previousVelocityX = ship.velocityX;
-    ship.previousVelocityY = ship.velocityY;
     ship.x += carryX * deltaSeconds;
     ship.y += carryY * deltaSeconds;
   }
@@ -177,10 +165,7 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     if (!ship.alive) continue;
     let separationX = 0;
     let separationY = 0;
-    let alignmentX = 0;
-    let alignmentY = 0;
     let nearCount = 0;
-    let alignedCount = 0;
     let centerX = 0;
     let centerY = 0;
     let farCount = 0;
@@ -199,13 +184,6 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
       separationX -= offsetX * falloff;
       separationY -= offsetY * falloff;
       nearCount += 1;
-      // Alignment only within the roam group, as steer.wgsl aligns only within a species: groups
-      // cross through each other instead of locking into one shared mill.
-      if (other.roamGroup === ship.roamGroup) {
-        alignmentX += other.previousVelocityX;
-        alignmentY += other.previousVelocityY;
-        alignedCount += 1;
-      }
     }
     const towardX = targetX - ship.x;
     const towardY = targetY - ship.y;
@@ -217,7 +195,7 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     // through the point's region instead of circling it.
     const axis = slotHash(ship.roamGroup, 31) * TWO_PI + SWARM_ROAM_AXIS_TURN * (slotHash(ship.roamGroup, 32) * 2 - 1) * time;
     const roamAngle = axis + Math.PI * (epoch % 2) + 0.6 * (slotHash(ship.roamGroup, 1000 + epoch) - 0.5);
-    const roamRadius = (0.6 + 0.4 * slotHash(ship.roamGroup, 2000 + epoch)) * SWARM_ROAM_REACH * home * roamScale;
+    const roamRadius = (0.6 + 0.4 * slotHash(ship.roamGroup, 2000 + epoch)) * SWARM_ROAM_REACH * home * SWARM_ROAM_SCALE;
     const waypointX = targetX + Math.cos(roamAngle) * roamRadius - ship.x;
     const waypointY = targetY + Math.sin(roamAngle) * roamRadius - ship.y;
     const waypointDistance = Math.hypot(waypointX, waypointY);
@@ -238,27 +216,14 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
       const seek = SWARM_LEASH * ship.leash * reach * reach * maximumSpeed;
       desiredX += (towardX / distance) * seek;
       desiredY += (towardY / distance) * seek;
-      if (feel.tightness > 0) {
-        // The harmonic well: desired speed grows linearly with the distance from the point.
-        const well = Math.min(maximumSpeed, TIGHTNESS_WELL_RATE * feel.tightness * distance);
-        desiredX += (towardX / distance) * well;
-        desiredY += (towardY / distance) * well;
-      }
+      // The harmonic well: desired speed grows linearly with the distance from the point.
+      const well = Math.min(maximumSpeed, TIGHTNESS_WELL_RATE * SWARM_TIGHTNESS * distance);
+      desiredX += (towardX / distance) * well;
+      desiredY += (towardY / distance) * well;
     }
     if (nearCount > 0) {
       desiredX += (separationX / nearCount) * SWARM_SEPARATION * maximumSpeed;
       desiredY += (separationY / nearCount) * SWARM_SEPARATION * maximumSpeed;
-    }
-    if (alignedCount > 0) {
-      // The average neighbour velocity, capped at this ship's cruise speed: the Chaser's maximum
-      // speed is fixed, so its alignment above 1 saturates there; here the maximum grows with the
-      // catch-up, and an uncapped average would feed on itself.
-      const averageVelocityX = alignmentX / alignedCount;
-      const averageVelocityY = alignmentY / alignedCount;
-      const averageSpeed = Math.hypot(averageVelocityX, averageVelocityY);
-      const alignment = SWARM_ALIGNMENT * feel.alignment * ship.alignmentScale * Math.min(1, ship.cruiseSpeed / Math.max(averageSpeed, EPSILON));
-      desiredX += averageVelocityX * alignment;
-      desiredY += averageVelocityY * alignment;
     }
     if (farCount > 0) {
       const averageX = centerX / farCount;
@@ -273,7 +238,7 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
         desiredY += averageY * weight;
       }
     }
-    const ownCourse = offCourse ? Math.atan2(ship.velocityY, ship.velocityX) : ship.course;
+    const ownCourse = Math.atan2(ship.velocityY, ship.velocityX);
     const swing = ship.wander * (0.7 * Math.sin(time * ship.wanderRateOne + ship.wanderPhaseOne) + 0.3 * Math.sin(time * ship.wanderRateTwo + ship.wanderPhaseTwo));
     desiredX += Math.cos(ownCourse + swing * 1.5) * SWARM_WANDER * maximumSpeed;
     desiredY += Math.sin(ownCourse + swing * 1.5) * SWARM_WANDER * maximumSpeed;
@@ -303,12 +268,10 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     ship.velocityY *= clamped / speed;
     let movementX = ship.velocityX;
     let movementY = ship.velocityY;
-    if (feel.buzz > 0) {
-      buzzDirection(ship.slot, time, buzzScratch);
-      const buzz = feel.buzz * BUZZ_SPEED_SHARE * ship.cruiseSpeed;
-      movementX += buzzScratch.x * buzz;
-      movementY += buzzScratch.y * buzz;
-    }
+    buzzDirection(ship.slot, time, buzzScratch);
+    const buzz = SWARM_BUZZ * BUZZ_SPEED_SHARE * ship.cruiseSpeed;
+    movementX += buzzScratch.x * buzz;
+    movementY += buzzScratch.y * buzz;
     ship.course = Math.atan2(movementY + carryY, movementX + carryX);
     ship.x = clampTo(ship.x + movementX * deltaSeconds, bounds.minX + margin, bounds.maxX - margin);
     ship.y = clampTo(ship.y + movementY * deltaSeconds, bounds.minY + margin, bounds.maxY - margin);

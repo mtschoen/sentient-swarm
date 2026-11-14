@@ -3,7 +3,7 @@
 // sum of update deltas) and no random numbers in the step.
 //
 // Motion: each ship is its own agent steered by the enemy Chaser's rules ported to the CPU
-// (src/game/swarm-flocking.js: seek with arrival braking toward the point, alignment above seek,
+// (src/game/swarm-flocking.js: seek with arrival braking toward the point,
 // short separation, cohesion and pressure from the neighbourhood), plus a per-slot temperament,
 // wander, a leash that keeps the flock controllable, and attack runs along the aim while firing.
 // Each ship flies along its course (its velocity's direction) and points along its heading, which
@@ -20,7 +20,7 @@
 import { WORLD_BOUNDS, MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { blendShips } from './swarm-blend.js';
 import { faceStep } from './swarm-facing.js';
-import { FISH_FEEL, FOLLOW_SMOOTH_SECONDS } from './swarm-feel.js';
+import { FOLLOW_SMOOTH_SECONDS, SWARM_FOLLOW } from './swarm-motion.js';
 import { SWARM_CRUISE_SPEED, SWARM_MAXIMUM_SPEED, flockStep, temperamentFor } from './swarm-flocking.js';
 
 export { MAXIMUM_SWARM_SHIPS };
@@ -40,7 +40,7 @@ const NO_AIM = Object.freeze({ firing: false, aimX: 0, aimY: 0 });
 
 function deadSlot() {
   return {
-    alive: false, x: 0, y: 0, previousX: 0, previousY: 0, velocityX: 0, velocityY: 0, previousVelocityX: 0, previousVelocityY: 0, course: 0, heading: 0,
+    alive: false, x: 0, y: 0, previousX: 0, previousY: 0, velocityX: 0, velocityY: 0, course: 0, heading: 0,
     bornSequence: null, bornTime: 0, ...temperamentFor(0),
   };
 }
@@ -66,17 +66,11 @@ export class PlayerSwarm {
     this.targetX = (bounds.minX + bounds.maxX) / 2;
     this.targetY = (bounds.minY + bounds.maxY) / 2;
     // Reused flockStep context.
-    this.context = { targetX: 0, targetY: 0, firing: false, aimX: 0, aimY: 0, time: 0, aliveCount: 0, bounds, margin: SWARM_SHIP_RADIUS, feel: FISH_FEEL, carryX: 0, carryY: 0 };
-    // The point's velocity, smoothed over FOLLOW_SMOOTH_SECONDS: the follow dial's share of it
+    this.context = { targetX: 0, targetY: 0, firing: false, aimX: 0, aimY: 0, time: 0, aliveCount: 0, bounds, margin: SWARM_SHIP_RADIUS, carryX: 0, carryY: 0 };
+    // The point's velocity, smoothed over FOLLOW_SMOOTH_SECONDS: the SWARM_FOLLOW share of it
     // carries the flock (flockStep's carry).
     this.pointVelocityX = 0;
     this.pointVelocityY = 0;
-  }
-
-  // The swarm feel dials (src/game/swarm-feel.js, experiment): { alignment, tightness, buzz }; the
-  // swarm starts with FISH_FEEL (the behaviour before the dials). The object is read every step.
-  setFeel(feel) {
-    this.context.feel = feel;
   }
 
   setBounds(bounds) {
@@ -186,9 +180,8 @@ export class PlayerSwarm {
     this.targetY = targetY;
     this.time += deltaSeconds;
     const context = this.context;
-    const follow = context.feel.follow ?? 0;
-    context.carryX = this.pointVelocityX * follow;
-    context.carryY = this.pointVelocityY * follow;
+    context.carryX = this.pointVelocityX * SWARM_FOLLOW;
+    context.carryY = this.pointVelocityY * SWARM_FOLLOW;
     context.targetX = targetX;
     context.targetY = targetY;
     context.firing = controls.firing;
