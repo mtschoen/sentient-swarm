@@ -435,10 +435,11 @@ test('mouse aim is the pointer minus the player and the primary button fires, fr
   runFor(game, 2);
   assert.deepEqual(game.player.aim, { x: 0, y: -1 });
   assert.ok(projectiles.spawns.length > 0);
-  // Every shot leaves along its ship's heading, inside the fire cone around the aim (straight up),
-  // widened by the base gun's half spread.
-  const limit = SWARM_FIRE_CONE_RADIANS + game.weapons.types.base.tiers[0].spreadRadians / 2 + 1e-9;
+  // Every shot is one ball from one ship, along that ship's heading: inside the fire cone around
+  // the aim (straight up), widened by the base gun's 2 degree jitter.
+  const limit = SWARM_FIRE_CONE_RADIANS + (2 * Math.PI) / 180 + 1e-9;
   for (const spawn of projectiles.spawns) {
+    assert.equal(spawn.radius, 0.1);
     const offset = Math.atan2(spawn.velocityX, -spawn.velocityY);
     assert.ok(Math.abs(offset) <= limit, `shot ${offset} radians off the aim`);
   }

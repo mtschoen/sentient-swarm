@@ -24,7 +24,9 @@
 //      the smaller PICKUP_IMPULSE_STRENGTH impulse instead. A time warp pickup (owner ruling R31)
 //      leaves the weapons alone: it starts or extends timeWarp, plays pickup('timewarp') and its
 //      shockwave is the larger TIME_WARP_IMPULSE_STRENGTH (the blast still fires).
-//   4. weapons.update; the armed weapon's spawns and then the rail turrets' spawns go to
+//   4. weapons.update (the armed kind, tier, charge and cue cadence; its own volley spawns are not
+//      queued); SwarmFire fires one projectile per ship shot from the ships by the armed recipe and
+//      the rate law, and its shots and then the rail turrets' spawns go to
 //      projectiles.queueSpawn and the beam to setBeam (null on the expiry frame even when the
 //      weapon still returned one). A frame that fires plays one weaponFire cue: the armed weapon's
 //      kind and tier when it fired (spawns or a beam), else 'rail' at the turret tier when only the
@@ -47,7 +49,7 @@
 //      mask kills the hit swarm ships (PlayerSwarm.applyHits), and losing the last one is the run's
 //      one death (run.playerHit, which drops the weapon and the turrets and resets the multiplier).
 // Player swarm spike: the ship is replaced by PlayerSwarm (white ships orbiting the controlled
-// point, which moves as the ship did and cannot be hit); SwarmFire spreads step 4's shots over the
+// point, which moves as the ship did and cannot be hit); SwarmFire fires step 4's shots from the
 // ships, and step 6 uploads the swarm for the contact pass (Simulation.setSwarmShips).
 //   8. run.update drains this step's actions: clearArena requests the kill-all for the next step
 //      (with the death flood) and clears projectiles, shockwave (bomb and death) queues an impulse
@@ -440,9 +442,9 @@ export class Game {
       firing: swarmFiring,
       aimX: swarmControls.aimX,
       aimY: swarmControls.aimY,
-      fireInterval: this.weapons.types[firedKind].tiers[firedTier - 1].fireInterval,
       deltaSeconds,
       kind: firedKind,
+      tier: firedTier,
     });
     swarmShots.spawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
     swarmShots.turretSpawns.forEach((spawn) => this.projectiles.queueSpawn(spawn));
