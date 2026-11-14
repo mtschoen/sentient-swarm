@@ -1,6 +1,6 @@
 // Density readback for pickup placement: every DENSITY_READBACK_INTERVAL steps a small compute pass
 // sums the five species density channels of the blurred coarse field into one f32 per coarse cell
-// (64 by 36, about 9 KB; threat and padding channels are never read), copies it into its own
+// (COARSE_COLUMNS by COARSE_ROWS, 128 by 72 or about 37 KB; threat and padding channels are never read), copies it into its own
 // staging ring (three buffers) and the CPU samples the newest mapped map with densityAt. The ring
 // never blocks: a busy ring skips the copy and a map arrives a few frames later. Before the first
 // map arrives densityAt returns 0. The shader is shaders/density_sum.wgsl.

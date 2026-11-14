@@ -45,7 +45,7 @@ test('packProjectileView ends with the world bounds it is given', () => {
   const bounds = { minX: 1, minY: 2, maxX: 7, maxY: 8 };
   const view = packProjectileView({ viewport: tall, time: 0, worldBounds: bounds });
   assert.deepEqual(Array.from(view.slice(16, 20)), Array.from(new Float32Array([bounds.minX, bounds.minY, bounds.maxX, bounds.maxY])));
-  assert.deepEqual(Array.from(packProjectileView({ viewport, time: 0, worldBounds: WORLD_BOUNDS }).slice(16, 20)), [0, 0, 16, 9]);
+  assert.deepEqual(Array.from(packProjectileView({ viewport, time: 0, worldBounds: WORLD_BOUNDS }).slice(16, 20)), [0, 0, WORLD_BOUNDS.maxX, WORLD_BOUNDS.maxY]);
 });
 
 test('packPickupView packs x, y, hue and fade per pickup and caps at 32', () => {

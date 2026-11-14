@@ -41,7 +41,7 @@ struct WarpView {
 @group(0) @binding(0) var<uniform> view: WarpView;
 @group(0) @binding(1) var<storage, read> field: array<vec4f>;
 
-// World units; the default line spacing is 16 / 96, about 0.167.
+// World units; the default line spacing is 1 / WARP_LINES_PER_WORLD_UNIT (warpgrid.js), about 0.167.
 const MAXIMUM_DISPLACEMENT: f32 = 0.12;
 // World units of displacement per unit of potential gradient, before saturation.
 const DISPLACEMENT_GAIN: f32 = 0.004;
@@ -146,8 +146,8 @@ fn warpVertex(@builtin(vertex_index) vertexIndex: u32) -> WarpVaryings {
   let direction = select(vec2f(0.0), gradient / max(magnitude, 1e-6), magnitude > 1e-6);
   let shockwave = impulseDisplacement(position);
   let displacement = direction * MAXIMUM_DISPLACEMENT * saturation + shockwave;
-  // Border lines stay on the arena edge, and a shockwave cannot push inner lines past it into
-  // the letterbox: they pile up against the wall instead.
+  // Border lines stay on the world edge, and a shockwave cannot push inner lines past it: they
+  // pile up against the wall instead.
   let onBorder = vec2<bool>(lattice.x == 0u || lattice.x == view.columns, lattice.y == 0u || lattice.y == view.rows);
   let displaced = clamp(position + select(displacement, vec2f(0.0), onBorder), vec2f(0.0), vec2f(WORLD_WIDTH, WORLD_HEIGHT));
 

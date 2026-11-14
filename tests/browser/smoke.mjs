@@ -80,7 +80,8 @@ const PLAY_LATE_CHECK_FRAMES = 900;
 const PLAY_TUNNEL_SETTLE_FRAMES = 60;
 const PLAY_TUNNEL_HALF_HEIGHT = 0.3;
 const PLAY_TUNNEL_START_OFFSET = 1;
-const PLAY_TUNNEL_END_X = 15;
+// The tunnel ends one unit short of the right edge of a 16-unit view centered on the ship.
+const PLAY_TUNNEL_END_OFFSET = 7;
 const PLAY_TUNNEL_MAXIMUM_RATIO = 0.5;
 const ARTIFACTS_DIRECTORY = new URL('../../artifacts/', import.meta.url);
 
@@ -422,7 +423,7 @@ async function measureTunnel(page, statsAtStop) {
   const died = await evaluateWithin(page, 'reading the first death', () => window.__smokeFirstDeathFrame !== null);
   await evaluateWithin(page, 'ending invulnerability', () => window.__murmuration.game.debugInvulnerable(false));
   const densities = corridorDensities(field, statsAtStop.playerY, {
-    halfHeight: PLAY_TUNNEL_HALF_HEIGHT, startX: statsAtStop.playerX + PLAY_TUNNEL_START_OFFSET, endX: PLAY_TUNNEL_END_X,
+    halfHeight: PLAY_TUNNEL_HALF_HEIGHT, startX: statsAtStop.playerX + PLAY_TUNNEL_START_OFFSET, endX: statsAtStop.playerX + PLAY_TUNNEL_END_OFFSET,
   });
   const text = `corridor ${densities.corridor.toFixed(3)}, control ${densities.control.toFixed(3)}, ratio ${densities.ratio.toFixed(3)}`;
   if (died || after.phase !== 'playing') {

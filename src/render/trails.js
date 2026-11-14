@@ -1,5 +1,9 @@
 // Trail decay pass (trails_decay.wgsl): the first draw of the scene pass writes the previous scene
-// target times the frame's decay into the current one, so glyphs leave fading trails.
+// target times the frame's decay into the current one, so glyphs leave fading trails. The history
+// is in screen space, so when the camera moves each pixel reads the previous scene shifted by the
+// camera's movement in whole device pixels (trailOriginFor rounds the camera's position, so the
+// sub-pixel remainder carries to the next frame instead of drifting); texels shifted in from
+// outside the target read as empty.
 import { createUniformBuffer } from '../gpu/buffers.js';
 import { SCENE_FORMAT, createFullscreenPipeline, loadRenderShader } from './render-shaders.js';
 
@@ -21,6 +25,12 @@ export function trailFrameFactors(trailDecay, deltaSeconds) {
   const decay = Math.pow(trailDecay, referenceFrames);
   const emissionScale = trailDecay >= 1 ? referenceFrames : (1 - decay) / (1 - trailDecay);
   return { decay, emissionScale };
+}
+
+// The camera center in whole device pixels at the viewport's current scale (zoom included).
+export function trailOriginFor(viewport) {
+  const scale = viewport.pixelsPerWorldUnit * viewport.effectiveZoom;
+  return { x: Math.round(viewport.cameraX * scale), y: Math.round(viewport.cameraY * scale) };
 }
 
 export class TrailDecayPass {
@@ -50,9 +60,12 @@ export class TrailDecayPass {
     }));
   }
 
-  // decay is this frame's factor (trailFrameFactors), not the per-1/60-second setting.
-  draw(pass, previousIndex, decay) {
+  // decay is this frame's factor (trailFrameFactors), not the per-1/60-second setting; shiftX and
+  // shiftY (whole device pixels, 0 by default) offset where each pixel reads the previous scene.
+  draw(pass, previousIndex, decay, shiftX = 0, shiftY = 0) {
     this.decayFloats[0] = decay;
+    this.decayFloats[1] = shiftX;
+    this.decayFloats[2] = shiftY;
     this.device.queue.writeBuffer(this.decayBuffer, 0, this.decayFloats);
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, this.bindGroups[previousIndex]);

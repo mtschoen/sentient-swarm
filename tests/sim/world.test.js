@@ -54,6 +54,19 @@ test('every preset neighbor grid fits the cell limit with cells at least the nei
   }
 });
 
+test('the 32 by 18 world keeps every preset radius as the cell except desktopUltra, which floors to fit', () => {
+  assert.equal(WORLD_WIDTH, 32);
+  assert.equal(WORLD_HEIGHT, 18);
+  assert.deepEqual([COARSE_COLUMNS, COARSE_ROWS], [128, 72]);
+  assert.deepEqual(gridDimensions(PRESETS.phoneLow.neighborRadius), { columns: 267, rows: 150, cellSize: 0.12, cellCount: 40050 });
+  assert.deepEqual(gridDimensions(PRESETS.phoneHigh.neighborRadius), { columns: 320, rows: 180, cellSize: 0.1, cellCount: 57600 });
+  assert.deepEqual(gridDimensions(PRESETS.desktop.neighborRadius), { columns: 320, rows: 180, cellSize: 0.1, cellCount: 57600 });
+  const ultra = gridDimensions(PRESETS.desktopUltra.neighborRadius);
+  assert.deepEqual([ultra.columns, ultra.rows, ultra.cellCount], [341, 192, 65472]);
+  // The plain square-root floor (0.09375) would need 342 by 192 = 65664 cells, over the limit.
+  assert.ok(ultra.cellSize > 0.09375 && ultra.cellSize < 0.094, `cell ${ultra.cellSize}`);
+});
+
 test('gridDimensions raises the cell only as far as the limit needs', () => {
   const tiny = gridDimensions(0.01);
   assert.ok(tiny.cellCount <= MAXIMUM_GRID_CELLS);

@@ -56,7 +56,7 @@
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
-import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, WORLD_HEIGHT, WORLD_WIDTH, PROJECTILE_FLAG_ALIVE, PROJECTILE_FLAG_MISSILE_RING, SPECIES_COUNT } from '/src/sim/layout.js';
+import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, PROJECTILE_FLAG_ALIVE, PROJECTILE_FLAG_MISSILE_RING, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES } from '/src/sim/params.js';
 import { defaultSpecies, normalizeShares } from '/src/sim/species.js';
@@ -72,7 +72,12 @@ const PROJECTILE_OFFSETS = { position: 0, velocity: 16, radius: 24, lifetime: 28
 const ARENA_INSET = 0.001;
 // Every kill's burst: params.killBurstParticles at its default (the pool has room for all of them here).
 const PROJECTILE_KILL_PARTICLES = DEFAULT_KILL_BURST_PARTICLES + DEFAULT_KILL_FRAGMENT_PARTICLES;
-const CENTER = [WORLD_WIDTH / 2, WORLD_HEIGHT / 2];
+// The checks run in a 16 by 9 playable rectangle at the world origin (Simulation.setWorldBounds),
+// the bounds every position and expectation below is written for.
+const ARENA_WIDTH = 16;
+const ARENA_HEIGHT = 9;
+const CHECK_BOUNDS = { minX: 0, minY: 0, maxX: ARENA_WIDTH, maxY: ARENA_HEIGHT };
+const CENTER = [ARENA_WIDTH / 2, ARENA_HEIGHT / 2];
 
 function seededRandom(seed) {
   let state = seed >>> 0;
@@ -116,8 +121,8 @@ class Harness {
   seedBlock(center) {
     const random = seededRandom(12345);
     const positions = Array.from({ length: AGENT_COUNT }, () => [
-      Math.min(WORLD_WIDTH - ARENA_INSET, Math.max(ARENA_INSET, center[0] + (random() * 2 - 1) * BLOCK_HALF_SIZE)),
-      Math.min(WORLD_HEIGHT - ARENA_INSET, Math.max(ARENA_INSET, center[1] + (random() * 2 - 1) * BLOCK_HALF_SIZE)),
+      Math.min(ARENA_WIDTH - ARENA_INSET, Math.max(ARENA_INSET, center[0] + (random() * 2 - 1) * BLOCK_HALF_SIZE)),
+      Math.min(ARENA_HEIGHT - ARENA_INSET, Math.max(ARENA_INSET, center[1] + (random() * 2 - 1) * BLOCK_HALF_SIZE)),
     ]);
     return this.seedPositions(positions, random);
   }
@@ -296,7 +301,7 @@ async function runMixedBulletsCase(harness) {
 
 const WALL_CENTER = [15.5, CENTER[1]];
 const BEAM_ORIGIN = [8, 3.5];
-const BEAM_TARGET = [WORLD_WIDTH, 4.5];
+const BEAM_TARGET = [ARENA_WIDTH, 4.5];
 const BEAM_HALF_WIDTH = 0.1;
 
 async function runBeamCase(harness, isDeviceLost) {
@@ -435,7 +440,7 @@ function wedgePositions() {
     const angle = toRadians(WEDGE_FIRST_DEGREES - SEED_MARGIN_DEGREES + random() * (WEDGE_LAST_DEGREES - WEDGE_FIRST_DEGREES + 2 * SEED_MARGIN_DEGREES));
     const x = Math.fround(SWEEP_ORIGIN[0] + Math.cos(angle) * radius);
     const y = Math.fround(SWEEP_ORIGIN[1] + Math.sin(angle) * radius);
-    if (x > ARENA_INSET && x < WORLD_WIDTH - ARENA_INSET && y > ARENA_INSET && y < WORLD_HEIGHT - ARENA_INSET) positions.push([x, y]);
+    if (x > ARENA_INSET && x < ARENA_WIDTH - ARENA_INSET && y > ARENA_INSET && y < ARENA_HEIGHT - ARENA_INSET) positions.push([x, y]);
   }
   return positions;
 }
@@ -578,11 +583,11 @@ async function runSweepBudgetCase(harness) {
   const alive = await harness.aliveFlags();
   const last = toRadians(WEDGE_LAST_DEGREES);
   // distanceToArenaEdge along the current (last) direction from the ship.
-  const edge = Math.min((WORLD_WIDTH - SWEEP_ORIGIN[0]) / Math.cos(last), (WORLD_HEIGHT - SWEEP_ORIGIN[1]) / Math.sin(last));
+  const edge = Math.min((ARENA_WIDTH - SWEEP_ORIGIN[0]) / Math.cos(last), (ARENA_HEIGHT - SWEEP_ORIGIN[1]) / Math.sin(last));
   const limit = SWEEP_MINIMUM_SCALE * edge;
   // The first step is a line at full reach (no previous direction): agents on its ray may die.
   const first = toRadians(WEDGE_FIRST_DEGREES);
-  const firstLength = Math.min((WORLD_WIDTH - SWEEP_ORIGIN[0]) / Math.cos(first), SWEEP_ORIGIN[1] / -Math.sin(first));
+  const firstLength = Math.min((ARENA_WIDTH - SWEEP_ORIGIN[0]) / Math.cos(first), SWEEP_ORIGIN[1] / -Math.sin(first));
   const firstEnd = [SWEEP_ORIGIN[0] + Math.cos(first) * firstLength, SWEEP_ORIGIN[1] + Math.sin(first) * firstLength];
   const farDead = positions.filter((position, index) => !alive[index]
     && distanceToSegment(position, SWEEP_ORIGIN, firstEnd) > SWEEP_HALF_WIDTH + SWEEP_TOLERANCE
@@ -679,6 +684,7 @@ async function runCheck() {
 
   const species = defaultSpecies().map((row) => ({ ...row, maximumSpeed: 0 }));
   const simulation = await Simulation.create(gpu, { capacity: CAPACITY, species, shares: normalizeShares([1, 1, 1, 1, 1]) });
+  simulation.setWorldBounds(CHECK_BOUNDS);
   simulation.setPlayer(1, 1);
   const projectiles = await Projectiles.create(gpu, {});
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));

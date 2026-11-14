@@ -12,10 +12,13 @@
 // by the title menu, which then owns the start (a menu cursor must not start the run). One update
 // is one step:
 //   1. input.update and read input.state (a gesture starts or restarts the run); a rising bomb
-//      edge that run.useBomb accepts calls simulation.requestKillAll before this step, so the
-//      bomb kills before projectiles and contact.
+//      edge that run.useBomb accepts calls simulation.requestRadialKill before this step (around
+//      the swarm centroid, bombRadiusForView of the view; a start and the death clear stay
+//      world-wide kill-alls), so the bomb kills before projectiles and contact.
 //   2. player.update (Playing only), with mouse aim derived as pointerWorld minus the player; with
-//      the beam armed the aim turns at most beamTurnRevolutionsPerSecond (0 is instant).
+//      the beam armed the aim turns at most beamTurnRevolutionsPerSecond (0 is instant). After the
+//      swarm moves, followCamera eases the camera toward cameraFocus (the point and the swarm
+//      centroid; held still while watching); a start, a quit and a respawn cut it there.
 //   3. pickups.update, then collect at the player into weapons.collect (before charge expiry; a
 //      rail pickup adds a turret and leaves the armed weapon alone, owner ruling R29); a
 //      collection plays the pickup effect and, with pickupBlastRadius above 0, fires the pickup
@@ -72,8 +75,8 @@ import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS, PlayerSwarm, SWARM_SHIP_RADIU
 import { SwarmFire } from './swarm-fire.js';
 import { SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../sim/spawner.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
-import { SPECIES_COUNT, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, boundsAround, viewSizeForAspect } from '../sim/layout.js';
-import { Camera } from './camera.js';
+import { SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
+import { Camera, bombRadiusForView, cameraFocus } from './camera.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 const NO_AIM = Object.freeze({ x: 0, y: 0 });
@@ -147,11 +150,11 @@ export class Game {
     // The gate table for the next simulation step (null while Dying and Respawning).
     this.stepGates = null;
     // The view's size in world units (setView, from Viewport.viewSize on every resize) and the
-    // playable rectangle inside the world: the view's size centered in the world.
-    this.viewSize = viewSizeForAspect(WORLD_WIDTH / WORLD_HEIGHT);
+    // playable rectangle: the whole world, at every aspect.
+    this.viewSize = viewSizeForAspect(VIEW_WIDTH / VIEW_HEIGHT);
     this.worldBounds = WORLD_BOUNDS;
-    // The renderer draws around this camera (Viewport.setCamera with camera.sample); it stays on
-    // the world center.
+    // The renderer draws around this camera (Viewport.setCamera with camera.sample); followCamera
+    // moves it every update.
     this.camera = new Camera({ centerX: WORLD_WIDTH / 2, centerY: WORLD_HEIGHT / 2 });
     this.player = new PlayerShip({ bounds: this.worldBounds });
     this.weapons = new WeaponState({ random });
@@ -290,31 +293,31 @@ export class Game {
       next.requests = previous.requests;
       next.filling = previous.filling;
     }
-    next.setAreaFraction(this.areaFraction());
     this.watchPressure = next;
   }
 
-  // The playable rectangle's share of the world's area.
-  areaFraction() {
-    return (this.worldBounds.width * this.worldBounds.height) / (WORLD_WIDTH * WORLD_HEIGHT);
-  }
-
-  // The view's { width, height } for the canvas aspect (Viewport.viewSize, on every resize). The
-  // playable rectangle is that size centered in the world: the ship, pickups, spawn gates and the
-  // simulation's walls follow it, spawn pressure holds the same density by scaling the alive target
-  // with its area, and spawns keep their distance as a fraction of the view width.
+  // The view's { width, height } for the canvas aspect (Viewport.viewSize, on every resize): the
+  // camera frames it, spawn gates ring it, pickups place within reach of it, the bomb clears around
+  // it and spawns keep their distance as a fraction of its width. The world bounds and the alive
+  // target do not depend on it, so every aspect plays the same world with the same count.
   setView({ width, height }) {
     this.viewSize = { width, height };
-    const bounds = boundsAround(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, width, height);
-    this.worldBounds = bounds;
     this.simulation.setSpawnViewWidth(width);
-    this.player.setBounds(bounds);
-    this.swarm.setBounds(bounds);
-    this.pickups.setBounds(bounds);
-    this.simulation.setWorldBounds(bounds);
-    const fraction = this.areaFraction();
-    this.spawnPressure.setAreaFraction(fraction);
-    this.watchPressure?.setAreaFraction(fraction);
+    this.pickups.setView(width, height);
+  }
+
+  // The camera's view: { centerX, centerY, width, height } in world units.
+  get view() {
+    return { centerX: this.camera.centerX, centerY: this.camera.centerY, width: this.viewSize.width, height: this.viewSize.height };
+  }
+
+  // What the camera frames: the swarm (cameraFocus) unless watching, where it holds still so the
+  // pointer-driven point cannot drag it. cut (run start, respawn, quit) jumps there with no easing.
+  followCamera(deltaSeconds, { cut = false } = {}) {
+    const focus = cameraFocus(this.player.position, this.swarm.aliveCount > 0 ? this.swarm.centroid : null);
+    const view = { viewWidth: this.viewSize.width, viewHeight: this.viewSize.height, bounds: this.worldBounds };
+    if (cut) this.camera.cut(focus.x, focus.y, view);
+    else if (!this.watching) this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view });
   }
 
   get watching() {
@@ -349,6 +352,7 @@ export class Game {
     this.pickups.reset();
     this.player.respawn();
     this.swarm.reset(this.player.position.x, this.player.position.y, this.initialSwarmShips);
+    this.followCamera(0, { cut: true });
     this.swarmFire.reset();
     this.spawnPressure.reset();
     this.spawnDirector.reset();
@@ -393,7 +397,9 @@ export class Game {
     const bombPressed = inputState.bomb && !this.bombHeld;
     this.bombHeld = inputState.bomb;
     if (bombPressed && this.run.useBomb(this.player.position)) {
-      this.simulation.requestKillAll();
+      // The bomb clears around the swarm out past the view's corners (bombRadiusForView), not the whole world.
+      const center = this.swarm.aliveCount > 0 ? this.swarm.centroid : this.player.position;
+      this.simulation.requestRadialKill(center.x, center.y, bombRadiusForView(this.viewSize.width, this.viewSize.height));
       this.effects?.bomb();
     }
 
@@ -413,6 +419,7 @@ export class Game {
     swarmControls.aimX = aimLength > 0 ? this.player.aim.x / aimLength : 0;
     swarmControls.aimY = aimLength > 0 ? this.player.aim.y / aimLength : 0;
     this.swarm.update(deltaSeconds, x, y, swarmControls);
+    this.followCamera(deltaSeconds);
 
     this.pickups.update(deltaSeconds, {
       playerX: x,
@@ -536,6 +543,8 @@ export class Game {
       playerY: this.player.position.y,
       safeDistance: pressure.spawnDistanceFraction * this.viewSize.width,
       bounds: this.worldBounds,
+      // Gates open in a ring just outside what the camera shows.
+      view: this.view,
       filling: pressure.filling,
       shares: this.simulation.shares,
       // The Ready arena (before a run) trickles from every gate; waves start with the run.
@@ -614,6 +623,7 @@ export class Game {
         break;
       case 'respawn':
         this.player.respawn();
+        this.followCamera(0, { cut: true });
         this.run.setRespawnSequence(this.simulation.frameSequence + 1);
         this.spawnPressure.reset();
         this.spawnDirector.reset();

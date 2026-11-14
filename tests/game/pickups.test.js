@@ -2,10 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { PickupDirector } from '../../src/game/pickups.js';
 import { centeredViewBounds } from '../sim/centered-view-bounds.js';
+import { WORLD_HEIGHT, WORLD_WIDTH } from '../../src/sim/layout.js';
 
 const STEP = 1 / 60;
-const WIDTH = 16;
-const HEIGHT = 9;
+const WIDTH = WORLD_WIDTH;
+const HEIGHT = WORLD_HEIGHT;
 
 function sequenceRandom() {
   let state = 0.1234;
@@ -284,4 +285,30 @@ test('the fallback placement steps toward the bounds center and clamps to the bo
   const [pickup] = director.pickups;
   assert.ok(pickup.x >= 4 && pickup.x <= 6 && pickup.y >= 2 && pickup.y <= 4);
   assert.deepEqual({ x: pickup.x, y: pickup.y }, { x: 6, y: 4 });
+});
+
+test('pickups land within reach: on the 3 to 5 annulus and inside a view-sized rectangle around the player', () => {
+  const director = new PickupDirector({ random: sequenceRandom() });
+  const player = { x: 20, y: 6 };
+  for (let index = 0; index < 60; index += 1) director.spawn(player.x, player.y);
+  for (const pickup of director.pickups) {
+    const distance = Math.hypot(pickup.x - player.x, pickup.y - player.y);
+    assert.ok(distance >= 3 - 1e-9 && distance <= 5 + 1e-9, `distance ${distance}`);
+    assert.ok(Math.abs(pickup.y - player.y) <= 4.5 + 1e-9, `y ${pickup.y}`);
+  }
+});
+
+test('setView scales the annulus by the view half-diagonal and narrows the placement rectangle', () => {
+  const director = new PickupDirector({ random: sequenceRandom() });
+  director.setView(9, 9);
+  const scale = Math.hypot(9, 9) / Math.hypot(16, 9);
+  assert.ok(Math.abs(director.minimumDistance - 3 * scale) < 1e-9);
+  assert.ok(Math.abs(director.maximumDistance - 5 * scale) < 1e-9);
+  for (let index = 0; index < 60; index += 1) director.spawn(16, 9);
+  for (const pickup of director.pickups) {
+    assert.ok(Math.abs(pickup.x - 16) <= 4.5 + 1e-9 && Math.abs(pickup.y - 9) <= 4.5 + 1e-9, `(${pickup.x}, ${pickup.y})`);
+  }
+  director.setView(16, 9);
+  assert.equal(director.minimumDistance, 3);
+  assert.equal(director.maximumDistance, 5);
 });

@@ -19,9 +19,9 @@
 // previous step's blurred field) of up to DENSITY_CANDIDATES placeable draws, else the first
 // placeable draw, so new agents join existing masses. Up to POSITION_ATTEMPTS draws; when none
 // is placeable (a far spawn distance leaves only the corners far enough) one last draw sits in
-// the band-deep square at the bounds corner farthest from the player; in the full 16 by 9 bounds,
-// with bands up to about 0.9, that square lies more than half the bounds width from any player
-// position, so every spawn distance up to SpawnPressure's 0.5 maximum still places. If that draw is too close as well the slot
+// the band-deep square at the bounds corner farthest from the player; in the full 32 by 18 world,
+// with bands up to about 0.9, that square lies more than 9 world units from any player position,
+// past SpawnPressure's 0.5 maximum of a 16-unit view width, so every spawn distance still places. If that draw is too close as well the slot
 // stays dead and the unit goes back with atomicAdd. The agent gets zero velocity (a gate spawn its
 // outward ejection),
 // SPAWN_IN_FRAMES spawn-in frames (the harmless pulse), the alive bit, the species, a random
@@ -80,7 +80,7 @@ fn claimSpecies() -> u32 {
   return NO_SPECIES;
 }
 
-// Half the shorter side of the bounds (the height in the 16 by 9 world) fills the whole arena.
+// Half the shorter side of the bounds fills the whole rectangle.
 fn bandDepth() -> f32 {
   let size = boundsSize(params);
   return clamp(params.spawnBandWidth, 0.0, min(size.x, size.y) * 0.5);

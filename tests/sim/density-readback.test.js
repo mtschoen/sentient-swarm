@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { DENSITY_READBACK_INTERVAL, DensityReadback } from '../../src/sim/density-readback.js';
-import { COARSE_COLUMNS, COARSE_ROWS } from '../../src/sim/layout.js';
+import { COARSE_CELL_SIZE, COARSE_COLUMNS, COARSE_ROWS } from '../../src/sim/layout.js';
 
 globalThis.GPUBufferUsage = { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, UNIFORM: 64, STORAGE: 128 };
 globalThis.GPUMapMode = { READ: 1 };
@@ -98,8 +98,8 @@ test('densityAt interpolates between cell centers and follows a hot cell', async
   const { readback, device } = await ready();
   device.mapValues[10 * COARSE_COLUMNS + 20] = 4;
   await deliver(readback);
-  const cellWidth = 16 / COARSE_COLUMNS;
-  const cellHeight = 9 / COARSE_ROWS;
+  const cellWidth = COARSE_CELL_SIZE;
+  const cellHeight = COARSE_CELL_SIZE;
   const centerX = (20 + 0.5) * cellWidth;
   const centerY = (10 + 0.5) * cellHeight;
   assert.ok(Math.abs(readback.densityAt(centerX, centerY) - 4) < 1e-6);
@@ -126,7 +126,7 @@ test('the field buffer is rebound only when it changes', async () => {
   assert.equal(device.bindGroups, 2);
 });
 
-test('the staging maps are 9 KB, three deep', async () => {
+test('the staging maps are one f32 per coarse cell, three deep', async () => {
   const { device } = await ready();
   const staging = device.buffers.filter((buffer) => buffer.usage === (1 | 8));
   assert.equal(staging.length, 3);
@@ -142,7 +142,7 @@ test('initialize loads density_sum.wgsl through the injected fetch with every co
   assert.ok(requested[0].endsWith('/src/sim/shaders/density_sum.wgsl'));
   assert.ok(device.shaderCode.includes('fn sum('));
   assert.ok(device.shaderCode.includes('@workgroup_size(256)'));
-  assert.ok(device.shaderCode.includes('64u * 36u'));
+  assert.ok(device.shaderCode.includes(`${COARSE_COLUMNS}u * ${COARSE_ROWS}u`));
   assert.ok(device.shaderCode.includes('species < 5u'));
   assert.ok(device.shaderCode.includes('cell * 8u + species'));
   assert.equal(device.shaderCode.match(/__[A-Z_]+__/), null);

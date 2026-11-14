@@ -1,12 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { WORLD_HEIGHT, WORLD_WIDTH } from '../../src/sim/layout.js';
 import {
-  WARP_IMPULSE_CAPACITY, WARP_SHADER_CONSTANTS, WARP_VIEW_BYTES, createWarpViewData, packWarpView, warpGridLatticePoint, warpGridSegmentCount,
+  PHONE_WARP_LATTICE, WARP_LINES_PER_WORLD_UNIT, WORLD_WARP_LATTICE, WARP_IMPULSE_CAPACITY, WARP_SHADER_CONSTANTS, WARP_VIEW_BYTES, createWarpViewData, packWarpView, warpGridLatticePoint, warpGridSegmentCount,
 } from '../../src/render/warpgrid.js';
 import { DEFAULT_IMPULSE_CAPACITY, DEFAULT_IMPULSE_DURATION_SECONDS } from '../../src/render/impulses.js';
 import { substituteConstants } from '../../src/gpu/shaders.js';
 import { Viewport } from '../../src/render/viewport.js';
+
+test('the world lattice keeps the one-screen line spacing; the phone lattice keeps the one-screen line count', () => {
+  assert.equal(WARP_LINES_PER_WORLD_UNIT, 6);
+  assert.deepEqual(WORLD_WARP_LATTICE, { columns: WORLD_WIDTH * 6, rows: WORLD_HEIGHT * 6 });
+  assert.deepEqual(WORLD_WARP_LATTICE, { columns: 192, rows: 108 });
+  assert.deepEqual(PHONE_WARP_LATTICE, { columns: 96, rows: 54 });
+});
 
 test('warpGridSegmentCount counts horizontal and vertical segments', () => {
   assert.equal(warpGridSegmentCount(96, 54), 55 * 96 + 97 * 54);

@@ -157,8 +157,8 @@ test('the spawn and burst setters accept their ranges and reject the rest', () =
   assert.equal(validatedKillBurstParticles(0), 0);
   assert.equal(validatedKillBurstParticles(MAXIMUM_KILL_BURST_PARTICLES), MAXIMUM_KILL_BURST_PARTICLES);
   for (const bad of [-1, 2.5, MAXIMUM_KILL_BURST_PARTICLES + 1, Number.NaN]) assert.throws(() => validatedKillBurstParticles(bad), RangeError);
-  assert.equal(validatedSpawnBandWidth(4.5), 4.5);
-  for (const bad of [0, -1, 4.6, Number.NaN]) assert.throws(() => validatedSpawnBandWidth(bad), RangeError);
+  assert.equal(validatedSpawnBandWidth(WORLD_HEIGHT / 2), WORLD_HEIGHT / 2);
+  for (const bad of [0, -1, WORLD_HEIGHT / 2 + 0.1, Number.NaN]) assert.throws(() => validatedSpawnBandWidth(bad), RangeError);
   assert.equal(validatedSpawnDensityBias(0), 0);
   assert.equal(validatedSpawnDensityBias(1), 1);
   for (const bad of [-0.1, 1.1, Number.NaN]) assert.throws(() => validatedSpawnDensityBias(bad), RangeError);
@@ -246,9 +246,9 @@ test('the range constants and defaults are pinned by value', () => {
 test('packSimParams packs the world bounds as a vec4f at 240, the whole world when omitted', () => {
   const read = (view) => [240, 244, 248, 252].map((offset) => view.getFloat32(offset, true));
   assert.deepEqual(read(new DataView(packSimParams({}))), [0, 0, WORLD_WIDTH, WORLD_HEIGHT]);
-  assert.deepEqual(read(new DataView(packSimParams({ worldBounds: WORLD_BOUNDS }))), [0, 0, 16, 9]);
+  assert.deepEqual(read(new DataView(packSimParams({ worldBounds: WORLD_BOUNDS }))), [0, 0, WORLD_WIDTH, WORLD_HEIGHT]);
   const narrow = centeredViewBounds(1);
-  assert.deepEqual(read(new DataView(packSimParams({ worldBounds: narrow }))), [3.5, 0, 12.5, 9]);
+  assert.deepEqual(read(new DataView(packSimParams({ worldBounds: narrow }))), [narrow.minX, narrow.minY, narrow.maxX, narrow.maxY]);
   // The bounds leave every earlier field where it was.
   const view = new DataView(packSimParams({ worldBounds: { minX: 1.25, minY: 0.5, maxX: 14.75, maxY: 8.5 }, projectileDt: 0.125 }));
   assert.deepEqual(read(view), [1.25, 0.5, 14.75, 8.5]);
@@ -261,7 +261,7 @@ test('validatedWorldBounds accepts rectangles inside the world and rejects the r
   for (const bounds of [
     undefined, {}, { minX: 0, minY: 0, maxX: Number.NaN, maxY: 9 }, { minX: 0, minY: 0, maxX: Infinity, maxY: 9 },
     { minX: 4, minY: 0, maxX: 4, maxY: 9 }, { minX: 0, minY: 5, maxX: 16, maxY: 2 },
-    { minX: -0.5, minY: 0, maxX: 16, maxY: 9 }, { minX: 0, minY: 0, maxX: 16.5, maxY: 9 }, { minX: 0, minY: 0, maxX: 16, maxY: 9.5 },
+    { minX: -0.5, minY: 0, maxX: 16, maxY: 9 }, { minX: 0, minY: 0, maxX: WORLD_WIDTH + 0.5, maxY: 9 }, { minX: 0, minY: 0, maxX: 16, maxY: WORLD_HEIGHT + 0.5 },
   ]) {
     assert.throws(() => validatedWorldBounds(bounds), RangeError, JSON.stringify(bounds));
   }

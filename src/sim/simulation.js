@@ -226,9 +226,11 @@ export class Simulation {
   }
 
   // Kills every agent within radius of (x, y), spawning ones included, in the next step only,
-  // through the kill-all pass; those kills land in killsUnscored. A later request in the same
-  // step replaces it, and a kill-all requested for that step wins over it.
+  // through the kill-all pass; those kills land in killsUnscored. Of two requests for the same step
+  // the larger radius wins (a bomb and a pickup blast together), and a kill-all requested for that
+  // step wins over both.
   requestRadialKill(x, y, radius) {
+    if (this.radialKill !== null && this.radialKill.radius >= radius) return;
     this.radialKill = { x, y, radius };
   }
 

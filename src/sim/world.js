@@ -1,14 +1,16 @@
 // World constants: the one source of the world's size for the CPU and, through SHADER_CONSTANTS in
 // layout.js, for every shader (common.wgsl's WORLD_WIDTH and WORLD_HEIGHT). The world is the area
 // the simulation covers: the coarse field and the neighbor grid span it, agents and the player stay
-// inside it. The view is what one window shows at camera zoom 1: the largest rectangle of the
+// inside it, and a follow camera (src/game/camera.js) moves the view over it. The view is what
+// one window shows at camera zoom 1: the largest rectangle of the
 // canvas aspect inside a VIEW_WIDTH by VIEW_HEIGHT screen (16 by 9 world units), so a 16:9 window
 // sees 16 by 9 units and a narrower or wider one a full-height column or a full-width strip.
 // Aspects outside [MINIMUM_VIEW_ASPECT, MAXIMUM_VIEW_ASPECT] are clamped (the viewport letterboxes
 // the rest). Pure: no GPU.
 
-export const WORLD_WIDTH = 16;
-export const WORLD_HEIGHT = 9;
+// Two views wide and two views high (owner default for the follow-camera step).
+export const WORLD_WIDTH = 32;
+export const WORLD_HEIGHT = 18;
 // The view at camera zoom 1 for a 16:9 window.
 export const VIEW_WIDTH = 16;
 export const VIEW_HEIGHT = 9;

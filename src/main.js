@@ -5,6 +5,7 @@ import { Game, RESTART_GUARD_SECONDS } from './game/game.js';
 import { createInput } from './input/input.js';
 import { Viewport } from './render/viewport.js';
 import { Renderer } from './render/renderer.js';
+import { PHONE_WARP_LATTICE, WORLD_WARP_LATTICE } from './render/warpgrid.js';
 import { observeCanvasSize } from './render/canvas-size.js';
 import { installCaptureHook } from './render/capture-hook.js';
 import { createLabPanel } from './ui/labPanel.js';
@@ -18,6 +19,7 @@ import { createFrameTimer, frameTimerKindFromSearch } from './gpu/frame-timer.js
 import { installAudio } from './audio/audio-hook.js';
 import { createHud } from './ui/hud.js';
 import { createTouchOverlay, withHaptics } from './ui/touchOverlay.js';
+import { createEdgeIndicators, edgeIndicatorTargets } from './ui/edgeIndicators.js';
 import { STICK_RADIUS } from './input/touch.js';
 import { setGamepadDeadZone } from './input/gamepad.js';
 import { createLifeWatcher, createRumble } from './input/rumble.js';
@@ -66,14 +68,15 @@ async function boot() {
   let renderer = null;
   // Created after the first resize, so resizeCanvas reaches it only once it exists (`let` hoists the name).
   let game = null;
-  // The HUD lives in CSS pixels; the viewport rectangle is in device pixels.
-  const layoutHud = () => {
+  // The HUD and the edge indicators live in CSS pixels; the viewport rectangle is in device pixels.
+  const cssArenaRect = () => {
     const scale = 1 / viewport.devicePixelRatio;
     const rect = viewport.arenaRectDevicePixels;
-    hud.layout(
-      { x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale },
-      { width: viewport.canvasWidth * scale, height: viewport.canvasHeight * scale },
-    );
+    return { x: rect.x * scale, y: rect.y * scale, width: rect.width * scale, height: rect.height * scale };
+  };
+  const layoutHud = () => {
+    const scale = 1 / viewport.devicePixelRatio;
+    hud.layout(cssArenaRect(), { width: viewport.canvasWidth * scale, height: viewport.canvasHeight * scale });
   };
   const resizeCanvas = ({ width, height, devicePixelRatio }) => {
     canvas.width = width;
@@ -105,7 +108,9 @@ async function boot() {
   const simulation = await Simulation.create(gpu, pinnedCapacity !== null
     ? { capacity: pinnedCapacity, scaleDensityToCapacity: true, onProgress: (completed, total) => showProgress('simulation', completed, total) }
     : { capacity: preset.capacity, neighborRadius: preset.neighborRadius, particleCapacity: preset.particleCapacity, scaleDensityToCapacity: true, onProgress: (completed, total) => showProgress('simulation', completed, total) });
-  renderer = await Renderer.create(gpu, { simulation, viewport, onProgress: (completed, total) => showProgress('renderer', completed, total) });
+  // A phone keeps the one-screen warp grid line budget, spread over the world (warpgrid.js).
+  const warpLattice = detectMobile() ? PHONE_WARP_LATTICE : WORLD_WARP_LATTICE;
+  renderer = await Renderer.create(gpu, { simulation, viewport, warpLattice, onProgress: (completed, total) => showProgress('renderer', completed, total) });
   const input = createInput(canvas, viewport);
   // Read by the browser checks (the mobile smoke asserts on the aim vector).
   window.__murmuration.input = input;
@@ -216,6 +221,8 @@ async function boot() {
   };
 
   const touchOverlay = createTouchOverlay(document.getElementById('touch-overlay'), { touch: input.touch, canvas });
+  // Chevrons on the view edge for off-screen pickups and the telegraphed wave gate.
+  const edgeIndicators = createEdgeIndicators(document.body);
 
   // Menus (owner ruling R17). The title menu is the one input from load to play: its buttons, a tap
   // on the arena, Enter, Space or a gamepad face button start the run, and audio unlocks inside
@@ -334,6 +341,7 @@ async function boot() {
     game.render(alpha, deltaSeconds);
     const state = game.state;
     hud.update(state);
+    edgeIndicators.update(edgeIndicatorTargets(game.pickups.pickups, game.simulation.spawnGates?.gates ?? []), viewport.viewBounds, cssArenaRect());
     touchOverlay.update(state);
     lifeWatcher.update(state);
     const isGameOver = state.phase === 'gameOver';

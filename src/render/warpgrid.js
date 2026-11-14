@@ -1,5 +1,8 @@
-// Warp grid (warpgrid.wgsl): a line list of columns by rows cells over the arena, drawn into its own
-// rgba16float layer that composite adds under the scene, so trail decay never copies (smears) it.
+// Warp grid (warpgrid.wgsl): a line list of columns by rows cells over the whole world, drawn into
+// its own rgba16float layer that composite adds under the scene, so trail decay never copies
+// (smears) it. WORLD_WARP_LATTICE keeps the one-screen spacing (WARP_LINES_PER_WORLD_UNIT, 96 by 54
+// lines per 16 by 9 view) over the world; PHONE_WARP_LATTICE spreads 96 by 54 lines over the world
+// (twice the spacing), the line budget a phone drew for one screen. The off-view lines are clipped.
 // No vertex or index buffer: the vertex shader derives each line end from vertex_index (see
 // warpGridLatticePoint, which mirrors it) and displaces it along the gradient of
 // density * densityWeight + threat * threatWeight sampled from the blurred coarse field, plus a
@@ -9,6 +12,7 @@ import { createUniformBuffer } from '../gpu/buffers.js';
 import { substituteConstants } from '../gpu/shaders.js';
 import { DEFAULT_IMPULSE_CAPACITY, DEFAULT_IMPULSE_DURATION_SECONDS, FLOATS_PER_IMPULSE } from './impulses.js';
 import { SCENE_FORMAT, loadRenderShader } from './render-shaders.js';
+import { WORLD_HEIGHT, WORLD_WIDTH } from '../sim/layout.js';
 
 export const WARP_IMPULSE_CAPACITY = DEFAULT_IMPULSE_CAPACITY;
 // Substituted into warpgrid.wgsl, so the shader's impulse array and lifetime follow ImpulseSet.
@@ -21,6 +25,9 @@ const IMPULSE_BYTES = 16;
 export const WARP_VIEW_BYTES = WARP_VIEW_HEADER_BYTES + WARP_IMPULSE_CAPACITY * IMPULSE_BYTES;
 const NO_IMPULSES = new Float32Array(WARP_IMPULSE_CAPACITY * FLOATS_PER_IMPULSE);
 const ADDITIVE = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
+export const WARP_LINES_PER_WORLD_UNIT = 6;
+export const WORLD_WARP_LATTICE = Object.freeze({ columns: WORLD_WIDTH * WARP_LINES_PER_WORLD_UNIT, rows: WORLD_HEIGHT * WARP_LINES_PER_WORLD_UNIT });
+export const PHONE_WARP_LATTICE = Object.freeze({ columns: 96, rows: 54 });
 
 // Horizontal lines: rows + 1 lines of columns segments; vertical lines: columns + 1 lines of rows segments.
 export function warpGridSegmentCount(columns, rows) {
@@ -61,7 +68,7 @@ export function packWarpView(
 }
 
 export class WarpGrid {
-  constructor(gpu, { columns = 96, rows = 54, viewport, common }) {
+  constructor(gpu, { columns = WORLD_WARP_LATTICE.columns, rows = WORLD_WARP_LATTICE.rows, viewport, common }) {
     this.device = gpu.device;
     this.columns = columns;
     this.rows = rows;

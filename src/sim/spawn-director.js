@@ -1,6 +1,7 @@
 // CPU spawn director (owner ruling R14, task C0b2): new agents enter through a few discrete spawn
-// gates instead of anywhere along the walls. Each gate has a position (in the wall band or the
-// interior, never within the player's safe radius), a radius, a favored species and a lifetime.
+// gates instead of anywhere along the walls. Each gate has a position (on the ring just outside the
+// camera's view, or in the wall band or the interior; never within the player's safe radius), a
+// radius, a favored species and a lifetime.
 // A gate fades open over GATE_FADE_SECONDS, drifts slowly (bouncing off the walls and steering
 // away from the player), and fades closed at the end of its lifetime; a new gate then opens
 // elsewhere, so the pressure moves around the arena over a run. A gate the player walks into
@@ -21,6 +22,13 @@
 // Time is the summed deltaSeconds of update (injected), randomness the injected random.
 // Bounds: gates place, drift and bounce inside context.bounds (the playable world bounds,
 // Game.worldBounds; WORLD_BOUNDS by default).
+// View ring: with context.view (the camera's { centerX, centerY, width, height }) a new gate opens on
+// a ring around the view center, RING_INNER_HALF_DIAGONALS to RING_OUTER_HALF_DIAGONALS view
+// half-diagonals out, so just outside what the camera shows (the half-diagonal circle holds the
+// whole view), and inside the bounds; a gate that drifts or is left more than
+// FAR_CLOSE_HALF_DIAGONALS half-diagonals from the view center closes, so the gates follow the
+// camera. When no ring draw lies inside the bounds (a view as large as the world), and without a
+// view, gates place in the wall band or the interior as below.
 // The shader side (spawn.wgsl) samples each new agent's position from the emitting gates, weighted
 // by emission and by speciesBias toward the gate's favored species; see spawnGates.
 import { WORLD_BOUNDS, SPECIES_COUNT } from './layout.js';
@@ -36,6 +44,8 @@ const WALL_INSET = 0.15;
 const WALL_BAND_DEPTH = 1.2;
 // Placement draws per new gate; the best scoring placeable draw wins.
 const PLACEMENT_CANDIDATES = 16;
+// Draws per new gate at most, counting the ring draws that fall outside the bounds.
+const PLACEMENT_DRAW_ATTEMPTS = 64;
 // Chance a placement candidate lies in the wall band rather than the interior: mostly walls, so
 // waves come in from the edges and rarely open up in the space the player is clearing.
 const WALL_BAND_CHANCE = 0.8;
@@ -49,6 +59,10 @@ const AIM_LANE_HALF_WIDTH = 1;
 const AIM_LANE_CLOSE_SECONDS = 2;
 // Placement score lost by a candidate in the aim lane (placeable still beats unplaceable).
 const AIM_LANE_PENALTY = 500;
+// The view ring, in view half-diagonals from the view center (see the header).
+export const RING_INNER_HALF_DIAGONALS = 1;
+export const RING_OUTER_HALF_DIAGONALS = 1.4;
+export const FAR_CLOSE_HALF_DIAGONALS = 2;
 
 export const DEFAULT_GATE_SCHEDULE = Object.freeze({
   gateCount: 3,
@@ -137,13 +151,14 @@ export class SpawnDirector {
   // minimum spawn distance from the player, SpawnPressure.spawnDistanceFraction times the view
   // width), filling (SpawnPressure's first fill), shares (species shares, for each new gate's
   // favored species), continuous (no waves; see the header), aimX and aimY (the player's aim, a
-  // unit vector or zero for none), bounds (the playable arena { minX, minY, maxX, maxY, width,
-  // height }, WORLD_BOUNDS when omitted).
+  // unit vector or zero for none), bounds (the playable rectangle { minX, minY, maxX, maxY, width,
+  // height }, WORLD_BOUNDS when omitted), view (the camera's { centerX, centerY, width, height }, or
+  // null for none; see the header's view ring).
   update(deltaSeconds, {
     bounds = WORLD_BOUNDS, playerX = (bounds.minX + bounds.maxX) / 2, playerY = (bounds.minY + bounds.maxY) / 2,
-    safeDistance = 0, filling = false, shares = [], continuous = false, aimX = 0, aimY = 0,
+    safeDistance = 0, filling = false, shares = [], continuous = false, aimX = 0, aimY = 0, view = null,
   } = {}) {
-    const context = { playerX, playerY, safeDistance, shares, aimX, aimY, bounds };
+    const context = { playerX, playerY, safeDistance, shares, aimX, aimY, bounds, view };
     this.filling = filling;
     this.continuous = continuous;
     if (this.needsInitialGates) {
@@ -244,6 +259,7 @@ export class SpawnDirector {
     if (!gate.closing && playerDistance < context.safeDistance + gate.radius) this.beginClosing(gate);
     gate.laneSeconds = inAimLane(gate, gate.radius, context) ? gate.laneSeconds + deltaSeconds : 0;
     if (!gate.closing && gate.laneSeconds >= AIM_LANE_CLOSE_SECONDS) this.beginClosing(gate);
+    if (!gate.closing && context.view && this.farFromView(gate, context.view)) this.beginClosing(gate);
     let { driftX, driftY } = gate;
     if (playerDistance > 0 && playerDistance < context.safeDistance + gate.radius + DRIFT_AVOID_MARGIN) {
       driftX = toGateX / playerDistance;
@@ -258,6 +274,10 @@ export class SpawnDirector {
     if (gate.y < minY + inset || gate.y > maxY - inset) gate.driftY = -gate.driftY;
     gate.x = clamp(gate.x, minX + inset, maxX - inset);
     gate.y = clamp(gate.y, minY + inset, maxY - inset);
+  }
+
+  farFromView(gate, { centerX, centerY, width, height }) {
+    return Math.hypot(gate.x - centerX, gate.y - centerY) > FAR_CLOSE_HALF_DIAGONALS * Math.hypot(width, height) / 2;
   }
 
   // A closing gate fades out over GATE_FADE_SECONDS from now (or what is left of its lifetime).
@@ -292,19 +312,44 @@ export class SpawnDirector {
     };
   }
 
-  // The best of PLACEMENT_CANDIDATES draws (wall band or interior): placeable draws (outside the
-  // safe radius plus the gate radius) beat unplaceable ones; among them far from the player and
-  // apart from the other gates scores higher. With no placeable draw the farthest one wins.
+  // With a view, the best of PLACEMENT_CANDIDATES draws on the view ring that lie inside the bounds
+  // (see the header); without one, or when no ring draw lies inside, the best of as many wall band
+  // or interior draws. Placeable draws (outside the safe radius plus the gate radius) beat
+  // unplaceable ones; among them far from the player and apart from the other gates scores
+  // higher. With no placeable draw the farthest one wins.
   placeGate(context) {
-    const { playerX, playerY, safeDistance, bounds = WORLD_BOUNDS } = context;
+    const { bounds = WORLD_BOUNDS, view = null } = context;
     const inset = WALL_INSET + this.schedule.gateRadius;
+    const ring = view === null ? null : this.bestPlacement(context, () => this.ringPoint(view, inset, bounds));
+    return ring ?? this.bestPlacement(context, () => (this.random() < WALL_BAND_CHANCE ? this.wallBandPoint(inset, bounds) : {
+      x: bounds.minX + inset + this.random() * (bounds.maxX - bounds.minX - 2 * inset),
+      y: bounds.minY + inset + this.random() * (bounds.maxY - bounds.minY - 2 * inset),
+    }));
+  }
+
+  // A uniform-angle point on the view ring, or null when it falls outside bounds less inset.
+  ringPoint({ centerX, centerY, width, height }, inset, { minX, minY, maxX, maxY }) {
+    const halfDiagonal = Math.hypot(width, height) / 2;
+    const angle = this.random() * Math.PI * 2;
+    const reach = halfDiagonal * (RING_INNER_HALF_DIAGONALS + this.random() * (RING_OUTER_HALF_DIAGONALS - RING_INNER_HALF_DIAGONALS));
+    const x = centerX + Math.cos(angle) * reach;
+    const y = centerY + Math.sin(angle) * reach;
+    if (x < minX + inset || x > maxX - inset || y < minY + inset || y > maxY - inset) return null;
+    return { x, y };
+  }
+
+  // The best scoring of the first PLACEMENT_CANDIDATES draws that are not null, out of at most
+  // PLACEMENT_DRAW_ATTEMPTS draws (a view in a world corner leaves about a quarter of the ring
+  // inside the world), or null for none.
+  bestPlacement(context, draw) {
+    const { playerX, playerY, safeDistance } = context;
     let best = null;
     let bestScore = -Infinity;
-    for (let candidate = 0; candidate < PLACEMENT_CANDIDATES; candidate += 1) {
-      const point = this.random() < WALL_BAND_CHANCE ? this.wallBandPoint(inset, bounds) : {
-        x: bounds.minX + inset + this.random() * (bounds.maxX - bounds.minX - 2 * inset),
-        y: bounds.minY + inset + this.random() * (bounds.maxY - bounds.minY - 2 * inset),
-      };
+    let candidates = 0;
+    for (let attempt = 0; attempt < PLACEMENT_DRAW_ATTEMPTS && candidates < PLACEMENT_CANDIDATES; attempt += 1) {
+      const point = draw();
+      if (point === null) continue;
+      candidates += 1;
       const playerDistance = Math.hypot(point.x - playerX, point.y - playerY);
       const spacing = this.gates.reduce((nearest, gate) => Math.min(nearest, Math.hypot(point.x - gate.x, point.y - gate.y)), PREFERRED_GATE_SPACING);
       const placeable = playerDistance >= safeDistance + this.schedule.gateRadius;

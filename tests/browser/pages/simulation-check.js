@@ -2,7 +2,7 @@
 // and polling the stats ring after every submit (stats lag one step), and checks: (a) the alive total tracks the ramping target (0.6 to 1.02
 // of it) and never exceeds what was requested (no double-spent budget); (b) every species holds
 // its share within 10 percent relative; (c) the read-back frameSequence lags the CPU frame by at
-// most 3; (d) after frame 1 every agent was spawned that frame: it sits at least WORLD_WIDTH / 4
+// most 3; (d) after frame 1 every agent was spawned that frame: it sits at least DEFAULT_SPAWN_DISTANCE (a quarter of the view width)
 // from the player and within the default spawn band of a wall (task C0b) with 29 spawn-in frames left, in-range species, phase and hueJitter, and zero
 // velocity unless integrate's wall spring already pushed it (inside DEFAULT_WALL_MARGIN of an edge);
 // (e) recreateWithCapacity(131072) keeps at least 95 percent of the alive agents after one more step;
@@ -29,7 +29,7 @@ import { SpawnPressure } from '/src/sim/spawner.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { DENSITY_READBACK_INTERVAL } from '/src/sim/density-readback.js';
 import { PARTICLE_HEADER_BYTES, PARTICLE_STRIDE_BYTES } from '/src/sim/particles.js';
-import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_WALL_MARGIN } from '/src/sim/params.js';
+import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DISTANCE, DEFAULT_WALL_MARGIN } from '/src/sim/params.js';
 
 const INITIAL_CAPACITY = 65536;
 const GROWN_CAPACITY = 131072;
@@ -59,7 +59,8 @@ const CADENCE_FRAMES = 300;
 // species 0 spawn lands at the first gate and every species 1 spawn at the second; a spawn moves
 // by its outward ejection (at most 1.6 world units per second) for one step before the readback.
 const GATE_CHECK_CAPACITY = 16384;
-const GATE_CHECK_GATES = [{ x: 3, y: 2, radius: 0.6, emit: 1, species: 0 }, { x: 13, y: 7, radius: 0.6, emit: 1, species: 1 }];
+// Placed around PLAYER, the same offsets from the player at any world size.
+const GATE_CHECK_GATES = [{ x: PLAYER[0] - 5, y: PLAYER[1] - 2.5, radius: 0.6, emit: 1, species: 0 }, { x: PLAYER[0] + 5, y: PLAYER[1] + 2.5, radius: 0.6, emit: 1, species: 1 }];
 const GATE_CHECK_SPAWNS = 400;
 const GATE_EJECT_REACH = 1.6 * STEP_SECONDS + 1e-4;
 const CADENCE_BURST_INTERVAL = 50;
@@ -116,7 +117,7 @@ function spawnPlacement(agentBytes) {
     const distance = Math.hypot(x - PLAYER[0], y - PLAYER[1]);
     closest = Math.min(closest, distance);
     const slot = base / AGENT_STRIDE_BYTES;
-    if (distance < WORLD_WIDTH / 4) return { failure: `slot ${slot} spawned ${distance.toFixed(3)} from the player` };
+    if (distance < DEFAULT_SPAWN_DISTANCE) return { failure: `slot ${slot} spawned ${distance.toFixed(3)} from the player` };
     if (x < 0 || x > WORLD_WIDTH || y < 0 || y > WORLD_HEIGHT) return { failure: `slot ${slot} spawned outside the arena at (${x}, ${y})` };
     const wallDistance = Math.min(x, y, WORLD_WIDTH - x, WORLD_HEIGHT - y);
     if (wallDistance > DEFAULT_SPAWN_BAND_WIDTH) return { failure: `slot ${slot} spawned ${wallDistance.toFixed(3)} from the nearest wall, outside the ${DEFAULT_SPAWN_BAND_WIDTH} band` };
@@ -129,7 +130,7 @@ function spawnPlacement(agentBytes) {
     if (!(hueJitter >= -1 && hueJitter <= 1)) return { failure: `slot ${slot} has hueJitter ${hueJitter}` };
   }
   if (spawning === 0) return { failure: 'no agent spawned' };
-  return { summary: `${spawning} agents spawned in frame 1, closest ${closest.toFixed(3)} from the player (need >= ${WORLD_WIDTH / 4})` };
+  return { summary: `${spawning} agents spawned in frame 1, closest ${closest.toFixed(3)} from the player (need >= ${DEFAULT_SPAWN_DISTANCE})` };
 }
 
 // Drains every ready ring slot into collected, keyed by frameSequence.

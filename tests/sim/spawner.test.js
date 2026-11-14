@@ -337,15 +337,3 @@ test('DEFAULT_RAMP pins every tuned value', () => {
   assert.equal(Object.isFrozen(DEFAULT_RAMP), true);
   assert.equal(SPEC_SPAWN_DISTANCE_FRACTION, 0.25);
 });
-
-test('setAreaFraction scales the alive target, not the frame cap, and validates its range', () => {
-  const pressure = new SpawnPressure({ capacity: CAPACITY });
-  const full = pressure.targetAlive;
-  pressure.setAreaFraction(0.5);
-  assert.equal(pressure.targetAlive, full * 0.5);
-  assert.equal(pressure.maximumPerFrame, Math.floor(CAPACITY / 60));
-  pressure.setAreaFraction(1);
-  assert.equal(pressure.targetAlive, full);
-  for (const bad of [0, -0.1, 1.01, Number.NaN, Infinity]) assert.throws(() => pressure.setAreaFraction(bad), RangeError);
-  assert.equal(pressure.targetAlive, full);
-});

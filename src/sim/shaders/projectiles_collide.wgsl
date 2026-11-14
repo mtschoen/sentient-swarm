@@ -82,8 +82,8 @@ const CAPSULE_CELL_BUDGET: u32 = 96u;
 const RING_MINIMUM_BAND: f32 = 0.08;
 const RING_CELL_BUDGET: u32 = 1024u;
 const BEAM_THREAT_UNITS: f32 = 4.0;
-// Collided cells per beam thread: 65536 for the workgroup, more than the whole grid at the default
-// cell size (14400 cells), so a sweep wide enough to cover half the arena is never cut short.
+// Collided cells per beam thread: 65536 for the workgroup, at least the whole grid at every preset
+// (MAXIMUM_GRID_CELLS in world.js), so a sweep across the world is never cut short.
 const BEAM_CELL_BUDGET: u32 = 256u;
 // The beam slot's previous direction is unit; anything shorter (a zero-filled slot) is a line.
 const BEAM_MINIMUM_PREVIOUS_LENGTH_SQUARED: f32 = 0.25;

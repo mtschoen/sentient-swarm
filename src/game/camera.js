@@ -16,8 +16,27 @@
 // cut(focusX, focusY, view) jumps to the clamped focus with zero velocity (run start and respawn).
 // sample(alpha) is the center extrapolated by alpha of the last update's delta along the velocity,
 // clamped like update, for rendering between fixed updates (glyphs extrapolate the same way).
+// cameraFocus blends the controlled point with the swarm centroid by CAMERA_POINT_WEIGHT: the ships
+// leash to the point but lag it, so the blend keeps the swarm, not just the point, in view.
+// bombRadiusForView is BOMB_VIEW_HALF_DIAGONALS view half-diagonals: the bomb clears what the
+// camera sees plus a margin around the swarm.
 export const CAMERA_SMOOTH_SECONDS = 0.3;
 export const CAMERA_DEAD_ZONE_FRACTION = 0.1;
+export const CAMERA_POINT_WEIGHT = 0.5;
+export const BOMB_VIEW_HALF_DIAGONALS = 1.2;
+
+// The point the camera follows: point is { x, y }, centroid { x, y } or null (no ship alive).
+export function cameraFocus(point, centroid) {
+  if (centroid === null) return { x: point.x, y: point.y };
+  return {
+    x: CAMERA_POINT_WEIGHT * point.x + (1 - CAMERA_POINT_WEIGHT) * centroid.x,
+    y: CAMERA_POINT_WEIGHT * point.y + (1 - CAMERA_POINT_WEIGHT) * centroid.y,
+  };
+}
+
+export function bombRadiusForView(width, height) {
+  return BOMB_VIEW_HALF_DIAGONALS * Math.hypot(width, height) / 2;
+}
 
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));

@@ -185,3 +185,19 @@ test('render refills the same view array per uniform buffer every frame', () => 
   }
   assert.equal(renderer.impulses.toUniformArray(2, renderer.impulseUniform), renderer.impulseUniform);
 });
+
+test('the trail decay shifts by the camera movement in device pixels since the last frame, and not after a resize', () => {
+  const { renderer } = createRenderer(createFakeSimulation('first', 0));
+  const draws = [];
+  renderer.trails.draw = (pass, previousIndex, decay, shiftX, shiftY) => draws.push([shiftX, shiftY]);
+  const viewport = renderer.viewport;
+  viewport.setCamera({ centerX: 10, centerY: 5 });
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 1 });
+  // 80 device pixels per world unit at 1280 by 720.
+  viewport.setCamera({ centerX: 10.5, centerY: 4.75 });
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 2 });
+  renderer.resize(1280, 720);
+  viewport.setCamera({ centerX: 12, centerY: 4.75 });
+  renderer.render(createFakeEncoder(), { alpha: 0, time: 3 });
+  assert.deepEqual(draws, [[0, 0], [40, -20], [0, 0]]);
+});

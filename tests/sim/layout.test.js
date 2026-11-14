@@ -12,15 +12,15 @@ test('agent stride is 32 bytes and buffer bytes scale linearly', () => {
 
 test('gridDimensions covers the arena', () => {
   const dimensions = gridDimensions(0.1);
-  assert.equal(dimensions.columns, 160);
-  assert.equal(dimensions.rows, 90);
-  assert.equal(dimensions.cellCount, 14400);
+  assert.equal(dimensions.columns, 320);
+  assert.equal(dimensions.rows, 180);
+  assert.equal(dimensions.cellCount, 57600);
 });
 
 test('gridDimensions rounds up when the radius does not divide the arena', () => {
   const dimensions = gridDimensions(0.3);
-  assert.equal(dimensions.columns, 54);
-  assert.equal(dimensions.rows, 30);
+  assert.equal(dimensions.columns, 107);
+  assert.equal(dimensions.rows, 60);
   assert.equal(dimensions.cellSize, 0.3);
 });
 
