@@ -1,7 +1,6 @@
 // The invite and reply codec: a session description as base64url of deflate-raw over a small JSON envelope.
 
-// Local until protocol.js (Task 2.1) lands; then import it from there.
-const PROTOCOL_VERSION = 1;
+import { PROTOCOL_VERSION } from './protocol.js';
 
 const JOIN_MARKER = '#join=';
 const BASE64_URL_PATTERN = /^[A-Za-z0-9_-]+$/;
