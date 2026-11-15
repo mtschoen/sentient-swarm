@@ -131,6 +131,28 @@ test('a countdown with no pause resumes both games', async () => {
   assert.deepEqual(bothPhases(host, guest), ['playing', 'playing']);
 });
 
+test('a start that lands on a hidden guest, which pauses from the start action, leaves both paused', async () => {
+  const pair = await createOnlinePair({ delaySeconds: 0.05 });
+  const { host, guest, step, stepUntil } = pair;
+  // The online wiring's rule for a hidden or unfocused page, inside the action as it runs there.
+  const record = guest.actions.push.bind(guest.actions);
+  guest.actions.push = (action) => {
+    record(action);
+    if (action.type === 'start') guest.session.pause();
+    return guest.actions.length;
+  };
+  host.session.markReady();
+  guest.session.markReady();
+  const hidden = { guestUpdates: false };
+  stepUntil(() => host.session.waitingFor === null, 'both ready', hidden);
+  host.session.start('versus');
+  stepUntil(() => guest.game.run.phase === 'playing', 'the guest started', hidden);
+  assert.equal(guest.game.paused, true);
+  step(0.5, hidden);
+  assert.equal(host.game.paused, true, 'the host does not play on against a hidden guest');
+  assert.equal(host.session.pausedBy, 1);
+});
+
 test('either player restarts from game over and both restart', async () => {
   const pair = await createOnlinePair({ delaySeconds: 0.05 });
   const { host, guest, stepBoth, stepUntil } = pair;

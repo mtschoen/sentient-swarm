@@ -11,7 +11,8 @@
 // it shows NO_DIRECT_ROUTE with a fresh invite. The guest has no timeout: it cannot see when the host
 // pastes its reply (its ICE checks start, and Chrome may call them failed, before that), so after
 // Copy reply it waits for the host (Cancel ends the wait) and shows NO_DIRECT_ROUTE only if its
-// connection ends before it opens.
+// connection ends before it opens. A start or restart that lands on a hidden or unfocused page
+// pauses both at once (the page would run no update and the other could play on alone).
 // Timers: setTimer(callback, seconds) -> handle and clearTimer(handle).
 
 import { createRtcConnection } from '../net/rtc-transport.js';
@@ -37,6 +38,7 @@ const STALE_REPLY = 'That reply is for another invite. Send your friend this new
 const NO_SECOND_INVITE = 'Already online: that invite link was ignored.';
 const SPARRING_OFF = 'DEBUG SPARRING is off online';
 const NO_REMOTE_SEATS = Object.freeze(new Set());
+const CONNECTION_LOST = 'CONNECTION LOST';
 
 // The title menu's ONLINE item; the action is read when chosen (the wiring is made after the menu).
 export function onlineMenuItem(toggle) {
@@ -187,19 +189,27 @@ export function createOnlineWiring({
     panel.hide();
   }
 
+  // The pause note, with Resume ghosted while the connection is lost (the session ignores it then).
+  function setPauseNote(text) {
+    pauseMenu.setNote(text);
+    pauseMenu.setItem('resume', { label: 'Resume', enabled: text !== CONNECTION_LOST });
+  }
+
   function showPause(text) {
     countdown.hide();
     audio?.setPaused(true);
-    pauseMenu.setNote(text);
+    setPauseNote(text);
     pauseMenu.show();
   }
 
   function leavePause() {
     countdown.hide();
     pauseMenu.hide();
-    pauseMenu.setNote('');
+    setPauseNote('');
     audio?.setPaused(false);
   }
+
+  const pageAway = () => documentObject.hidden === true || documentObject.hasFocus?.() === false;
 
   function opened() {
     if (connected) return;
@@ -213,6 +223,7 @@ export function createOnlineWiring({
     const remoteSeat = role === 'host' ? 2 : 1;
     const wasConnected = connected;
     const wasHost = role === 'host';
+    const atTitle = menu.visible;
     session = null;
     teardown();
     leavePause();
@@ -223,7 +234,7 @@ export function createOnlineWiring({
       else panel.showMessage(NO_DIRECT_ROUTE);
       return;
     }
-    if (reason === 'remoteQuit') showToast(`Player ${remoteSeat} left the match.`);
+    if (reason === 'remoteQuit') showToast(atTitle ? `Player ${remoteSeat} left.` : `Player ${remoteSeat} left the match.`);
     else if (END_MESSAGES[reason] !== undefined) showToast(END_MESSAGES[reason]);
   }
 
@@ -232,7 +243,7 @@ export function createOnlineWiring({
       case 'connection':
         if (action.state === 'open') {
           if (!connected) opened();
-          else if (pauseMenu.visible) pauseMenu.setNote('');
+          else if (pauseMenu.visible) setPauseNote('');
         }
         break;
       case 'start':
@@ -240,9 +251,10 @@ export function createOnlineWiring({
         leavePause();
         menu.hide();
         audio?.restartRun();
+        if (pageAway()) session.pause();
         break;
       case 'pause':
-        showPause(action.lost ? 'CONNECTION LOST' : `PLAYER ${action.by + 1} PAUSED`);
+        showPause(action.lost ? CONNECTION_LOST : `PLAYER ${action.by + 1} PAUSED`);
         break;
       case 'countdown':
         if (action.number === null) countdown.hide();

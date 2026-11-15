@@ -166,7 +166,7 @@ export function createPauseMenu({ onResume, onSettings, onRestart, onQuit, docum
     className: 'menu-pause',
     title: 'PAUSED',
     items: [
-      { label: 'Resume', primary: true, action: () => onResume() },
+      { id: 'resume', label: 'Resume', primary: true, action: () => onResume() },
       { label: 'Settings', action: () => onSettings() },
       { label: 'Restart run', action: () => onRestart() },
       { label: 'Quit to title', action: () => onQuit() },

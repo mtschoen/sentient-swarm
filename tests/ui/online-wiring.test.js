@@ -114,6 +114,8 @@ function createFakeSession(options) {
 
 function createFakes({ runPhase = 'ready', padIndex = 0 } = {}) {
   const documentObject = createFakeDocument();
+  documentObject.focused = true;
+  documentObject.hasFocus = () => documentObject.focused;
   const timers = createTimers();
   const toasts = [];
   const items = new Map();
@@ -127,6 +129,8 @@ function createFakes({ runPhase = 'ready', padIndex = 0 } = {}) {
   const pauseMenu = {
     visible: false,
     note: '',
+    items: new Map(),
+    setItem(id, view) { this.items.set(id, view); },
     show() { this.visible = true; },
     hide() { this.visible = false; },
     setNote(text) { this.note = text; },
@@ -352,8 +356,14 @@ test('the session actions drive the pause note, the countdown and the title', ()
   session.act({ type: 'countdown', number: 3 });
   assert.equal(fakes.pauseMenu.visible, false);
   assert.equal(online.countdown.number, 3);
+  assert.deepEqual(fakes.pauseMenu.items.get('resume'), { label: 'Resume', enabled: true });
   session.act({ type: 'pause', by: null, lost: true });
   assert.equal(fakes.pauseMenu.note, 'CONNECTION LOST');
+  assert.deepEqual(fakes.pauseMenu.items.get('resume'), { label: 'Resume', enabled: false }, 'Resume is ghosted in place while the connection is lost');
+  session.act({ type: 'connection', state: 'open' });
+  assert.equal(fakes.pauseMenu.note, '');
+  assert.deepEqual(fakes.pauseMenu.items.get('resume'), { label: 'Resume', enabled: true });
+  session.act({ type: 'pause', by: null, lost: true });
   session.act({ type: 'end', reason: 'lost' });
   assert.equal(fakes.menu.visible, true);
   assert.equal(fakes.pauseMenu.visible, false);
@@ -410,3 +420,28 @@ test('cancelling the panel, or a connection that fails before it opens, leaves n
   await settleUntil(() => online.inviteUrl !== null, 'the fresh invite');
 });
 
+test('the peer quitting at the connected title says the player left, with no match named', () => {
+  const factory = countingConnectionFactory();
+  const { fakes, sessions, toasts } = createFakes();
+  const online = createOnlineWiring({ ...fakes, createConnection: factory.create });
+  const session = connectHost(online, sessions);
+  assert.equal(fakes.menu.visible, true);
+  session.act({ type: 'end', reason: 'remoteQuit' });
+  assert.deepEqual(toasts, ['Player 2 left.']);
+});
+
+for (const [label, away] of [['hidden', (documentObject) => { documentObject.hidden = true; }], ['without focus', (documentObject) => { documentObject.focused = false; }]]) {
+  test(`a start or restart that lands on a page ${label} pauses both at once`, () => {
+    const factory = countingConnectionFactory();
+    const { fakes, sessions } = createFakes({ runPhase: 'playing' });
+    const online = createOnlineWiring({ ...fakes, createConnection: factory.create });
+    const session = connectHost(online, sessions);
+    session.act({ type: 'start', mode: 'hives' });
+    assert.equal(session.calls.pause, 0, 'a page in view plays on');
+    away(fakes.documentObject);
+    session.act({ type: 'start', mode: 'hives' });
+    assert.equal(session.calls.pause, 1);
+    session.act({ type: 'restart' });
+    assert.equal(session.calls.pause, 2);
+  });
+}
