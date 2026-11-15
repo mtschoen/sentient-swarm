@@ -96,7 +96,7 @@ import { MAXIMUM_PLAYER_SEATS, SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOU
 import { Camera, bombRadiusForView, fitZoom, framingCenter } from './camera.js';
 import { SeatRevival } from './seat-revival.js';
 import { SoloZoomController } from './solo-zoom.js';
-import { soloZoomOptions } from './solo-zoom-step.js';
+import { easeOutLimits, soloZoomOptions } from './solo-zoom-step.js';
 import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, reviveSeats, seatStarts, tickInvulnerability, uploadSwarms } from './seats.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
@@ -380,7 +380,7 @@ export class Game {
     const solo = soloZoomOptions(this, deltaSeconds);
     if (this.watching) return;
     if (solo !== null) this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view, ...solo });
-    else this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view, targetZoom: fitZoom(focuses, view.viewWidth, view.viewHeight) });
+    else this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view, ...easeOutLimits(this.camera), targetZoom: fitZoom(focuses, view.viewWidth, view.viewHeight) });
   }
 
   // Delegates to the controller (RangeError for a bad name or value); only the lab calls it.

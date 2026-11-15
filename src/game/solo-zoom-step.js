@@ -3,6 +3,7 @@
 // Returns null (and resets the controller) for everything else, so the caller takes today's path:
 // the feature off (the default), reduced motion, no or two live seats, Ready, Game over and watch mode.
 import { DENSITY_REFERENCE_CAPACITY } from '../sim/species.js';
+import { MINIMUM_CAMERA_ZOOM } from './camera.js';
 import { RunPhase } from './run.js';
 import { liveSeats } from './seats.js';
 import { sampleZoomPressure } from './zoom-pressure.js';
@@ -56,4 +57,18 @@ export function soloZoomOptions(game, deltaSeconds) {
     });
   }
   return { targetZoom, zoomMinimum: settings.minimum, zoomMaximum: settings.maximum, zoomSmoothSeconds: settings.smoothSeconds };
+}
+
+// A zoom outside the default range is more than this away before the limits are widened.
+const OUT_OF_RANGE_TOLERANCE = 1e-3;
+
+// Camera.update clamps hard to the limits it is passed. After the solo zoom ends (a seat revives, the
+// knob turns off, reduced motion turns on) the camera may still sit above 1 (or below the co-op floor),
+// so the non-solo call widens the limits to the current zoom and the spring eases back with no pop;
+// once the zoom is inside the default range (within a thousandth) this is {}, today's exact call.
+export function easeOutLimits(camera) {
+  const options = {};
+  if (camera.zoom > 1 + OUT_OF_RANGE_TOLERANCE) options.zoomMaximum = camera.zoom;
+  if (camera.zoom < MINIMUM_CAMERA_ZOOM - OUT_OF_RANGE_TOLERANCE) options.zoomMinimum = camera.zoom;
+  return options;
 }

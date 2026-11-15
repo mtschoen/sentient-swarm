@@ -175,3 +175,43 @@ test('setSoloZoomSetting rejects bad values', async () => {
   assert.throws(() => game.setSoloZoomSetting('nonsense', 1), RangeError);
   assert.throws(() => game.setSoloZoomSetting('enabled', 1), RangeError);
 });
+
+test('leaving solo mode mid-zoom eases back without a pop, then returns to the default call', async () => {
+  const leaves = {
+    'the knob turns off': (game) => game.setSoloZoomSetting('enabled', false),
+    'reduced motion turns on': (game) => game.setReducedMotion(true),
+  };
+  for (const [name, leave] of Object.entries(leaves)) {
+    const { game } = await startedGame();
+    runFor(game, 10);
+    const before = game.camera.zoom;
+    assert.ok(before > 1.3, name);
+    const calls = spyCamera(game);
+    leave(game);
+    game.update(STEP);
+    assert.ok(Math.abs(game.camera.zoom - before) < 0.1, `${name}: ${before} to ${game.camera.zoom}`);
+    runFor(game, 10);
+    assert.ok(game.camera.zoom <= 1.001, name);
+    game.update(STEP);
+    assert.ok(!('zoomMaximum' in calls.at(-1)), `${name}: back to today's call`);
+  }
+});
+
+test('the controller gets the unzoomed view, the pressure sampler the zoomed one', async () => {
+  const { game } = await startedGame();
+  runFor(game, 10);
+  assert.ok(game.camera.zoom > 1.3);
+  const seen = { controller: null, sampled: [] };
+  const { update } = game.soloZoom;
+  game.soloZoom.update = (deltaSeconds, input) => { seen.controller = input; return update.call(game.soloZoom, deltaSeconds, input); };
+  game.simulation.densityFunction = () => 1;
+  const original = game.densityAt;
+  let widest = 0;
+  game.densityAt = (x, y) => { widest = Math.max(widest, Math.hypot(x - game.seats[0].cameraFocus.x, y - game.seats[0].cameraFocus.y)); return original(x, y); };
+  game.update(STEP);
+  assert.equal(seen.controller.viewWidth, game.viewSize.width);
+  assert.equal(seen.controller.viewHeight, game.viewSize.height);
+  // The far ring sits at 1.1 zoomed half-diagonals, so inside the unzoomed one.
+  const zoomedRing = 1.1 * Math.hypot(game.viewSize.width, game.viewSize.height) / 2 / game.camera.zoom;
+  assert.ok(Math.abs(widest - zoomedRing) < 0.5, `ring ${widest} vs ${zoomedRing}`);
+});
