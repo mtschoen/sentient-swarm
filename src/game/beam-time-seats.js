@@ -2,7 +2,7 @@
 // beam time starts, runs, ends and reaches the seats. Each function takes the Game as context, so
 // game.js keeps only the hooks in its frame order.
 
-import { BEAM_TIME_TIER } from './beam-time.js';
+import { BEAM_TIME_PROBE_GRACE_SECONDS, BEAM_TIME_TIER } from './beam-time.js';
 import { placeShard } from './beam-shards.js';
 import { BEAM_SHARD_TYPE } from './weaponTypes.js';
 import { pickupAnchor } from './seats.js';
@@ -68,6 +68,7 @@ export function endBeamTime(game) {
   for (const seat of game.seats) seat.weapons.endBeamTime();
   game.beamShards.finish();
   game.spawnPressure.setSurge(1);
+  game.probeGraceSeconds = BEAM_TIME_PROBE_GRACE_SECONDS;
   game.effects?.expiry?.();
 }
 
@@ -75,6 +76,7 @@ export function endBeamTime(game) {
 // reset by the caller).
 export function cancelBeamTime(game) {
   game.beamTime.end();
+  game.probeGraceSeconds = 0;
   game.beamShards.finish();
   game.spawnPressure.setSurge(1);
 }

@@ -3,6 +3,8 @@
 // the timer ran out, so the caller can play the expiry cue once.
 export const BEAM_TIME_SECONDS = 12;
 export const BEAM_TIME_TIER = 1;
+// Game seconds after beam time ends in which the quality probe stays paused, while the surge's surplus crowd drains.
+export const BEAM_TIME_PROBE_GRACE_SECONDS = 4;
 
 export class BeamTime {
   constructor({ durationSeconds = BEAM_TIME_SECONDS } = {}) {

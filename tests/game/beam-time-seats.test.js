@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../../src/game/game.js';
-import { BEAM_TIME_SECONDS } from '../../src/game/beam-time.js';
+import { BEAM_TIME_PROBE_GRACE_SECONDS, BEAM_TIME_SECONDS } from '../../src/game/beam-time.js';
 import { MAXIMUM_BEAM_TIME_SURGE, SpawnPressure } from '../../src/sim/spawner.js';
 import { SOLO_ZOOM_RANGES } from '../../src/game/solo-zoom.js';
 import { spawnShardsForWaves, startBeamTime } from '../../src/game/beam-time-seats.js';
@@ -226,7 +226,25 @@ test('beam time surges the spawning: every open gate emits between waves, which 
   assert.equal(surged.simulation.seekScales.at(-1), plain.simulation.seekScales.at(-1));
   runFor(surged.game, BEAM_TIME_SECONDS + 0.1);
   assert.equal(surged.game.spawnPressure.surge, 1);
+  runFor(surged.game, BEAM_TIME_PROBE_GRACE_SECONDS + 0.1);
   assert.equal(surged.game.acceptsProbeFrames, true);
+});
+
+test('the probe stays paused for a grace after beam time ends, and a new run clears it', async () => {
+  const { game } = await startedGame();
+  startBeamTime(game);
+  runFor(game, BEAM_TIME_SECONDS + 0.1);
+  assert.equal(game.beamTime.active, false);
+  assert.equal(game.acceptsProbeFrames, false, 'just after the window');
+  runFor(game, BEAM_TIME_PROBE_GRACE_SECONDS / 2);
+  assert.equal(game.acceptsProbeFrames, false, 'inside the grace');
+  runFor(game, BEAM_TIME_PROBE_GRACE_SECONDS / 2 + 0.1);
+  assert.equal(game.acceptsProbeFrames, true, 'after the grace');
+  startBeamTime(game);
+  runFor(game, BEAM_TIME_SECONDS + 0.1);
+  game.start();
+  game.update(STEP);
+  assert.equal(game.acceptsProbeFrames, true, 'a new run drops the grace');
 });
 
 test('beam time bypasses the wave bank: refills are requested on every step, while between waves they are throttled otherwise', async () => {

@@ -178,6 +178,8 @@ export class Game {
     this.soloZoom = new SoloZoomController();
     this.reducedMotion = false;
     this.bombHoldRemaining = 0;
+    // Game seconds left of the probe pause after beam time ends (BEAM_TIME_PROBE_GRACE_SECONDS).
+    this.probeGraceSeconds = 0;
     // One seat per player; the first is the solo player.
     this.random = random;
     this.seats = [new PlayerSeat({ index: 0, random, bounds: this.worldBounds })];
@@ -464,7 +466,7 @@ export class Game {
   // The quality probe measures only real play: Playing outside the lab, with no capacity change in
   // flight (so a lab mix never steps or persists a preset, and the lab-leave rate restore holds).
   get acceptsProbeFrames() {
-    return this.run.phase === RunPhase.Playing && !this.paused && !this.labActive && !this.capacitySwap.pending && !this.beamTime.active;
+    return this.run.phase === RunPhase.Playing && !this.paused && !this.labActive && !this.capacitySwap.pending && !this.beamTime.active && this.probeGraceSeconds <= 0;
   }
 
   update(deltaSeconds) {
@@ -527,6 +529,7 @@ export class Game {
     }
 
     this.timeWarp.update(deltaSeconds);
+    this.probeGraceSeconds = Math.max(0, this.probeGraceSeconds - deltaSeconds);
     tickBeamTime(this, deltaSeconds);
     this.pendingSimulationSeconds += deltaSeconds * this.timeWarp.scale;
     this.pendingProjectileSeconds += deltaSeconds;
