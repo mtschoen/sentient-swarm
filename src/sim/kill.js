@@ -136,7 +136,8 @@ export class KillAllPass extends ComputePass {
   }
 }
 
-// Swarm in player_collide.wgsl: radius f32, armedSeats u32 (bit k arms seat k), two padding words, then
+// Swarm in player_collide.wgsl: radius f32, armedSeats u32 (bit k arms seat k for the neutral contact pass),
+// projectileArmedSeats u32 (bit k lets the opposing seat's shots hit seat k, versus_hits.wgsl), one padding word, then
 // MAXIMUM_CONTACT_SLOTS slots of { position vec2f, state u32 (bit 0 alive, bit 1 fresh), padding };
 // seat k's slot s is slot k * MAXIMUM_SWARM_SHIPS + s.
 const SWARM_HEADER_BYTES = 16;
@@ -149,11 +150,12 @@ const SHIP_FRESH = 2;
 
 // The Swarm uniform: seatTables is one or two per-seat slot tables of { x, y, alive, fresh } (index is
 // the slot; missing slots and a missing seat are dead); armedSeats bit k false keeps seat k's slots from
-// being hit. Fills bytes (a new buffer by default, reused by Simulation every step) and returns it.
-export function packSwarmShips(seatTables, { radius, armedSeats }, bytes = new ArrayBuffer(SWARM_UNIFORM_BYTES)) {
+// being hit by neutral agents; projectileArmedSeats (default armedSeats) does the same for opposing projectiles. Fills bytes (a new buffer by default, reused by Simulation every step) and returns it.
+export function packSwarmShips(seatTables, { radius, armedSeats, projectileArmedSeats = armedSeats }, bytes = new ArrayBuffer(SWARM_UNIFORM_BYTES)) {
   const view = new DataView(bytes);
   view.setFloat32(0, radius, true);
   view.setUint32(4, armedSeats, true);
+  view.setUint32(8, projectileArmedSeats, true);
   for (let seat = 0; seat < MAXIMUM_PLAYER_SEATS; seat += 1) {
     const ships = seatTables[seat] ?? [];
     const count = Math.min(ships.length, MAXIMUM_SWARM_SHIPS);

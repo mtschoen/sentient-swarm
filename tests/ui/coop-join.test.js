@@ -96,3 +96,47 @@ test('handleConnect is true for seat 2 pad under a new or the same index, false 
   assert.equal(join.handleConnect(2), true, 'a new index takes the seat');
   assert.equal(join.handleConnect(0), false);
 });
+
+function sparringSetup() {
+  const state = { gamepads: [pad(0)], seatTwoPad: 'unset', extraPad: 'unset', toasts: [] };
+  const input = { setSeatTwoPad: (padIndex) => { state.seatTwoPad = padIndex; }, seatOnePadIndex: () => 0 };
+  const menuInput = { setExtraPad: (padIndex) => { state.extraPad = padIndex; } };
+  const hud = { showToast: (text) => state.toasts.push(text) };
+  const documentObject = { createElement: () => ({ style: {}, hidden: false, textContent: '' }) };
+  const elements = [];
+  const menuElement = { append: (element) => elements.push(element) };
+  const join = createCoopJoin({ input, menuInput, hud, menuElement, navigatorObject: { getGamepads: () => state.gamepads }, documentObject, sparring: true });
+  return { join, state, elements };
+}
+
+test('sparring seats a virtual pad at once and keeps it through reset, disconnects and shoulder presses', () => {
+  const { join, state, elements } = sparringSetup();
+  assert.equal(join.playerCount, 2);
+  assert.equal(state.seatTwoPad, 1000);
+  assert.equal(state.extraPad, 1000);
+  join.update({ titleOpen: true });
+  state.gamepads = [pad(0, [5])];
+  join.update({ titleOpen: true });
+  state.gamepads = [pad(0), pad(1, [5])];
+  join.update({ titleOpen: true });
+  state.gamepads = [pad(0, [5])];
+  join.update({ titleOpen: true });
+  assert.equal(join.playerCount, 2);
+  assert.deepEqual(state.toasts, []);
+  assert.equal(join.handleDisconnect(1000), false);
+  assert.equal(join.handleConnect(1), false);
+  assert.equal(join.padForSeat(1), null);
+  assert.equal(join.padForSeat(0), 0);
+  join.reset();
+  assert.equal(join.playerCount, 2);
+  assert.equal(state.seatTwoPad, 1000);
+  const texts = elements.map((element) => element.textContent);
+  assert.ok(texts.includes('P2: SPARRING DUMMY (DEBUG)'));
+  assert.ok(texts.some((text) => text.startsWith('DEBUG SPARRING: PLAYER 2 IS A DUMMY')));
+});
+
+test('without sparring no virtual seat exists', () => {
+  const { join, state } = setup();
+  assert.equal(join.playerCount, 1);
+  assert.equal(state.seatTwoPad, null);
+});

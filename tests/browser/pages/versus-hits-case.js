@@ -15,7 +15,10 @@
 //      ship 30 within BEAM_HIT_STEP_INTERVAL steps while ship 31 still lives;
 // (v7) the hives feeding ground: with a gate row owned by seat 2 at AGENT (radius 1.5, so a reach of
 //      3), seat 2 bullets through an agent at AGENT and one at SECOND_AGENT (4 away) credit seat 2 two
-//      owner kills and one feeding kill (feedingKillsSinceLastRead [0, 1]); without the row, none.
+//      owner kills and one feeding kill (feedingKillsSinceLastRead [0, 1]); without the row, none;
+// (v8) the sparring dummy (neutralImmune on seat 2): a neutral agent on a plain seat 2 ship sets its
+//      bit (control); on a neutral-immune ship it sets none, yet a seat 1 bullet on that ship still
+//      claims it and stops; a fully invulnerable seat 2 ship is safe from the agent and the bullet.
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, MAXIMUM_SWARM_SHIPS, PROJECTILE_FLAG_ALIVE } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { Projectiles, PROJECTILE_STRIDE_BYTES } from '/src/game/projectiles.js';
@@ -29,11 +32,16 @@ const READBACK_ATTEMPTS = 20;
 const SPOTS = {
   own: [4, 9], target: [8, 9], pair: [12, 9], agent: [16, 9], secondAgent: [20, 9],
   ringEast: [24.55, 4], ringWest: [23.45, 4], beamNear: [8, 14], beamFar: [12, 14],
+  controlShip: [28, 3], immuneShip: [28, 7], invulnerableShip: [28, 12],
 };
 const RING_CENTER = [24, 4];
 const BEAM_ORIGIN = [4, 14];
 const BEAM_HIT_STEP_INTERVAL = 6;
 const SEAT_TWO_SHIPS = { 7: 'target', 9: 'pair', 10: 'pair', 20: 'ringEast', 21: 'ringWest', 30: 'beamNear', 31: 'beamFar' };
+
+// The seat 2 table and upload options of the step in progress (the (v8) cases change them).
+let seatTwoShips = SEAT_TWO_SHIPS;
+let seatTwoOptions = {};
 
 async function readBuffer(device, source) {
   const staging = device.createBuffer({ size: source.size, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
@@ -80,7 +88,7 @@ export async function runVersusCase(gpu) {
   const step = async (spawnGates = null) => {
     simulation.setPlayerState({ x: 1, y: 1 });
     simulation.setSwarmShips(table({ 2: 'own' }, first), SWARM_SHIP_RADIUS);
-    simulation.setSwarmShips(table(SEAT_TWO_SHIPS, first), SWARM_SHIP_RADIUS, { seat: 1 });
+    simulation.setSwarmShips(table(seatTwoShips, first), SWARM_SHIP_RADIUS, { seat: 1, ...seatTwoOptions });
     first = false;
     const encoder = device.createCommandEncoder({ label: 'versus-check-frame' });
     simulation.step(encoder, STEP_SECONDS, undefined, spawnGates);
@@ -175,6 +183,42 @@ export async function runVersusCase(gpu) {
   }
   verdicts.push([beamBits.includes(30) && !beamBits.includes(31), `(v6) beam: second mask bits ${beamBits.join(',')} (need 30 and not 31)`]);
   projectiles.setBeam(null, 0);
+
+  // (v8) the sparring dummy.
+  const onlyAgentAt = (spot) => {
+    const agentBytes = new ArrayBuffer(CAPACITY * AGENT_STRIDE_BYTES);
+    const agentView = new DataView(agentBytes);
+    agentView.setFloat32(AGENT_OFFSETS.position, SPOTS[spot][0], true);
+    agentView.setFloat32(AGENT_OFFSETS.position + 4, SPOTS[spot][1], true);
+    agentView.setUint32(AGENT_OFFSETS.flags, AGENT_FLAG_ALIVE, true);
+    device.queue.writeBuffer(simulation.agentsBuffer, 0, agentBytes);
+  };
+  seatTwoShips = { 42: 'controlShip' };
+  seatTwoOptions = {};
+  onlyAgentAt('controlShip');
+  stats = await step();
+  verdicts.push([maskBits(stats.secondSwarmHitMask).includes(42), `(v8) control, agent on a plain seat 2 ship: second mask bits ${maskBits(stats.secondSwarmHitMask).join(',')} (need 42 included)`]);
+  seatTwoShips = { 43: 'immuneShip' };
+  seatTwoOptions = { neutralImmune: true };
+  onlyAgentAt('immuneShip');
+  stats = await step();
+  stats = await step();
+  verdicts.push([maskBits(stats.secondSwarmHitMask).length === 0, `(v8) agent on a neutral-immune ship: second mask bits ${maskBits(stats.secondSwarmHitMask).join(',')} (need none)`]);
+  slot = projectiles.queueSpawn(bulletAt('immuneShip'), 0);
+  stats = await step();
+  [alive] = await projectileAlive([slot]);
+  verdicts.push([maskBits(stats.secondSwarmHitMask).includes(43) && !alive, `(v8) seat 1 bullet on the neutral-immune ship: second mask bits ${maskBits(stats.secondSwarmHitMask).join(',')}, alive ${alive} (need 43 included and false)`]);
+  projectiles.clear();
+  seatTwoShips = { 44: 'invulnerableShip' };
+  seatTwoOptions = { neutralImmune: true, invulnerable: true };
+  onlyAgentAt('invulnerableShip');
+  slot = projectiles.queueSpawn(bulletAt('invulnerableShip'), 0);
+  stats = await step();
+  [alive] = await projectileAlive([slot]);
+  verdicts.push([maskBits(stats.secondSwarmHitMask).length === 0 && alive, `(v8) invulnerable ship under an agent and a bullet: second mask bits ${maskBits(stats.secondSwarmHitMask).join(',')}, alive ${alive} (need none and true)`]);
+  projectiles.clear();
+  seatTwoShips = SEAT_TWO_SHIPS;
+  seatTwoOptions = {};
 
   removePass();
   projectiles.destroy();

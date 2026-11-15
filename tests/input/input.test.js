@@ -335,3 +335,10 @@ test('readGamepadAt reads by Gamepad.index, not array position, and is neutral f
   assert.equal(firstPadIndex(navigatorObject, 2), null);
   assert.equal(readGamepad(navigatorObject, { excludeIndex: 2 }).firing, false);
 });
+
+test('a pad index no pad has reads neutral for seat 2 and leaves seat 1 on the first pad', () => {
+  const buttons = Array.from({ length: 17 }, (unused, button) => ({ pressed: button === 7 }));
+  const navigatorObject = { getGamepads: () => [{ index: 0, buttons, axes: [0, 0, 0, 0], mapping: 'standard' }] };
+  assert.deepEqual(readGamepadAt(navigatorObject, 1000), readGamepadAt({ getGamepads: () => [] }, 0));
+  assert.equal(firstPadIndex(navigatorObject, 1000), 0);
+});

@@ -97,3 +97,10 @@ test('the rows take the seat colors, hide with the title and write the DOM only 
   assert.equal(one.hidden, true);
   assert.ok(!one.className.includes('pad-status-pressed'));
 });
+
+test('sparring replaces the missing-controller text with the dummy label', () => {
+  const model = padStatusModel({ pads: [pad(0)], seatTwoPad: 1000, sparring: true });
+  assert.equal(model.two.text, 'P2: SPARRING DUMMY (DEBUG)');
+  assert.equal(model.two.pressed, false);
+  assert.equal(padStatusModel({ pads: [pad(0)], seatTwoPad: 1000 }).two.text, 'P2: JOINED, BUT THE BROWSER NO LONGER LISTS ITS CONTROLLER');
+});

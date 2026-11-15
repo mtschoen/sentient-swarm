@@ -63,3 +63,28 @@ test('carryStateInto keeps both seat tables and their invulnerable flags', () =>
   assert.equal(view.getFloat32(16 + 256 * 16, true), 2);
   assert.ok(Math.abs(view.getFloat32(0, true) - 0.06) < 1e-7);
 });
+
+const projectileArmedSeats = (upload) => new DataView(upload.bytes).getUint32(8, true);
+
+test('the projectile mask equals armedSeats except for a neutral-immune seat, which keeps only its projectile bit', () => {
+  const { simulation } = fakeSimulation();
+  simulation.setPlayerState({ x: 1, y: 1 });
+  simulation.setSwarmShips([ship(1)], 0.06);
+  simulation.setSwarmShips([ship(2)], 0.06, { seat: 1 });
+  const plain = simulation.contactUpload();
+  assert.equal(projectileArmedSeats(plain), armedSeats(plain));
+  assert.equal(projectileArmedSeats(plain), 0b11);
+  simulation.setSwarmShips([ship(2)], 0.06, { seat: 1, neutralImmune: true });
+  const immune = simulation.contactUpload();
+  assert.equal(armedSeats(immune), 0b01);
+  assert.equal(projectileArmedSeats(immune), 0b11);
+  simulation.setSwarmShips([ship(2)], 0.06, { seat: 1, invulnerable: true, neutralImmune: true });
+  const invulnerable = simulation.contactUpload();
+  assert.equal(armedSeats(invulnerable), 0b01);
+  assert.equal(projectileArmedSeats(invulnerable), 0b01);
+  simulation.setSwarmShips([ship(2)], 0.06, { seat: 1, neutralImmune: true });
+  simulation.setPlayerState({ x: 1, y: 1, invulnerable: true });
+  const everyone = simulation.contactUpload();
+  assert.equal(armedSeats(everyone), 0);
+  assert.equal(projectileArmedSeats(everyone), 0);
+});

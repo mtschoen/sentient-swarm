@@ -3,9 +3,13 @@
 export const JOIN_BUTTON_INDICES = Object.freeze([4, 5, 6, 7]);
 export const SECOND_PAD_JOIN_BUTTON_INDICES = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7]);
 
+// The pad index of the sparring dummy (?debug=sparring): no browser reports an index this high.
+export const VIRTUAL_PAD_INDEX = 1000;
+
 export class SeatJoin {
   constructor() {
     this.seatTwoPad = null;
+    this.virtual = false;
     this.previousHeld = new Map();
     this.primed = false;
     this.wasOpen = false;
@@ -25,6 +29,13 @@ export class SeatJoin {
     return held;
   }
 
+  // Seats the dummy: seat 2 is joined from now on, driven by no device, and neither a press, a
+  // disconnect nor reset() takes it back.
+  seatVirtual() {
+    this.virtual = true;
+    this.seatTwoPad = VIRTUAL_PAD_INDEX;
+  }
+
   poll(gamepads, { open }) {
     const now = this.snapshot(gamepads);
     const previous = this.previousHeld;
@@ -32,7 +43,7 @@ export class SeatJoin {
     this.previousHeld = now;
     this.primed = true;
     this.wasOpen = open;
-    if (prime || !open) return null;
+    if (prime || !open || this.virtual) return null;
     const firstPad = gamepads.find((gamepad) => gamepad && gamepad.index !== this.seatTwoPad) ?? null;
     for (const gamepad of gamepads) {
       if (!gamepad) continue;
@@ -56,6 +67,7 @@ export class SeatJoin {
   }
 
   seatTwoConnected(gamepads) {
+    if (this.virtual) return true;
     return this.joined && gamepads.some((gamepad) => gamepad && gamepad.index === this.seatTwoPad);
   }
 
@@ -67,7 +79,7 @@ export class SeatJoin {
   }
 
   reset() {
-    this.seatTwoPad = null;
+    this.seatTwoPad = this.virtual ? VIRTUAL_PAD_INDEX : null;
     this.primed = false;
     this.previousHeld = new Map();
     this.wasOpen = false;

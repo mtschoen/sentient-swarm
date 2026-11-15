@@ -51,8 +51,8 @@ export function createFakeSimulation() {
     clearSwarmShips(seat) { this.clearSwarmShipsCalls.push(seat); },
     // Every upload also records its seat, invulnerable flag and the number of arguments it was called with.
     setSwarmShips(ships, radius, options) {
-      const { seat = 0, invulnerable = false } = options ?? {};
-      this.swarmUploads.push({ ships: ships.map((ship) => ({ ...ship })), radius, sequence: this.frameSequence + 1, seat, invulnerable, argumentCount: options === undefined ? 2 : 3 });
+      const { seat = 0, invulnerable = false, neutralImmune = false } = options ?? {};
+      this.swarmUploads.push({ ships: ships.map((ship) => ({ ...ship })), radius, sequence: this.frameSequence + 1, seat, invulnerable, neutralImmune, argumentCount: options === undefined ? 2 : 3 });
     },
     setSeekScale(scale) { this.seekScales.push(scale); },
     setSpawnDistanceFraction(fraction) { this.spawnDistanceFractions.push(fraction); },

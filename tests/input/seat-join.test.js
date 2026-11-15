@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { SeatJoin, JOIN_BUTTON_INDICES, SECOND_PAD_JOIN_BUTTON_INDICES } from '../../src/input/seat-join.js';
+import { SeatJoin, VIRTUAL_PAD_INDEX, JOIN_BUTTON_INDICES, SECOND_PAD_JOIN_BUTTON_INDICES } from '../../src/input/seat-join.js';
 
 function pad(index, pressedButtons = []) {
   const buttons = Array.from({ length: 17 }, (unused, button) => ({ pressed: pressedButtons.includes(button) }));
@@ -141,4 +141,19 @@ test('a pad that appears while the title is closed is primed when it reopens', (
   assert.equal(join.poll([pad(0), pad(1, [5])], { open: false }), null);
   assert.equal(join.poll([pad(0), pad(1, [5])], { open: true }), null);
   assert.equal(join.joined, false);
+});
+
+test('a virtual seat is joined at once, survives reset, never leaves and ignores presses and pads', () => {
+  const join = new SeatJoin();
+  join.seatVirtual();
+  assert.equal(join.joined, true);
+  assert.equal(join.seatTwoPad, VIRTUAL_PAD_INDEX);
+  assert.equal(join.poll([pad(0)], { open: true }), null);
+  assert.equal(join.poll([pad(0, [5])], { open: true }), null);
+  assert.equal(join.poll([pad(0, [5, 6])], { open: false }), null);
+  assert.equal(join.seatTwoConnected([]), true);
+  assert.equal(join.reconnect(3, []), false);
+  join.reset();
+  assert.equal(join.joined, true);
+  assert.equal(join.seatTwoPad, VIRTUAL_PAD_INDEX);
 });

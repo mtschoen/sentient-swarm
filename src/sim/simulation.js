@@ -230,9 +230,10 @@ export class Simulation {
   // invulnerable flag disarms every slot.
   // seat 1 (the second seat) is dispatched from its first call until clearSwarmShips(1); its
   // invulnerable flag disarms that seat alone. The contact radius packed is seat 0's.
-  setSwarmShips(ships, radius, { seat = 0, invulnerable = false } = {}) {
+  // neutralImmune keeps neutral agents from hitting the seat while opposing projectiles still do.
+  setSwarmShips(ships, radius, { seat = 0, invulnerable = false, neutralImmune = false } = {}) {
     if (seat !== 0 && seat !== 1) throw new RangeError('seat must be 0 or 1, got ' + seat);
-    this.swarmSeats[seat] = { ships, radius, invulnerable: Boolean(invulnerable) };
+    this.swarmSeats[seat] = { ships, radius, invulnerable: Boolean(invulnerable), neutralImmune: Boolean(neutralImmune) };
   }
 
   // Drops seat 1 so the contact pass returns to one seat; seat 0 is always present.
@@ -246,10 +247,13 @@ export class Simulation {
   contactUpload() {
     const allInvulnerable = this.playerContact?.invulnerable ?? false;
     let armedSeats = 0;
+    let projectileArmedSeats = 0;
     this.swarmSeats.forEach((seat, index) => {
-      if (!allInvulnerable && !seat.invulnerable) armedSeats |= 1 << index;
+      if (allInvulnerable || seat.invulnerable) return;
+      projectileArmedSeats |= 1 << index;
+      if (!seat.neutralImmune) armedSeats |= 1 << index;
     });
-    const bytes = packSwarmShips(this.swarmSeats.map((seat) => seat.ships), { radius: this.swarmSeats[0].radius, armedSeats }, this.swarmBytes);
+    const bytes = packSwarmShips(this.swarmSeats.map((seat) => seat.ships), { radius: this.swarmSeats[0].radius, armedSeats, projectileArmedSeats }, this.swarmBytes);
     return { bytes, seatCount: this.swarmSeats.length };
   }
 

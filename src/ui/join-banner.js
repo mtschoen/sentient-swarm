@@ -4,7 +4,10 @@ import { SEAT_COLORS } from '../game/seat-colors.js';
 const INVITE_TEXT = 'PLAYER 2: PRESS A BUTTON ON A SECOND CONTROLLER TO JOIN (WITH ONE CONTROLLER AND THE KEYBOARD: A SHOULDER BUTTON)';
 const JOINED_TEXT = 'PLAYER 2 JOINED. PRESS A SHOULDER BUTTON TO LEAVE';
 
-export function joinBannerText({ joined }) {
+const SPARRING_TEXT = 'DEBUG SPARRING: PLAYER 2 IS A DUMMY THAT SITS STILL, NEVER FIRES AND IGNORES THE NEUTRAL SWARM';
+
+export function joinBannerText({ joined, sparring = false }) {
+  if (sparring) return SPARRING_TEXT;
   return joined ? JOINED_TEXT : INVITE_TEXT;
 }
 
@@ -18,8 +21,8 @@ export function createJoinBanner(parent, { documentObject = document } = {}) {
   let lastVisible = false;
   return {
     element,
-    update({ joined, visible }) {
-      const text = joinBannerText({ joined });
+    update({ joined, visible, sparring = false }) {
+      const text = joinBannerText({ joined, sparring });
       if (text !== lastText) {
         element.textContent = text;
         lastText = text;

@@ -534,3 +534,15 @@ test('a stats frame issued before a co-op restart kills none of the fresh ships'
   assert.deepEqual(game.seats.map((seat) => seat.aliveCount), [12, 12]);
   assert.deepEqual(game.seats.map((seat) => seat.down), [false, false]);
 });
+
+test('setNeutralImmuneSeats marks only the named seat neutral-immune in its upload and defaults to none', async () => {
+  const { game, simulation } = await startTwoSeats();
+  game.update(STEP);
+  assert.ok(simulation.swarmUploads.slice(-2).every((upload) => upload.neutralImmune === false));
+  game.setNeutralImmuneSeats([1]);
+  game.update(STEP);
+  const [first, second] = simulation.swarmUploads.slice(-2);
+  assert.equal(first.neutralImmune, false);
+  assert.equal(second.neutralImmune, true);
+  assert.equal(second.invulnerable, false);
+});

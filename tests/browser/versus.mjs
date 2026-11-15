@@ -11,6 +11,11 @@
 //   B. the title at 844 by 390 and at 1280 by 720 with pad 1 joined: the mode item lies inside the
 //      window and overlaps no other button, the title, the link, the join banner or a pad status row
 //      (artifacts/versus-title-844x390.png and versus-title-1280x720.png).
+//   C. ?debug=sparring with one synthetic pad and NO second pad (the one-person test setup): the title
+//      already counts two players and offers the mode button, with the dummy banner and P2 row; versus
+//      starts with seat 1 invulnerable, the neutral swarm is left alone and chases the dummy for ten
+//      simulated seconds while seat 2 keeps every ship; then seat 1 fires at it and seat 2 is wiped
+//      by seat 1's shots (PLAYER 1 WINS).
 // The pages get no user gesture the audio could unlock on, and the browser is launched muted.
 // Usage: SMOKE_PORT=5193 node tests/browser/versus.mjs
 // Exit codes: 0 ok, 1 failure.
@@ -213,6 +218,53 @@ async function runA(browser, server) {
   await finish('A', page, context);
 }
 
+async function runC(browser, server) {
+  const { context, page } = await openPage(browser, server, { search: { swarm: '4', debug: 'sparring' } });
+  await addPad(page, 0);
+  await waitFrames(page, SEARCH_FRAMES);
+  const title = await page.evaluate(() => ({
+    players: window.__murmuration.coop.playerCount,
+    banner: document.querySelector('.join-banner').textContent,
+    rows: [...document.querySelectorAll('.pad-status')].map((element) => element.textContent),
+    immune: window.__murmuration.game.neutralImmuneSeats.has(1),
+  }));
+  expect(title.players === 2 && title.immune, `C: the title shows ${title.players} players, seat 2 neutral-immune ${title.immune}`);
+  expect(title.banner.startsWith('DEBUG SPARRING') && title.rows.includes('P2: SPARRING DUMMY (DEBUG)'), `C: banner "${title.banner}", rows ${JSON.stringify(title.rows)}`);
+  let item = await modeItem(page);
+  expect(item.text === 'MODE: CO-OP' && !item.disabled, `C: the mode item reads "${item.text}", disabled ${item.disabled}`);
+  await tap(page, 0, DPAD_DOWN);
+  await tap(page, 0, 0);
+  item = await modeItem(page);
+  expect(item.chosen === 'versus', `C: the pad did not pick versus ("${item.text}")`);
+  await press(page, 'ArrowUp');
+  await press(page, 'Enter');
+  const started = await page.evaluate(() => ({ phase: window.__murmuration.game.state.phase, mode: window.__murmuration.game.mode, seats: window.__murmuration.game.seats.length }));
+  expect(started.phase === 'playing' && started.mode === 'versus' && started.seats === 2, `C: started ${JSON.stringify(started)}`);
+  await page.evaluate(() => window.__murmuration.game.debugInvulnerable(true, 0));
+  // Ten simulated seconds with the neutral swarm alive: seat 2 sits still and keeps every ship.
+  await waitFrames(page, 600);
+  const held = await page.evaluate(() => {
+    const { game } = window.__murmuration;
+    return { phase: game.state.phase, ships: game.seats.map((seat) => seat.aliveCount), alive: game.latestStats?.aliveTotal ?? 0 };
+  });
+  expect(held.phase === 'playing' && held.ships.join(',') === '4,4' && held.alive > 100, `C: after the hold ${JSON.stringify(held)} (need playing, 4,4 and neutral agents present)`);
+  console.log(`versus C: dummy kept ${held.ships[1]} ships for 600 frames among ${held.alive} neutral agents`);
+  await setAxes(page, 0, [0, 0, 1, 0]);
+  const waited = await waitFor(page, async () => (await page.evaluate(() => window.__murmuration.game.seats[1].aliveCount)) === 0, WIPE_FRAMES);
+  expect(await page.evaluate(() => window.__murmuration.game.seats[1].aliveCount) === 0, `C: seat 1's shots did not wipe the dummy within ${WIPE_FRAMES} frames`);
+  await setAxes(page, 0, [0, 0, 0, 0]);
+  await waitFor(page, async () => (await phaseOf(page)) === 'gameOver', GAME_OVER_FRAMES, 10);
+  const banner = await page.evaluate(() => document.querySelector('.hud-gameover-title').textContent);
+  expect(banner === 'PLAYER 1 WINS', `C: the game over reads "${banner}"`);
+  // Quit to title: the dummy is still seated.
+  await waitFrames(page, RESTART_GUARD_FRAMES);
+  await page.evaluate(() => window.__murmuration.game.quitToTitle());
+  await page.evaluate(() => window.__murmuration.coop.reset());
+  expect(await page.evaluate(() => window.__murmuration.coop.playerCount) === 2, 'C: the dummy left the seat on reset');
+  console.log(`versus C: dummy wiped after ${waited} frames, game over "${banner}"`);
+  await finish('C', page, context);
+}
+
 async function checkTitleLayout(browser, server, viewport) {
   const { context, page } = await openPage(browser, server, { viewport });
   await joinSeatTwo(page);
@@ -241,6 +293,7 @@ async function run() {
   try {
     browser = (await launchWebGpuBrowser()).browser;
     await runA(browser, server);
+    await runC(browser, server);
     await checkTitleLayout(browser, server, PHONE_VIEWPORT);
     await checkTitleLayout(browser, server, DESKTOP_VIEWPORT);
   } catch (error) {

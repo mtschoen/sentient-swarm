@@ -348,7 +348,13 @@ async function boot() {
   const rotateOverlay = createRotateOverlay({ isMobile: detectMobile() });
   document.getElementById('rotate-overlay').append(rotateOverlay.element);
   const menuInput = createMenuInput();
-  coopJoin = createCoopJoin({ input, menuInput, hud, menuElement: menu.element });
+  // ?debug=sparring: seat 2 is a dummy with no pad, immune to the neutral swarm only (versus and hives alone).
+  const sparring = new URLSearchParams(location.search).get('debug') === 'sparring';
+  coopJoin = createCoopJoin({ input, menuInput, hud, menuElement: menu.element, sparring });
+  if (sparring) {
+    game.setNeutralImmuneSeats([1]);
+    hud.showToast('DEBUG SPARRING: player 2 is a dummy');
+  }
   window.__murmuration.coop = coopJoin;
   let pausedByRotate = false;
   let rotateShowing = false;

@@ -199,6 +199,7 @@ export class Game {
     // The seat whose swarm was wiped last (where the death flood appears), and seats a debug hook made invulnerable.
     this.lastWipedSeat = null;
     this.debugInvulnerableSeats = new Set();
+    this.neutralImmuneSeats = new Set();
     // The revive counts of a down seat; seat.down mirrors it (set together in seats.js).
     this.revival = new SeatRevival({ seatCount: MAXIMUM_PLAYER_SEATS });
     // The versus match (VersusMatch, with its Hives in hives mode) while versus or hives, else null.
@@ -801,6 +802,12 @@ export class Game {
       if (!enabled) this.debugInvulnerableSeats.clear();
     } else if (enabled) this.debugInvulnerableSeats.add(seat);
     else this.debugInvulnerableSeats.delete(seat);
+  }
+
+  // Debug (?debug=sparring): the listed seats are immune to the neutral swarm alone; opposing projectiles
+  // and ship contact still kill them. Revive immunity and debugInvulnerable stay immune to everything.
+  setNeutralImmuneSeats(seatIndices) {
+    this.neutralImmuneSeats = new Set(seatIndices);
   }
 
   // alpha is FrameLoop's fraction of an update; it becomes the fraction of the current simulation

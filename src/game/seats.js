@@ -90,7 +90,7 @@ export function uploadSwarms(game) {
     return;
   }
   for (const seat of game.seats) {
-    game.simulation.setSwarmShips(seat.swarm.contactShips(sequence), SWARM_SHIP_RADIUS, { seat: seat.index, invulnerable: game.debugInvulnerableSeats.has(seat.index) || seat.invulnerableSeconds > 0 });
+    game.simulation.setSwarmShips(seat.swarm.contactShips(sequence), SWARM_SHIP_RADIUS, { seat: seat.index, invulnerable: game.debugInvulnerableSeats.has(seat.index) || seat.invulnerableSeconds > 0, neutralImmune: game.neutralImmuneSeats.has(seat.index) });
   }
 }
 

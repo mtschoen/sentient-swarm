@@ -2,11 +2,12 @@
 // thread per projectile slot, run after player_collide.wgsl in a step whose simulation has versus
 // projectiles set (Simulation.setVersusProjectiles; never in solo or co-op). The ships are the
 // contact pass's own uniform (the same buffer, written for this step), so a slot's alive state, its
-// seat's armed bit and its hit bit mean what they mean there: the contact pass has already cleared
+// seat's alive state and its hit bit mean what they mean there (the armed bit it reads is
+// projectileArmedSeats, which equals armedSeats except for a neutral-immune seat): the contact pass has already cleared
 // the bits of dead and fresh slots this step.
 //
 // A projectile with an owner (flag bits 2 and 3, projectileOwner) tests the opposing seat's alive
-// ships whose hit bit is clear, when that seat is armed. A ship is claimed by setting its hit bit
+// ships whose hit bit is clear, when that seat is projectile-armed. A ship is claimed by setting its hit bit
 // with atomicOr on the persistent swarm hit mask: only the claim that saw the bit clear kills it,
 // so two projectiles never kill one ship and a ship already hit (by an agent or a projectile, still
 // waiting for the CPU to read it back) never absorbs a shot; a lost claim goes on to the next ship.
@@ -36,7 +37,7 @@ struct SwarmShip {
 struct Swarm {
   radius: f32,
   armedSeats: u32,
-  paddingOne: u32,
+  projectileArmedSeats: u32,
   paddingTwo: u32,
   ships: array<SwarmShip, MAXIMUM_CONTACT_SLOTS>,
 }
@@ -140,7 +141,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   }
   // Owner 1 is seat 0, whose shots hit seat 1, and the other way round.
   let targetSeat = 2u - owner;
-  if (((swarm.armedSeats >> targetSeat) & 1u) == 0u) {
+  if (((swarm.projectileArmedSeats >> targetSeat) & 1u) == 0u) {
     return;
   }
   let first = targetSeat * MAXIMUM_SWARM_SHIPS;

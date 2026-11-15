@@ -4,7 +4,8 @@ import { SeatJoin } from '../input/seat-join.js';
 import { createJoinBanner } from './join-banner.js';
 import { createPadStatus } from './pad-status.js';
 
-export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorObject = navigator, documentObject = document }) {
+// sparring (?debug=sparring): seat 2 is a virtual seat, joined from the start and driven by no device.
+export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorObject = navigator, documentObject = document, sparring = false }) {
   const seatJoin = new SeatJoin();
   const banner = createJoinBanner(menuElement, { documentObject });
   const padStatus = createPadStatus(menuElement, { documentObject });
@@ -14,6 +15,11 @@ export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorOb
   function seatPad(padIndex) {
     input.setSeatTwoPad(padIndex);
     menuInput.setExtraPad(padIndex);
+  }
+
+  if (sparring) {
+    seatJoin.seatVirtual();
+    seatPad(seatJoin.seatTwoPad);
   }
 
   return {
@@ -27,24 +33,24 @@ export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorOb
         seatPad(null);
         hud.showToast('Player 2 left');
       }
-      banner.update({ joined: seatJoin.joined, visible: titleOpen });
-      padStatus.update({ pads: gamepads(), seatTwoPad: seatJoin.joined ? seatJoin.seatTwoPad : null, visible: titleOpen });
+      banner.update({ joined: seatJoin.joined, visible: titleOpen, sparring });
+      padStatus.update({ pads: gamepads(), seatTwoPad: seatJoin.joined ? seatJoin.seatTwoPad : null, visible: titleOpen, sparring });
     },
     get playerCount() {
       return seatJoin.joined ? 2 : 1;
     },
     reset() {
       seatJoin.reset();
-      seatPad(null);
-      banner.update({ joined: false, visible: false });
+      seatPad(seatJoin.seatTwoPad);
+      banner.update({ joined: seatJoin.joined, visible: false, sparring });
     },
     padForSeat(seat) {
-      if (seat === 1) return seatJoin.seatTwoPad ?? undefined;
+      if (seat === 1) return seatJoin.virtual ? null : seatJoin.seatTwoPad ?? undefined;
       return seatJoin.joined ? input.seatOnePadIndex() : undefined;
     },
     // True when seat 2's pad left mid-run (the page pauses and toasts). At the title it unseats seat 2 instead.
     handleDisconnect(padIndex) {
-      if (!(seatJoin.joined && padIndex === seatJoin.seatTwoPad)) return false;
+      if (seatJoin.virtual || !(seatJoin.joined && padIndex === seatJoin.seatTwoPad)) return false;
       if (!titleWasOpen) return true;
       seatJoin.reset();
       seatPad(null);

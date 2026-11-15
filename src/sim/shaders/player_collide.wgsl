@@ -27,7 +27,7 @@ struct SwarmShip {
 struct Swarm {
   radius: f32,
   armedSeats: u32,
-  paddingOne: u32,
+  projectileArmedSeats: u32,
   paddingTwo: u32,
   ships: array<SwarmShip, MAXIMUM_CONTACT_SLOTS>,
 }
