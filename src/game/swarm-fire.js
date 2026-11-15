@@ -18,8 +18,9 @@
 //   the trigger goes down is phased by slotHash over its interval, so shots are a continuous
 //   drizzle. Ready ships are served in rotation so no slot starves.
 //   MAXIMUM_SWARM_SPAWNS_PER_UPDATE is a backstop for a huge delta.
-// - Rail turrets: each turret volley fires once from one ship in rotation, at full size, in the
-//   turrets' own directions around the aim (the turrets belong to the swarm as a whole).
+// - Rail turrets are gunner ships (gunnerIndex >= 0, marked by PlayerSwarm): GunnerFire
+//   (src/game/gunner-fire.js) fires their needles from their own positions along their own
+//   headings, whatever else is armed, including the beam.
 // - Beam: one beam from the swarm centroid along the aim (the projectile system has one beam slot).
 // - report describes the newest distribute for the fire log (src/game/fire-log.js): the ships, how
 //   many point inside the cone, how many are off cooldown, the ship shots fired and the aggregate
@@ -28,6 +29,7 @@ import { MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { perShipInterval } from './swarm-fire-rate.js';
 import { swarmShotRecipe } from './swarm-shots.js';
 import { slotHash } from './swarm-flocking.js';
+import { GunnerFire } from './gunner-fire.js';
 
 export const SWARM_FIRE_CONE_RADIANS = (35 * Math.PI) / 180;
 export const MAXIMUM_SWARM_SPAWNS_PER_UPDATE = 512;
@@ -39,6 +41,7 @@ const COOLDOWN_FACTORS = Float64Array.from({ length: MAXIMUM_SWARM_SHIPS }, (_, 
 export class SwarmFire {
   constructor({ random = Math.random } = {}) {
     this.random = random;
+    this.gunnerFire = new GunnerFire({ random });
     this.cooldowns = new Float64Array(MAXIMUM_SWARM_SHIPS);
     this.scheduled = new Uint8Array(MAXIMUM_SWARM_SHIPS);
     this.report = { ships: 0, inCone: 0, ready: 0, fired: 0, shotsPerSecond: 0 };
@@ -47,15 +50,18 @@ export class SwarmFire {
 
   reset() {
     this.rotation = 0;
+    this.gunnerFire.reset();
     this.cooldowns.fill(0);
     this.scheduled.fill(0);
   }
 
-  // fire: WeaponState.update's result for origin (its turret spawns and beam pass through);
+  // fire: WeaponState.update's result for origin (its beam passes through; its turret spawns are
+  // not read, the gunner ships fire them);
   // ships: PlayerSwarm.ships; centroid: its centroid.
-  // control: { firing, aimX, aimY, deltaSeconds, kind, tier } (kind and tier are the weapon fired).
+  // control: { firing, aimX, aimY, deltaSeconds, kind, tier, railTier } (kind and tier are the weapon
+  // fired, railTier the gunners' needle tier).
   // Returns { spawns, turretSpawns, beam }. No ships: nothing fires.
-  distribute(fire, ships, origin, centroid, { firing, aimX, aimY, deltaSeconds, kind, tier }) {
+  distribute(fire, ships, origin, centroid, { firing, aimX, aimY, deltaSeconds, kind, tier, railTier = 1 }) {
     const result = { spawns: [], turretSpawns: [], beam: null };
     const count = ships.length;
     const report = this.report;
@@ -68,13 +74,7 @@ export class SwarmFire {
     if (!firing) this.scheduled.fill(0);
     const recipe = firing ? swarmShotRecipe(kind, tier) : null;
     if (recipe !== null) this.fireShips(result.spawns, ships, Math.atan2(aimY, aimX), recipe, deltaSeconds);
-    if (fire.turretSpawns.length > 0) {
-      const ship = ships[this.rotation % count];
-      this.rotation = (this.rotation + 1) % count;
-      for (const spawn of fire.turretSpawns) {
-        result.turretSpawns.push({ ...spawn, x: spawn.x - origin.x + ship.x, y: spawn.y - origin.y + ship.y });
-      }
-    }
+    result.turretSpawns = this.gunnerFire.fire(ships, { firing, aimX, aimY, deltaSeconds, railTier });
     if (fire.beam !== null) result.beam = { ...fire.beam, x: centroid.x, y: centroid.y };
     return result;
   }

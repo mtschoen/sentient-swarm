@@ -19,7 +19,7 @@ function seededRandom(seed = 12345) {
 
 // count ships on a row, each pointing at the given heading (radians).
 function shipsHeading(count, headingFor = () => 0) {
-  return Array.from({ length: count }, (_, index) => ({ slot: index, x: 8 + index * 0.01, y: 4.5 - index * 0.01, heading: headingFor(index) }));
+  return Array.from({ length: count }, (_, index) => ({ slot: index, x: 8 + index * 0.01, y: 4.5 - index * 0.01, heading: headingFor(index), gunnerIndex: -1 }));
 }
 
 const NO_FIRE = { spawns: [], turretSpawns: [], beam: null, expired: false };
@@ -157,19 +157,42 @@ test('a ship that turns into the cone fires at once, and the first shots are pha
   assert.ok(firingFrames >= 4, `${firingFrames} frames with shots in the first interval`);
 });
 
-test('turret volleys fire once from one rotating ship, at full size; the beam leaves the centroid', () => {
+test('gunners fire the turret needles from their own positions; the beam still leaves the centroid', () => {
   const fire = new SwarmFire({ random: seededRandom() });
-  const ships = shipsHeading(4);
+  const ships = shipsHeading(3);
+  ships[0] = { ...ships[0], gunnerIndex: 0, heading: 0 };
+  ships[1] = { ...ships[1], gunnerIndex: 1, heading: Math.PI };
   const turret = { x: 8, y: 4.5, velocityX: -40, velocityY: 0, radius: 0.05, lifetime: 0.6, kind: 2, seed: 0.5, extra: 0 };
   const beam = { x: 8, y: 4.5, directionX: 1, directionY: 0, halfWidth: 0.12 };
-  const control = { ...AIM_RIGHT, firing: false };
-  const volley = { spawns: [], turretSpawns: [turret, turret], beam, expired: false };
-  const result = fire.distribute(volley, ships, ORIGIN, { x: 9, y: 5 }, control);
-  assert.equal(result.spawns.length, 0);
-  assert.deepEqual(result.turretSpawns.map((spawn) => [spawn.x, spawn.radius, spawn.velocityX]), [[8, 0.05, -40], [8, 0.05, -40]]);
-  assert.deepEqual([result.beam.x, result.beam.y, result.beam.halfWidth], [9, 5, 0.12]);
-  const next = fire.distribute({ ...NO_FIRE, turretSpawns: [turret] }, ships, ORIGIN, ORIGIN, control);
-  assert.equal(next.turretSpawns[0].x, 8.01);
+  const control = { ...AIM_RIGHT, railTier: 2, kind: 'base' };
+  const volley = { ...NO_FIRE, turretSpawns: [turret], beam };
+  const turretSpawns = [];
+  let last = null;
+  for (let step = 0; step < 36; step += 1) {
+    last = fire.distribute(volley, ships, ORIGIN, { x: 9, y: 5 }, control);
+    turretSpawns.push(...last.turretSpawns);
+  }
+  assert.ok(turretSpawns.length > 0);
+  for (const spawn of turretSpawns) {
+    const gunner = ships.slice(0, 2).find((ship) => Math.abs(spawn.x - ship.x) < 1e-9 && Math.abs(spawn.y - ship.y) < 0.2);
+    assert.ok(gunner, `needle at ${spawn.x}, ${spawn.y} is not from a gunner`);
+    assert.ok(Math.abs(spawn.velocityX - Math.cos(gunner.heading) * 40) < 1e-9);
+    assert.ok(Math.abs(spawn.velocityY - Math.sin(gunner.heading) * 40) < 1e-9);
+  }
+  assert.deepEqual([last.beam.x, last.beam.y, last.beam.halfWidth], [9, 5, 0.12]);
+});
+
+test('a gunner fires under a pooled beam and a pulse', () => {
+  for (const kind of ['beam', 'pulse']) {
+    const fire = new SwarmFire({ random: seededRandom() });
+    const ships = shipsHeading(2);
+    ships[0] = { ...ships[0], gunnerIndex: 0 };
+    let needles = 0;
+    for (let step = 0; step < 36; step += 1) {
+      needles += fire.distribute(NO_FIRE, ships, ORIGIN, ORIGIN, { ...AIM_RIGHT, kind, tier: 1 }).turretSpawns.length;
+    }
+    assert.ok(needles > 0, `${kind}: no turret needles`);
+  }
 });
 
 test('no ships fire nothing, and reset restarts the rotation and the cooldowns', () => {
@@ -177,9 +200,12 @@ test('no ships fire nothing, and reset restarts the rotation and the cooldowns',
   const beam = { x: 0, y: 0, directionX: 1, directionY: 0, halfWidth: 0.1 };
   const empty = fire.distribute({ ...NO_FIRE, beam }, [], ORIGIN, ORIGIN, AIM_RIGHT);
   assert.deepEqual(empty, { spawns: [], turretSpawns: [], beam: null });
-  fireFor(fire, shipsHeading(12), 1);
+  fireFor(fire, shipsHeading(12).map((ship) => ({ ...ship, gunnerIndex: ship.slot })), 1);
+  assert.ok(fire.gunnerFire.scheduled.some((flag) => flag === 1));
   fire.reset();
   assert.equal(fire.rotation, 0);
+  assert.ok(fire.gunnerFire.cooldowns.every((cooldown) => cooldown === 0));
+  assert.ok(fire.gunnerFire.scheduled.every((flag) => flag === 0));
   assert.ok(fire.cooldowns.every((cooldown) => cooldown === 0));
   assert.ok(fire.scheduled.every((flag) => flag === 0));
 });
