@@ -95,6 +95,39 @@ test('mutating the sent array afterwards does not change the delivered bytes', (
   assert.deepEqual(received, [1]);
 });
 
+test('a handler that disconnects mid-delivery stops the delivery and loses no other message', () => {
+  const pair = createMemoryTransportPair({ delaySeconds: 0.1 });
+  const received = [];
+  pair.guest.onMessage((channel, bytes) => {
+    received.push(bytes[0]);
+    if (bytes[0] === 1) pair.disconnect();
+  });
+  pair.host.send('events', Uint8Array.of(1));
+  pair.host.send('state', Uint8Array.of(2));
+  pair.host.send('events', Uint8Array.of(3));
+  pair.advance(0.05);
+  pair.host.send('events', Uint8Array.of(4));
+  pair.advance(0.06);
+  assert.deepEqual(received, [1], 'nothing is delivered after the disconnect');
+  pair.reconnect();
+  pair.advance(0.1);
+  assert.deepEqual(received, [1, 3, 4], 'the held events survive and the state message was dropped');
+});
+
+test('a handler that closes mid-delivery stops the delivery', () => {
+  const pair = createMemoryTransportPair();
+  const received = [];
+  pair.guest.onMessage((channel, bytes) => {
+    received.push(bytes[0]);
+    pair.close();
+  });
+  pair.host.send('events', Uint8Array.of(1));
+  pair.host.send('events', Uint8Array.of(2));
+  pair.host.send('state', Uint8Array.of(3));
+  pair.advance(0);
+  assert.deepEqual(received, [1]);
+});
+
 test('an unknown channel is rejected', () => {
   assert.equal(validateChannel('state'), 'state');
   assert.equal(validateChannel('events'), 'events');

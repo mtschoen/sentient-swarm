@@ -10,9 +10,12 @@ import { cameraFocus as focusOf } from './camera.js';
 import { SEAT_COLORS } from './seat-colors.js';
 import { REVIVE_INVULNERABLE_SECONDS } from './seat-revival.js';
 import { WORLD_BOUNDS } from '../sim/layout.js';
+import { InputState } from '../input/input.js';
 
 // A swarm ship collects pickups this close (the point collects within the director's own reach).
 export const SWARM_PICKUP_RADIUS = 0.2;
+// What a remote seat reads (online, src/net/online-game.js): no movement, aim, fire or bomb.
+export const NEUTRAL_INPUT = Object.freeze(Object.assign(new InputState(), { move: Object.freeze({ x: 0, y: 0 }), aim: Object.freeze({ x: 0, y: 0 }) }));
 const TIME_EPSILON = 1e-9;
 const NO_AIM = Object.freeze({ x: 0, y: 0 });
 const NO_SWARM_HITS = Object.freeze([]);

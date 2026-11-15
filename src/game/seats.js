@@ -82,7 +82,8 @@ export function gameSeekTargets(game) {
   return targets;
 }
 
-// Each seat's ships for the next step's contact pass. One seat calls exactly the solo upload.
+// Each seat's ships for the next step's contact pass. One seat calls exactly the solo upload. A
+// remote seat (online) is uploaded invulnerable: its hits are judged on its own machine.
 export function uploadSwarms(game) {
   const sequence = game.simulation.frameSequence + 1;
   if (game.seats.length === 1) {
@@ -90,18 +91,19 @@ export function uploadSwarms(game) {
     return;
   }
   for (const seat of game.seats) {
-    game.simulation.setSwarmShips(seat.swarm.contactShips(sequence), SWARM_SHIP_RADIUS, { seat: seat.index, invulnerable: game.debugInvulnerableSeats.has(seat.index) || seat.invulnerableSeconds > 0, neutralImmune: game.neutralImmuneSeats.has(seat.index) });
+    game.simulation.setSwarmShips(seat.swarm.contactShips(sequence), SWARM_SHIP_RADIUS, { seat: seat.index, invulnerable: game.debugInvulnerableSeats.has(seat.index) || seat.invulnerableSeconds > 0 || seat.remote, neutralImmune: game.neutralImmuneSeats.has(seat.index) });
   }
 }
 
 // Every seat that is not down fires: its shots and gunner needles are queued, its beam set in its
 // own slot (a two-seat game only), and at most one weaponFire cue plays per update, seat 1 first.
 // In versus every projectile and beam carries its seat as owner (it can hit the other swarm).
+// A remote seat (online) fires on its own machine, so it is skipped here.
 export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
   const { projectiles, effects } = game;
   let cued = false;
   game.seats.forEach((seat, index) => {
-    if (seat.down) return;
+    if (seat.down || seat.remote) return;
     // The kind and tier this frame fires at; the update itself drops to base on expiry.
     const { fire, shots, kind, tier, railTier } = seat.fire(deltaSeconds, { playing, firing: controls[index].firing });
     // The fire log (?debug=fire, main.js): why the local seat's swarm is silent while fire is held.
@@ -116,6 +118,7 @@ export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
     shots.spawns.forEach((spawn) => projectiles.queueSpawn(spawn, ...ownerArguments));
     shots.turretSpawns.forEach((spawn) => projectiles.queueSpawn(spawn, ...ownerArguments));
     const beam = fire.expired ? null : shots.beam;
+    if (index === game.localSeatIndex) game.online?.recordBeam(beam);
     if (game.seats.length > 1) projectiles.setBeam(beam, seat.index, ...ownerArguments);
     else projectiles.setBeam(beam);
     // With every ship a gunner the armed weapon is silent, so its volley cue does not sound either.

@@ -78,13 +78,14 @@
 // their seat and hit the other swarm, touching ships both die, kills grow only their seat, and a seat
 // at 0 ships (in hives also a hold of every hive) ends the match: the run's one death, then game over
 // (state.matchResult). One seat, quit, the lab and watch mode return to co-op.
+// Online (game.online, src/net/online-game.js): the remote seat reads no input and is mirrored from snapshots.
 // Watch mode (the lab, task C6b): setWatch(fraction) puts the run in Ready and keeps it there (no
 // gesture starts it, so weapons and contact stay off); the player point follows the pointer (or
 // the move stick without one) so the swarm chases it, and a watch SpawnPressure with full seek
 // holds the alive target at fraction of capacity in place of the play ramp. setWatch(null) leaves
 // it; start() (the lab's Play) leaves it too.
 import { Projectiles } from './projectiles.js';
-import { PlayerSeat, SWARM_PICKUP_RADIUS } from './player-seat.js';
+import { NEUTRAL_INPUT, PlayerSeat, SWARM_PICKUP_RADIUS } from './player-seat.js';
 import { BEAM_SHARD_TYPE, DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND } from './weaponTypes.js';
 import { PickupDirector } from './pickups.js';
 import { BeamTime } from './beam-time.js';
@@ -205,6 +206,7 @@ export class Game {
     this.revival = new SeatRevival({ seatCount: MAXIMUM_PLAYER_SEATS });
     // The versus match (VersusMatch, with its Hives in hives mode) while versus or hives, else null.
     this.versusMatch = null;
+    this.online = null;
     this.pickups = new PickupDirector({ random, bounds: this.worldBounds });
     this.score = new ScoreKeeper({ capacity });
     this.awards = new Awards();
@@ -296,9 +298,7 @@ export class Game {
 
   // Resets every module and clears the arena (one kill-all). Sequence guards stay monotonic: the
   // respawn sequence moves to the next step, so a hit latched in the previous run takes no life.
-  restart() {
-    this.beginRun();
-  }
+  restart() { this.beginRun(); }
 
   beginRun() {
     this.watchPressure = null;
@@ -523,11 +523,12 @@ export class Game {
     const playing = this.run.phase === RunPhase.Playing;
     const controls = seats.map((seat, index) => seat.controlsFrom(inputs[index]));
     seats.forEach((seat, index) => {
-      if (seat.down) return;
+      if (seat.down || seat.remote) return;
       if (playing) seat.steer(deltaSeconds, controls[index], { beamTurnRevolutionsPerSecond: this.beamTurnRevolutionsPerSecondValue });
       else if (this.watching) moveWatchPoint(seat.player, deltaSeconds, inputs[index], controls[index]);
       seat.flock(deltaSeconds, playing && controls[index].firing);
     });
+    this.online?.applyRemoteSeats(this, deltaSeconds);
     if (this.versus) stepVersus(this, deltaSeconds);
     this.followCamera(deltaSeconds);
 
@@ -583,10 +584,12 @@ export class Game {
       this.freshStats = { ...frames[frames.length - 1], killsSinceLastRead };
     }
     this.run.update(deltaSeconds).forEach((action) => this.handleAction(action));
+    this.online?.afterUpdate(this, deltaSeconds);
   }
 
-  // The local seat reads the first input state, the other seat its own.
+  // The local seat reads the first input state, the other seat its own; a remote seat (online) reads none.
   inputFor(seat) {
+    if (seat.remote) return NEUTRAL_INPUT;
     return seat.index === this.localSeatIndex ? this.input.state : this.input.seatTwoState;
   }
 
@@ -777,9 +780,7 @@ export class Game {
     this.pickupBlastRadiusValue = radius;
   }
 
-  get pickupBlastRadius() {
-    return this.pickupBlastRadiusValue;
-  }
+  get pickupBlastRadius() { return this.pickupBlastRadiusValue; }
 
   // Beam aim turn rate in revolutions per second (the lab sets it); 0 turns the limit off.
   setBeamTurnRate(revolutionsPerSecond) {
@@ -789,9 +790,7 @@ export class Game {
     this.beamTurnRevolutionsPerSecondValue = revolutionsPerSecond;
   }
 
-  get beamTurnRevolutionsPerSecond() {
-    return this.beamTurnRevolutionsPerSecondValue;
-  }
+  get beamTurnRevolutionsPerSecond() { return this.beamTurnRevolutionsPerSecondValue; }
 
   // Debug hook (browser checks, a lab sandbox): while enabled, the GPU contact test never hits, so
   // the ship survives a measurement in a crowded arena (the C0b corridor metric).

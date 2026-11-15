@@ -52,7 +52,11 @@ export function createMemoryTransportPair({ delaySeconds = 0, lossFraction = 0, 
     const due = queue.filter((message) => message.deliverAt <= time);
     due.sort((first, second) => first.deliverAt - second.deliverAt || first.sequence - second.sequence);
     for (const message of due) {
-      queue.splice(queue.indexOf(message), 1);
+      // A handler may disconnect or close the pair (which drops queued messages): stop there.
+      if (connection !== TransportState.Open) return;
+      const index = queue.indexOf(message);
+      if (index < 0) continue;
+      queue.splice(index, 1);
       for (const handler of [...message.to.messageHandlers]) handler(message.channel, message.bytes);
     }
   }
