@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { Game } from '../../src/game/game.js';
 import { BEAM_TIME_SECONDS } from '../../src/game/beam-time.js';
 import { MAXIMUM_BEAM_TIME_SURGE, SpawnPressure } from '../../src/sim/spawner.js';
-import { startBeamTime } from '../../src/game/beam-time-seats.js';
+import { SOLO_ZOOM_RANGES } from '../../src/game/solo-zoom.js';
+import { spawnShardsForWaves, startBeamTime } from '../../src/game/beam-time-seats.js';
 import { PROJECTILE_KINDS } from '../../src/game/weaponTypes.js';
 import { RunPhase } from '../../src/game/run.js';
 import {
@@ -66,6 +67,27 @@ test('a wave places a persistent shard inside the world and off screen, and the 
   runFor(game, 30);
   assert.equal(shardsInWorld(game).length, game.beamShards.needed - game.beamShards.count);
   assert.ok(shardsInWorld(game).every((entry) => entry.fade === 1 && entry.age === 0), 'a shard does not age or fade');
+});
+
+test('a shard is placed off screen of the unzoomed view while the solo zoom has punched in', async () => {
+  const { game, simulation } = await startedGame({ interval: 60 });
+  simulation.densityFunction = () => 1;
+  game.setSoloZoomSetting('enabled', true);
+  game.setSoloZoomSetting('crowdReference', SOLO_ZOOM_RANGES.crowdReference[0]);
+  runFor(game, 10);
+  assert.ok(game.camera.zoom > 1.3, `zoom ${game.camera.zoom}`);
+  game.beamShards.onWaves = () => 1;
+  // A varying source, so placements land all over the world (the zone between the zoomed and the unzoomed view included).
+  let seed = 12345;
+  game.random = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  const { ringView } = game;
+  for (let index = 0; index < 80; index += 1) spawnShardsForWaves(game);
+  const shards = shardsInWorld(game);
+  assert.equal(shards.length, 80);
+  for (const shard of shards) {
+    const inside = Math.abs(shard.x - ringView.centerX) <= ringView.width / 2 && Math.abs(shard.y - ringView.centerY) <= ringView.height / 2;
+    assert.ok(!inside, `the shard at ${shard.x}, ${shard.y} lies inside the unzoomed view`);
+  }
 });
 
 test('a shard collected counts, plays its cue and the pickup blast, and leaves the weapons alone', async () => {

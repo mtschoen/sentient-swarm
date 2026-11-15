@@ -1,6 +1,6 @@
 // Pure pieces of the lab panel (labPanel.js): option lists, slider specs, the frames-per-second
 // accumulator and the readout formatter. No DOM, so node:test covers all of it.
-import { SOLO_ZOOM_DEFAULTS, SOLO_ZOOM_RANGES } from '../game/solo-zoom.js';
+import { SOLO_ZOOM_RANGES } from '../game/solo-zoom.js';
 import { SPECIES_NAMES } from '../sim/species.js';
 
 // The quality preset capacities (src/settings/presets.js) and the earlier panel choices, sorted.
@@ -111,14 +111,14 @@ export const LAB_KNOB_GROUPS = [
   ] },
   // The solo camera zoom (default off); ranges come from solo-zoom.js so the controller and the lab agree.
   { title: 'Camera', knobs: [
-    { key: 'soloZoomEnabled', label: 'solo zoom (0 off, 1 on)', minimum: 0, maximum: 1, step: 1, integer: true },
+    { key: 'soloZoomEnabled', label: 'solo zoom (0 off, 1 on; Play only)', minimum: 0, maximum: 1, step: 1, integer: true },
     { key: 'soloZoomMinimum', label: 'zoom minimum (phones want 0.67)', minimum: SOLO_ZOOM_RANGES.minimum[0], maximum: SOLO_ZOOM_RANGES.minimum[1], step: 0.01 },
     { key: 'soloZoomMaximum', label: 'zoom maximum', minimum: SOLO_ZOOM_RANGES.maximum[0], maximum: SOLO_ZOOM_RANGES.maximum[1], step: 0.01 },
     { key: 'soloZoomPunchIn', label: 'punch in when crowded (ln, negative pulls out)', minimum: SOLO_ZOOM_RANGES.punchIn[0], maximum: SOLO_ZOOM_RANGES.punchIn[1], step: 0.01 },
     { key: 'soloZoomPullOut', label: 'pull out when action is elsewhere (ln)', minimum: SOLO_ZOOM_RANGES.pullOut[0], maximum: SOLO_ZOOM_RANGES.pullOut[1], step: 0.01 },
     { key: 'soloZoomSmoothSeconds', label: 'zoom smoothing seconds', minimum: SOLO_ZOOM_RANGES.smoothSeconds[0], maximum: SOLO_ZOOM_RANGES.smoothSeconds[1], step: 0.05 },
     { key: 'soloZoomRateLimit', label: 'zoom rate limit (ln per second)', minimum: SOLO_ZOOM_RANGES.rateLimit[0], maximum: SOLO_ZOOM_RANGES.rateLimit[1], step: 0.05 },
-    { key: 'soloZoomCrowdReference', label: 'crowd reference (density that reads as full)', minimum: SOLO_ZOOM_RANGES.crowdReference[0], maximum: SOLO_ZOOM_RANGES.crowdReference[1], step: SOLO_ZOOM_DEFAULTS.crowdReference / 100 },
+    { key: 'soloZoomCrowdReference', label: 'crowd reference (density that reads as full)', minimum: SOLO_ZOOM_RANGES.crowdReference[0], maximum: SOLO_ZOOM_RANGES.crowdReference[1], step: 0.05 },
   ] },
 ];
 

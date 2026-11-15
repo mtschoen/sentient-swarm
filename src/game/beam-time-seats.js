@@ -21,7 +21,7 @@ export function spawnShardsForWaves(game) {
   for (let index = 0; index < requested; index += 1) {
     const { x, y } = placeShard({
       bounds: game.worldBounds,
-      view: game.view,
+      view: game.ringView,
       anchor: pickupAnchor(game.seats),
       gates: game.spawnDirector.gates,
       shards: game.pickups.pickups.filter((pickup) => pickup.type === BEAM_SHARD_TYPE),

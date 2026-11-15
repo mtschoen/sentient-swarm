@@ -28,7 +28,7 @@ export const SOLO_ZOOM_RANGES = Object.freeze({
   pullOut: [0, 1],
   smoothSeconds: [0.2, 4],
   rateLimit: [0.05, 2],
-  crowdReference: [ZOOM_DEFAULT_CROWD_REFERENCE / 100, ZOOM_DEFAULT_CROWD_REFERENCE * 100],
+  crowdReference: [0.25, 25],
 });
 
 export const ZOOM_PRESSURE_ATTACK_SECONDS = 0.4;

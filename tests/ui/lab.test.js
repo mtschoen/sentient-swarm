@@ -483,7 +483,7 @@ test('the solo zoom knobs have the specified ranges, steps and shipped defaults'
     soloZoomPullOut: [0, 1, 0.01, undefined],
     soloZoomSmoothSeconds: [0.2, 4, 0.05, undefined],
     soloZoomRateLimit: [0.05, 2, 0.05, undefined],
-    soloZoomCrowdReference: [...SOLO_ZOOM_RANGES.crowdReference, SOLO_ZOOM_DEFAULTS.crowdReference / 100, undefined],
+    soloZoomCrowdReference: [0.25, 25, 0.05, undefined],
   };
   for (const [key, [minimum, maximum, step, integer]] of Object.entries(expected)) {
     const spec = specFor(key);

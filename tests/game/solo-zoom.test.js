@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SOLO_ZOOM_DEFAULTS, SOLO_ZOOM_RANGES, SoloZoomController, ZOOM_HYSTERESIS, zoomFit } from '../../src/game/solo-zoom.js';
-import { ZOOM_DEFAULT_CROWD_REFERENCE } from '../../src/game/zoom-pressure.js';
 
 const STEP = 1 / 60;
 const VIEW = { viewWidth: 16, viewHeight: 9 };
@@ -22,7 +21,7 @@ test('defaults are off and match the spec candidates', () => {
   assert.equal(SOLO_ZOOM_DEFAULTS.minimum, 0.5);
   assert.ok(Math.abs(SOLO_ZOOM_DEFAULTS.punchIn - Math.log(1.4)) < 1e-12);
   assert.ok(Math.abs(SOLO_ZOOM_DEFAULTS.pullOut - Math.log(1 / 0.6)) < 1e-12);
-  assert.deepEqual(SOLO_ZOOM_RANGES.crowdReference, [ZOOM_DEFAULT_CROWD_REFERENCE / 100, ZOOM_DEFAULT_CROWD_REFERENCE * 100]);
+  assert.deepEqual(SOLO_ZOOM_RANGES.crowdReference, [0.25, 25]);
   assert.equal(new SoloZoomController().settings.enabled, false);
 });
 

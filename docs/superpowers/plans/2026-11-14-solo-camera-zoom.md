@@ -1,6 +1,8 @@
+Status: implemented; waiting on the owner to pick shipped defaults (enabled, minimum including the 0.67 phone floor, maximum, crowd reference)
+
 # Solo Camera Zoom (lab knobs) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Let the solo camera zoom with the crowd (punch in when crowded, pull out when the action is elsewhere) behind lab knobs, with the shipped default unchanged (solo zoom fixed at 1, off).
 
@@ -79,7 +81,7 @@ Order: run A, B and C in parallel and merge them first (C is small and D imports
 **Interfaces:**
 - Produces: `Camera.update(deltaSeconds, { ..., targetZoom = 1, zoomMinimum = MINIMUM_CAMERA_ZOOM, zoomMaximum = 1, zoomSmoothSeconds = CAMERA_ZOOM_SMOOTH_SECONDS })`; `Camera.cut(focusX, focusY, { ..., zoom = 1, zoomMinimum = MINIMUM_CAMERA_ZOOM, zoomMaximum = 1 })`. The camera remembers the last limits (`this.zoomMinimum`, `this.zoomMaximum`, initially the old constants and 1) so `sample` clamps with them.
 
-- [ ] **Step 1: Write failing tests** in `tests/game/camera.test.js`:
+- [x] **Step 1: Write failing tests** in `tests/game/camera.test.js`:
   - `defaults keep the zoom inside [MINIMUM_CAMERA_ZOOM, 1]`: update with `targetZoom: 3` for 10 s, `camera.zoom === 1` (exactly); with `targetZoom: 0.1`, `camera.zoom` converges to `MINIMUM_CAMERA_ZOOM`.
   - `zoomMaximum raises the ceiling`: update with `targetZoom: 1.6, zoomMaximum: 1.6` for 10 s, `camera.zoom` within 1e-6 of 1.6; the view extents read `viewWidth / camera.zoom`.
   - `zoomMinimum lowers the floor`: `targetZoom: 0.3, zoomMinimum: 0.3` converges to 0.3.
@@ -87,11 +89,11 @@ Order: run A, B and C in parallel and merge them first (C is small and D imports
   - `cut honors the limits`: `cut(16, 9, { ...VIEW, zoom: 1.5, zoomMaximum: 1.6 })` gives `camera.zoom === 1.5`; without `zoomMaximum`, 1.
   - `sample clamps with the last limits`: after the zoomMaximum 1.6 update at zoom 1.59 with positive `zoomVelocity`, `sample(1).zoom <= 1.6`.
   - `an omitted option is today's behavior`: an update sequence without the new options equals one that passes the defaults explicitly (deepEqual on `zoom`, `centerX`, `centerY`).
-- [ ] **Step 2: Run** `node --test tests/game/camera.test.js`. Expected: the new tests FAIL.
-- [ ] **Step 3: Implement** the options in `update`, `cut` and `sample` (store `zoomMinimum` and `zoomMaximum` on the camera in both `update` and `cut`; replace the three `clamp(..., MINIMUM_CAMERA_ZOOM, 1)` calls; replace the literal `2 / CAMERA_ZOOM_SMOOTH_SECONDS` with `2 / zoomSmoothSeconds`). Update the header comment (it says "the solo game never passes a target"): the solo game passes one only when the lab knob is on.
-- [ ] **Step 4: Run** `node --test tests/game/camera.test.js` then `npm test`. Expected: all PASS.
-- [ ] **Step 5: Mutation proof**: change the ceiling back to a literal 1 in `update`; the `zoomMaximum raises the ceiling` test must fail. Restore.
-- [ ] **Step 6: Commit** `Let the camera take per-update zoom limits and smoothing`.
+- [x] **Step 2: Run** `node --test tests/game/camera.test.js`. Expected: the new tests FAIL.
+- [x] **Step 3: Implement** the options in `update`, `cut` and `sample` (store `zoomMinimum` and `zoomMaximum` on the camera in both `update` and `cut`; replace the three `clamp(..., MINIMUM_CAMERA_ZOOM, 1)` calls; replace the literal `2 / CAMERA_ZOOM_SMOOTH_SECONDS` with `2 / zoomSmoothSeconds`). Update the header comment (it says "the solo game never passes a target"): the solo game passes one only when the lab knob is on.
+- [x] **Step 4: Run** `node --test tests/game/camera.test.js` then `npm test`. Expected: all PASS.
+- [x] **Step 5: Mutation proof**: change the ceiling back to a literal 1 in `update`; the `zoomMaximum raises the ceiling` test must fail. Restore.
+- [x] **Step 6: Commit** `Let the camera take per-update zoom limits and smoothing`.
 
 ---
 
@@ -110,7 +112,7 @@ Order: run A, B and C in parallel and merge them first (C is small and D imports
   - `export function sampleZoomPressure({ densityAt, focusX, focusY, viewWidth, viewHeight, bounds, capacityScale, crowdReference }): { near: number, far: number }` where `densityAt(x, y) -> number` is `Game.densityAt`, `viewWidth` and `viewHeight` are the current zoomed view extents, `bounds` is `{ minX, minY, maxX, maxY }`, `capacityScale` is `capacity / DENSITY_REFERENCE_CAPACITY`, `crowdReference` is the normalized density that reads as full crowding (the knob). Returns `near` and `far` in 0..1.
 - Consumes: nothing from other tasks.
 
-- [ ] **Step 1: Write failing tests** (`tests/game/zoom-pressure.test.js`), using a synthetic `densityAt`:
+- [x] **Step 1: Write failing tests** (`tests/game/zoom-pressure.test.js`), using a synthetic `densityAt`:
   - `an empty map gives zero pressure`: `densityAt = () => 0` gives `{ near: 0, far: 0 }`.
   - `near ignores a crowd outside the near circle but far sees it`: density 5 only at points farther than 5 units from the focus and outside the view gives `near === 0`, `far > 0`.
   - `near sees a crowd at the focus`: density high within 3 units gives `near > 0.9`, `far === 0`.
@@ -118,12 +120,12 @@ Order: run A, B and C in parallel and merge them first (C is small and D imports
   - `crowdReference scales the response`: doubling `crowdReference` lowers `near` for a mid-level field.
   - `far points outside the world are skipped, and an all-outside ring gives far 0`: focus at the world corner with a huge view; the count of `densityAt` calls for far is below 8 and `far` is finite.
   - `smoothstep` edges: `smoothstep(0.25, 1, 0.25) === 0`, `(…, 1) === 1`, midpoint 0.5 at the center of the interval's cubic (0.5 at t = 0.5).
-- [ ] **Step 2: Run** `node --test tests/game/zoom-pressure.test.js`. Expected: FAIL (module missing).
-- [ ] **Step 3: Implement** with the formulas in Design decision 2: near = `smoothstep(0.25, 1.0, mean(densityAt over focus + 8 ring points at ZOOM_NEAR_RADIUS) / (capacityScale * crowdReference))`; far = `smoothstep(0.15, 0.6, mean over the in-bounds points of the 8-point ring at radius ZOOM_FAR_VIEW_FACTOR * hypot(viewWidth, viewHeight) / 2 / (capacityScale * crowdReference))`; ring points evenly spaced by angle, starting at angle 0. Guard `capacityScale * crowdReference > 0` with a `RangeError`.
-- [ ] **Step 4: Run** the test file. Expected: PASS.
-- [ ] **Step 5: Mutation proof**: drop the `capacityScale` divisor; the preset invariance test must fail. Restore.
-- [ ] **Step 6: Calibrate the default (one time).** Write a throwaway script in `.claude/scripts/` (delete it after) or use the lab in a browser to read `game.simulation.densityAt` at the swarm in a ramped play run, near a heavy crowd, at capacity 524288 (so `capacityScale` is 1); pick `ZOOM_DEFAULT_CROWD_REFERENCE` so a fully crowded spot reads near 1. Record the measured numbers (count and reproduction command, not raw output) in the commit body and export the constant from this file: `export const ZOOM_DEFAULT_CROWD_REFERENCE = <measured>;` with a comment naming it a lab-tuned placeholder. Task 3 imports it.
-- [ ] **Step 7: Commit** `Add the zoom pressure sampler`.
+- [x] **Step 2: Run** `node --test tests/game/zoom-pressure.test.js`. Expected: FAIL (module missing).
+- [x] **Step 3: Implement** with the formulas in Design decision 2: near = `smoothstep(0.25, 1.0, mean(densityAt over focus + 8 ring points at ZOOM_NEAR_RADIUS) / (capacityScale * crowdReference))`; far = `smoothstep(0.15, 0.6, mean over the in-bounds points of the 8-point ring at radius ZOOM_FAR_VIEW_FACTOR * hypot(viewWidth, viewHeight) / 2 / (capacityScale * crowdReference))`; ring points evenly spaced by angle, starting at angle 0. Guard `capacityScale * crowdReference > 0` with a `RangeError`.
+- [x] **Step 4: Run** the test file. Expected: PASS.
+- [x] **Step 5: Mutation proof**: drop the `capacityScale` divisor; the preset invariance test must fail. Restore.
+- [x] **Step 6: Calibrate the default (one time).** Write a throwaway script in `.claude/scripts/` (delete it after) or use the lab in a browser to read `game.simulation.densityAt` at the swarm in a ramped play run, near a heavy crowd, at capacity 524288 (so `capacityScale` is 1); pick `ZOOM_DEFAULT_CROWD_REFERENCE` so a fully crowded spot reads near 1. Record the measured numbers (count and reproduction command, not raw output) in the commit body and export the constant from this file: `export const ZOOM_DEFAULT_CROWD_REFERENCE = <measured>;` with a comment naming it a lab-tuned placeholder. Task 3 imports it.
+- [x] **Step 7: Commit** `Add the zoom pressure sampler`.
 
 ---
 
@@ -142,7 +144,7 @@ Order: run A, B and C in parallel and merge them first (C is small and D imports
   - `class SoloZoomController` with: `get settings()` (a copy), `set(name, value)` (throws `RangeError` naming the key for an unknown key, a non-boolean `enabled`, or a number outside `SOLO_ZOOM_RANGES`; also throws when `minimum > maximum` after the change), `reset()` (pressures and log target to 0, last zoom 1), `hold()` returns the last zoom with no state change, `update(deltaSeconds, { near, far, swarmRadius, viewWidth, viewHeight }) -> number` the target zoom, and `get lastZoom()`.
   - `export function zoomFit(swarmRadius, viewWidth, viewHeight): number` = `0.5 * min(viewWidth, viewHeight) * ZOOM_FIT_FRACTION / (swarmRadius + ZOOM_FIT_MARGIN)`.
 
-- [ ] **Step 1: Write failing tests** (deltas injected, 1/60 s steps):
+- [x] **Step 1: Write failing tests** (deltas injected, 1/60 s steps):
   - `defaults are off and match the spec candidates`: `enabled === false`, `maximum === 1.6`, `minimum === 0.5`, `punchIn` close to `Math.log(1.4)`, `pullOut` close to `Math.log(1 / 0.6)`.
   - `set validates`: out-of-range, unknown key, `enabled: 1`, and `minimum` above `maximum` each throw `RangeError`; a valid value is stored and visible in `settings`; `settings` returns a copy (mutating it changes nothing).
   - `no pressure gives zoom 1`: 5 s of `near: 0, far: 0, swarmRadius: 1` gives exactly 1 (fit is 1.575 so no cap).
@@ -156,11 +158,11 @@ Order: run A, B and C in parallel and merge them first (C is small and D imports
   - `output stays inside [minimum, maximum]` over a randomized-by-fixed-sequence set of inputs (use a fixed array of 200 input triples, no `Math.random`).
   - `hold returns the last zoom and does not advance state`: after updates, `hold()` equals the last output; a following `update` continues as if `hold` never ran (compare to a twin controller).
   - `reset returns to 1`.
-- [ ] **Step 2: Run** `node --test tests/game/solo-zoom.test.js`. Expected: FAIL (module missing).
-- [ ] **Step 3: Implement.** Per update: smooth `near` and `far` toward their inputs with `alpha = 1 - exp(-dt / tau)`, tau attack when rising and release when falling; `wish = punchIn * nearSmooth - pullOut * farSmooth * (1 - nearSmooth)`; move `logTarget` toward `wish` by at most `rateLimit * dt`, but only when `abs(wish - logTarget) >= ZOOM_HYSTERESIS`; output `clamp(exp(logTarget), minimum, max(minimum, min(maximum, zoomFit(...))))`; store as `lastZoom`. Header comment states: pure, no clock, no `Math.random`; the camera spring applies `smoothSeconds`.
-- [ ] **Step 4: Run** the test file. Expected: PASS.
-- [ ] **Step 5: Mutation proof**: remove the `(1 - nearSmooth)` factor (far/near test fails); remove the fit cap (fit test fails); remove the rate limit (rate test fails). Restore each.
-- [ ] **Step 6: Commit** `Add the solo zoom controller`.
+- [x] **Step 2: Run** `node --test tests/game/solo-zoom.test.js`. Expected: FAIL (module missing).
+- [x] **Step 3: Implement.** Per update: smooth `near` and `far` toward their inputs with `alpha = 1 - exp(-dt / tau)`, tau attack when rising and release when falling; `wish = punchIn * nearSmooth - pullOut * farSmooth * (1 - nearSmooth)`; move `logTarget` toward `wish` by at most `rateLimit * dt`, but only when `abs(wish - logTarget) >= ZOOM_HYSTERESIS`; output `clamp(exp(logTarget), minimum, max(minimum, min(maximum, zoomFit(...))))`; store as `lastZoom`. Header comment states: pure, no clock, no `Math.random`; the camera spring applies `smoothSeconds`.
+- [x] **Step 4: Run** the test file. Expected: PASS.
+- [x] **Step 5: Mutation proof**: remove the `(1 - nearSmooth)` factor (far/near test fails); remove the fit cap (fit test fails); remove the rate limit (rate test fails). Restore each.
+- [x] **Step 6: Commit** `Add the solo zoom controller`.
 
 ---
 
@@ -183,7 +185,7 @@ Behavior of `followCamera` (the non-cut update path), pinned by the tests below:
 5. `cut` (start, quit, respawn): `soloZoom.reset()`, zoom 1 (solo) or `fitZoom` (co-op) as today.
 6. `spawnCounts`: pass `view: this.ringView` where `ringView` is `this.view` with `width` and `height` set to `viewSize.width / Math.min(1, camera.zoom)` and `viewSize.height / Math.min(1, camera.zoom)` (Design decision 5). With zoom at or below 1 it equals `this.view` exactly, so co-op and the default are unchanged.
 
-- [ ] **Step 1: Write failing tests** (`tests/game/solo-zoom-game.test.js`; a stubbed `simulation.densityAt` returning a constant, fixed `deltaSeconds`):
+- [x] **Step 1: Write failing tests** (`tests/game/solo-zoom-game.test.js`; a stubbed `simulation.densityAt` returning a constant, fixed `deltaSeconds`):
   - `the default game never leaves zoom 1 in solo, whatever the density`: 600 updates in Playing with `densityAt = () => 1e9`; `camera.zoom === 1` exactly and `camera.update` was always called without `zoomMaximum` (spy).
   - `enabled and crowded zooms in past 1`: `setSoloZoomSetting('enabled', true)`, `crowdReference` at its minimum, 600 updates; `camera.zoom > 1.05` and `<= 1.6`.
   - `enabled, far action only, zooms out`: density high only at the far ring (stub by distance from the focus), `punchIn` default; `camera.zoom < 0.95` and `>= 0.5`.
@@ -195,11 +197,11 @@ Behavior of `followCamera` (the non-cut update path), pinned by the tests below:
   - `the bomb radius ignores the zoom`: zoom in to 1.4, bomb; `requestRadialKill` radius equals `bombRadiusForView(viewSize.width, viewSize.height)`.
   - `the spawn ring view caps its zoom at 1`: zoom in to 1.4; the `view` given to `spawnDirector.update` has width `viewSize.width`; zoomed out to 0.6 it has width `viewSize.width / 0.6`.
   - `setSoloZoomSetting rejects bad values` (RangeError passes through).
-- [ ] **Step 2: Run** `node --test tests/game/solo-zoom-game.test.js`. Expected: FAIL.
-- [ ] **Step 3: Implement** per the behavior list. Put the solo branch in a small helper module if `game.js` growth exceeds the budget: `src/game/solo-zoom-step.js` exporting `soloZoomTarget(game, deltaSeconds)` (taking the `Game` as context, like `seats.js`); `followCamera` calls it.
-- [ ] **Step 4: Run** the new test file, then `npm test`. Expected: PASS everywhere, including the existing co-op camera tests.
-- [ ] **Step 5: Mutation proof**: delete the reduced-motion condition (the reduced motion test fails); delete the live-seat-count condition (two-seat test fails); make `ringView` equal `view` (ring test fails). Restore each.
-- [ ] **Step 6: Commit** `Wire the solo zoom into the follow camera`.
+- [x] **Step 2: Run** `node --test tests/game/solo-zoom-game.test.js`. Expected: FAIL.
+- [x] **Step 3: Implement** per the behavior list. Put the solo branch in a small helper module if `game.js` growth exceeds the budget: `src/game/solo-zoom-step.js` exporting `soloZoomTarget(game, deltaSeconds)` (taking the `Game` as context, like `seats.js`); `followCamera` calls it.
+- [x] **Step 4: Run** the new test file, then `npm test`. Expected: PASS everywhere, including the existing co-op camera tests.
+- [x] **Step 5: Mutation proof**: delete the reduced-motion condition (the reduced motion test fails); delete the live-seat-count condition (two-seat test fails); make `ringView` equal `view` (ring test fails). Restore each.
+- [x] **Step 6: Commit** `Wire the solo zoom into the follow camera`.
 
 ---
 
@@ -226,18 +228,18 @@ Behavior of `followCamera` (the non-cut update path), pinned by the tests below:
 
 Because `captureLabState` and `restoreLabState` iterate `MIX_KNOB_SPECS`, leaving the lab restores every one of these with no extra code; the tests below prove it.
 
-- [ ] **Step 1: Write failing tests**, following `tests/ui/lab.test.js`'s beam knob tests (commit e10655e is the template):
+- [x] **Step 1: Write failing tests**, following `tests/ui/lab.test.js`'s beam knob tests (commit e10655e is the template):
   - `the solo zoom knobs have the specified ranges, steps and shipped defaults` (loop like the beam test; also `assert.deepEqual(KNOB_RANGES[key], [spec.minimum, spec.maximum])` and equality with `SOLO_ZOOM_DEFAULTS` and `SOLO_ZOOM_RANGES`; `LAB_KNOB_DEFAULTS.soloZoomEnabled === 0`).
   - `the solo zoom knobs read and write the game and round-trip through a shared mix` (write each, `captureMix`, `decodeMix(encodeMix(...))`, `applyMix` onto a fresh context).
   - `leaving the lab restores the solo zoom knobs` (enable and change two knobs, `captureLabState` before and `restoreLabState` after; `game.soloZoom.settings` equals the defaults).
   - `crossing minimum and maximum never throws from the lab`: with maximum 1.0, `writeKnob` of `soloZoomMinimum` 1 succeeds; writing `soloZoomMinimum` above the current maximum raises the maximum to match; writing `soloZoomMaximum` below the current minimum lowers the minimum to match.
   - `an older mix without the keys leaves the defaults` and `a mix with soloZoomMaximum 9 is rejected by decodeMix` (`labPresets.test.js`).
   - `the Camera group appears once in the panel with eight sliders` (`panelModel.test.js`, `labPanel.test.js`: the panel renders eight inputs with `data-knob` for these keys, DOM faked as the existing tests do).
-- [ ] **Step 2: Run** `node --test tests/ui/lab.test.js tests/ui/panelModel.test.js tests/ui/labPresets.test.js tests/ui/labPanel.test.js`. Expected: new tests FAIL.
-- [ ] **Step 3: Implement** the bindings, specs, ranges and defaults. In `lab.js` add a small helper `soloZoomValue(key, setting)` like `simulationValue`. The `minimum`/`maximum` ordering rule: the binding for either key, when the new value would cross the other, also sets the other to the new value so `SoloZoomController.set` never throws from the lab.
-- [ ] **Step 4: Run** the four files, then `npm test`. Expected: PASS.
-- [ ] **Step 5: Mutation proof**: remove `soloZoomEnabled` from `KNOB_RANGES` (round-trip and range tests fail); make the enabled write always `true` (the restore test fails). Restore.
-- [ ] **Step 6: Commit** `Add the solo zoom lab knobs`.
+- [x] **Step 2: Run** `node --test tests/ui/lab.test.js tests/ui/panelModel.test.js tests/ui/labPresets.test.js tests/ui/labPanel.test.js`. Expected: new tests FAIL.
+- [x] **Step 3: Implement** the bindings, specs, ranges and defaults. In `lab.js` add a small helper `soloZoomValue(key, setting)` like `simulationValue`. The `minimum`/`maximum` ordering rule: the binding for either key, when the new value would cross the other, also sets the other to the new value so `SoloZoomController.set` never throws from the lab.
+- [x] **Step 4: Run** the four files, then `npm test`. Expected: PASS.
+- [x] **Step 5: Mutation proof**: remove `soloZoomEnabled` from `KNOB_RANGES` (round-trip and range tests fail); make the enabled write always `true` (the restore test fails). Restore.
+- [x] **Step 6: Commit** `Add the solo zoom lab knobs`.
 
 ---
 
@@ -248,13 +250,13 @@ Because `captureLabState` and `restoreLabState` iterate `MIX_KNOB_SPECS`, leavin
 
 **Interfaces:** model on `tests/game/seek-range-guard.test.js` (reuse its `sourceFiles` walker, copy it; it is a test-local helper).
 
-- [ ] **Step 1: Write the tests:**
+- [x] **Step 1: Write the tests:**
   - `setSoloZoomSetting appears only in the Game (definition) and the lab binding`: `assert.deepEqual(files.sort(), ['src/game/game.js', 'src/ui/lab.js'])`.
   - `the shipped Game starts with solo zoom off`: create a game the way `tests/game/game.test.js` does (or import `SOLO_ZOOM_DEFAULTS`): `SOLO_ZOOM_DEFAULTS.enabled === false` and `new SoloZoomController().settings.enabled === false`.
   - `nothing but the lab calls soloZoom.set`: the same file scan for `soloZoom.set(` returns only `src/game/game.js`.
-- [ ] **Step 2: Run** `node --test tests/game/solo-zoom-guard.test.js`. Expected: PASS (it guards the finished wiring, so it cannot fail before).
-- [ ] **Step 3: Mutation proof (required here instead of red-first):** temporarily add `game.setSoloZoomSetting('enabled', true)` to `src/main.js`; the first test must fail. Remove it.
-- [ ] **Step 4: Commit** `Guard that only the lab enables the solo zoom`.
+- [x] **Step 2: Run** `node --test tests/game/solo-zoom-guard.test.js`. Expected: PASS (it guards the finished wiring, so it cannot fail before).
+- [x] **Step 3: Mutation proof (required here instead of red-first):** temporarily add `game.setSoloZoomSetting('enabled', true)` to `src/main.js`; the first test must fail. Remove it.
+- [x] **Step 4: Commit** `Guard that only the lab enables the solo zoom`.
 
 ---
 
@@ -265,7 +267,7 @@ Because `captureLabState` and `restoreLabState` iterate `MIX_KNOB_SPECS`, leavin
 
 **Interfaces:** reuses `setSlider`, `waitFrames`, `open`, `expect`, `expectNoErrors` from the file. Time is counted in animation frames (`waitFrames`), never wall-clock assertions. The page runs with `probe=off` and a pinned capacity as the existing lab checks do.
 
-- [ ] **Step 1: Write the check:**
+- [x] **Step 1: Write the check:**
   1. Open the lab, press Play (read how the existing checks start a run: `lab.play()`/the Play button), wait `SETTLE_FRAMES`.
   2. With the knob off (default): hold 120 frames in Playing; assert `game.camera.zoom === 1`.
   3. `setSlider(page, 'soloZoomEnabled', 1)`, `setSlider(page, 'soloZoomCrowdReference', <the range minimum>)` and `setSlider(page, 'soloZoomPunchIn', 0.6)`; wait 300 frames; assert `game.camera.zoom > 1.05` and `<= 1.6`, and `game.view.width < game.viewSize.width`.
@@ -273,9 +275,9 @@ Because `captureLabState` and `restoreLabState` iterate `MIX_KNOB_SPECS`, leavin
   5. Reduced motion: call `game.setReducedMotion(true)` through `page.evaluate`; wait 300 frames; assert `camera.zoom` within 1e-3 of 1 (the spring eases back, so use a settle of 600 frames).
   6. Leave the lab to the title; assert `game.soloZoom.settings.enabled === false` and every other setting equals `SOLO_ZOOM_DEFAULTS` (read through `lab.capture()` is not needed; read `game.soloZoom.settings`), then start a normal run and assert zoom stays 1 for 120 frames.
   7. `expectNoErrors(page, 'solo zoom')`.
-- [ ] **Step 2: Run** `node tests/browser/smoke-lab.mjs` (or the new file). Expected: passes with a GPU adapter, prints a `smoke-lab: solo zoom ...` line; exit 2 means no adapter (then report it as not exercised, with `WEBGPU_ADAPTER=fallback` as the software attempt).
-- [ ] **Step 3: Mutation proof**: with the knob on, comment out the `camera.update` zoom option in the solo helper (Task 4); the check must fail at step 3. Restore.
-- [ ] **Step 4: Run** `npm test` (the launcher spelling test) and commit `Check the solo zoom in the lab browser run`.
+- [x] **Step 2: Run** `node tests/browser/smoke-lab.mjs` (or the new file). Expected: passes with a GPU adapter, prints a `smoke-lab: solo zoom ...` line; exit 2 means no adapter (then report it as not exercised, with `WEBGPU_ADAPTER=fallback` as the software attempt).
+- [x] **Step 3: Mutation proof**: with the knob on, comment out the `camera.update` zoom option in the solo helper (Task 4); the check must fail at step 3. Restore.
+- [x] **Step 4: Run** `npm test` (the launcher spelling test) and commit `Check the solo zoom in the lab browser run`.
 
 ---
 
@@ -284,9 +286,9 @@ Because `captureLabState` and `restoreLabState` iterate `MIX_KNOB_SPECS`, leavin
 **Files:**
 - Modify: `AGENTS.md`
 
-- [ ] **Step 1: Run the docs-update check** and update, with exact wording drawn from the new code: the Global constraints camera paragraph ("at zoom 1 in solo" gains "unless the lab's solo zoom is on, default off; `soloZoom*` knobs"); the Co-op "Camera" bullet (co-op unchanged, the solo controller idle with two live seats); Frame order step 2 (`Game.followCamera` solo branch, hold rules, reduced motion forces 1); the view dependants list from Design decision 5 (bomb, safe distance and pickups unzoomed, gate ring zoomed but capped at zoom 1); File map entries for `solo-zoom.js`, `zoom-pressure.js`, `solo-zoom-step.js` (if created) and the new tests; the browser check entry; and a sentence pointing to `tests/game/solo-zoom-guard.test.js` like the seek range one.
-- [ ] **Step 2: Verify** no em-dashes: `rg -n "\x{2014}" AGENTS.md docs/superpowers/plans` finds nothing in the lines you touched; run `npm test`.
-- [ ] **Step 3: Commit** `Document the solo camera zoom lab knobs`.
+- [x] **Step 1: Run the docs-update check** and update, with exact wording drawn from the new code: the Global constraints camera paragraph ("at zoom 1 in solo" gains "unless the lab's solo zoom is on, default off; `soloZoom*` knobs"); the Co-op "Camera" bullet (co-op unchanged, the solo controller idle with two live seats); Frame order step 2 (`Game.followCamera` solo branch, hold rules, reduced motion forces 1); the view dependants list from Design decision 5 (bomb, safe distance and pickups unzoomed, gate ring zoomed but capped at zoom 1); File map entries for `solo-zoom.js`, `zoom-pressure.js`, `solo-zoom-step.js` (if created) and the new tests; the browser check entry; and a sentence pointing to `tests/game/solo-zoom-guard.test.js` like the seek range one.
+- [x] **Step 2: Verify** no em-dashes: `rg -n "\x{2014}" AGENTS.md docs/superpowers/plans` finds nothing in the lines you touched; run `npm test`.
+- [x] **Step 3: Commit** `Document the solo camera zoom lab knobs`.
 
 ---
 
