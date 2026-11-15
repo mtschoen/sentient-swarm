@@ -1,5 +1,6 @@
 // Pure pieces of the lab panel (labPanel.js): option lists, slider specs, the frames-per-second
 // accumulator and the readout formatter. No DOM, so node:test covers all of it.
+import { ESCALATION_RANGES } from '../game/escalation.js';
 import { SOLO_ZOOM_RANGES } from '../game/solo-zoom.js';
 import { SPECIES_NAMES } from '../sim/species.js';
 
@@ -74,6 +75,15 @@ export const LAB_KNOB_GROUPS = [
     { key: 'seekFloorFraction', label: 'seek floor', minimum: 0, maximum: 1, step: 0.01 },
     { key: 'spawnDistanceStartFraction', label: 'spawn distance start', minimum: 0.25, maximum: 0.4, step: 0.01 },
     { key: 'refillFractionPerSecond', label: 'refill per second', minimum: 0, maximum: 1, step: 0.01 },
+  ] },
+  // The escalation past the ramp (src/game/escalation.js); ranges come from ESCALATION_RANGES. Rate 0 is today's game.
+  { title: 'Escalation', knobs: [
+    { key: 'escalationRate', label: 'escalation rate (0 off)', minimum: ESCALATION_RANGES.rate[0], maximum: ESCALATION_RANGES.rate[1], step: 0.05 },
+    { key: 'escalationRefillGrowthSeconds', label: 'refill growth seconds (e-fold)', minimum: ESCALATION_RANGES.refillGrowthSeconds[0], maximum: ESCALATION_RANGES.refillGrowthSeconds[1], step: 10 },
+    { key: 'escalationCeiling', label: 'escalated alive ceiling', minimum: ESCALATION_RANGES.ceilingFraction[0], maximum: ESCALATION_RANGES.ceilingFraction[1], step: 0.01 },
+    { key: 'escalationSeekMaximum', label: 'escalated seek maximum', minimum: ESCALATION_RANGES.seekMaximum[0], maximum: ESCALATION_RANGES.seekMaximum[1], step: 0.05 },
+    { key: 'escalationPredatorShift', label: 'Chaser share moved to Predator', minimum: ESCALATION_RANGES.predatorShift[0], maximum: ESCALATION_RANGES.predatorShift[1], step: 0.01 },
+    { key: 'escalationWaveGrowthSeconds', label: 'seconds to halve the wave period', minimum: ESCALATION_RANGES.waveGrowthSeconds[0], maximum: ESCALATION_RANGES.waveGrowthSeconds[1], step: 10 },
   ] },
   { title: 'Spawn gates', knobs: [
     { key: 'gateCount', label: 'gate count', minimum: 2, maximum: 4, step: 1, integer: true },

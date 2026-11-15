@@ -408,3 +408,47 @@ test('validateBeamTimeSurge accepts [1, maximum] and throws RangeError outside i
   assert.doesNotThrow(() => validateBeamTimeSurge(MAXIMUM_BEAM_TIME_SURGE));
   for (const bad of [0.99, MAXIMUM_BEAM_TIME_SURGE + 0.01, Number.NaN, Infinity, '3']) assert.throws(() => validateBeamTimeSurge(bad), RangeError, String(bad));
 });
+
+test('secondsPastRamp is 0 during the ramp, then the elapsed time past rampSeconds, and resets with the ramp', () => {
+  const pressure = new SpawnPressure({ capacity: CAPACITY });
+  pressure.update(100, null, EQUAL_SHARES, 1);
+  assert.equal(pressure.secondsPastRamp, 0);
+  pressure.update(30, null, EQUAL_SHARES, 2);
+  assert.equal(pressure.secondsPastRamp, 10);
+  pressure.reset();
+  assert.equal(pressure.secondsPastRamp, 0);
+});
+
+test('setEscalation multiplies the plain target and the refill rate; the surge applies on top with its cap', () => {
+  const pressure = new SpawnPressure({ capacity: CAPACITY });
+  pressure.update(200, null, EQUAL_SHARES, 1);
+  const plain = pressure.targetAlive;
+  pressure.setEscalation({ targetMultiplier: 1.5, refillMultiplier: 4 });
+  assert.equal(pressure.targetAlive, plain * 1.5);
+  pressure.setSurge(MAXIMUM_BEAM_TIME_SURGE);
+  assert.equal(pressure.targetAlive, CAPACITY * BEAM_TIME_SURGE_CEILING_FRACTION);
+  pressure.setSurge(1);
+  pressure.setEscalation();
+  assert.equal(pressure.targetAlive, plain);
+  assert.throws(() => pressure.setEscalation({ targetMultiplier: 0 }), RangeError);
+  assert.throws(() => pressure.setEscalation({ refillMultiplier: Number.POSITIVE_INFINITY }), RangeError);
+  assert.equal(pressure.targetAlive, plain);
+});
+
+test('a refill multiplier raises the steady refill per step by that factor', () => {
+  const refillFor = (multiplier) => {
+    const pressure = new SpawnPressure({ capacity: CAPACITY });
+    pressure.update(200, { aliveTotal: CAPACITY, frameSequence: 1 }, EQUAL_SHARES, 2);
+    assert.equal(pressure.filling, false, 'a full arena ends the first fill');
+    pressure.setEscalation({ refillMultiplier: multiplier });
+    let total = 0;
+    for (let step = 0; step < 60; step += 1) {
+      const counts = pressure.update(STEP_SECONDS, { aliveTotal: 0, frameSequence: 3 + step }, EQUAL_SHARES, 4 + step);
+      total += counts.reduce((sum, count) => sum + count, 0);
+    }
+    return total;
+  };
+  const base = refillFor(1);
+  assert.ok(Math.abs(base - DEFAULT_RAMP.refillFractionPerSecond * CAPACITY * DEFAULT_CEILING) <= 1);
+  assert.ok(Math.abs(refillFor(3) - 3 * base) <= 3);
+});

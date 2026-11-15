@@ -439,3 +439,35 @@ test('surging makes every open gate emit between waves, and not surging leaves t
   assert.ok(surging.gates.some((gate) => gate.emit === 1));
   assert.equal(surging.gates.filter((gate) => gate.open >= 1 && !gate.closing).every((gate) => gate.emit === 1), true);
 });
+
+test('setEscalation scales the wave period (floored at the wave length) and the burst (at most 1) without touching the schedule', () => {
+  const director = new SpawnDirector({ random: () => 0.5 });
+  assert.equal(director.wavePeriodSeconds, DEFAULT_GATE_SCHEDULE.wavePeriodSeconds);
+  assert.equal(director.burstFraction, DEFAULT_GATE_SCHEDULE.burstFraction);
+  director.setEscalation({ wavePeriodMultiplier: 0.5, burstMultiplier: 2 });
+  assert.equal(director.wavePeriodSeconds, DEFAULT_GATE_SCHEDULE.wavePeriodSeconds * 0.5);
+  assert.equal(director.burstFraction, DEFAULT_GATE_SCHEDULE.burstFraction * 2);
+  director.setEscalation({ wavePeriodMultiplier: 0.01, burstMultiplier: 100 });
+  assert.equal(director.wavePeriodSeconds, DEFAULT_GATE_SCHEDULE.waveSeconds);
+  assert.equal(director.burstFraction, 1);
+  assert.deepEqual(director.schedule, { ...DEFAULT_GATE_SCHEDULE });
+  assert.throws(() => director.setEscalation({ wavePeriodMultiplier: 0 }), RangeError);
+  assert.equal(director.burstFraction, 1);
+  // A lab period already under the wave length is never raised by the floor.
+  director.setSchedule({ wavePeriodSeconds: 0.3 });
+  director.setEscalation({ wavePeriodMultiplier: 0.5 });
+  assert.equal(director.wavePeriodSeconds, 0.3);
+});
+
+test('a halved wave period starts about twice the waves, and the wave state carries the escalated burst', () => {
+  const wavesIn = (multiplier) => {
+    const director = new SpawnDirector({ random: () => 0.5 });
+    director.setEscalation({ wavePeriodMultiplier: multiplier, burstMultiplier: 2 });
+    for (let step = 0; step < 60 * 30; step += 1) director.update(STEP_SECONDS, { safeDistance: SAFE_DISTANCE, shares: EQUAL_SHARES });
+    assert.equal(director.wave.burstFraction, DEFAULT_GATE_SCHEDULE.burstFraction * 2);
+    return director.waveSequence;
+  };
+  const plain = wavesIn(1);
+  assert.ok(plain > 5);
+  assert.ok(Math.abs(wavesIn(0.5) - 2 * plain) <= 3);
+});

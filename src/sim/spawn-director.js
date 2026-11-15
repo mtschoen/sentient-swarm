@@ -26,6 +26,10 @@
 // so the game can tell a new wave from the last one.
 // Surge (the beam time event): with the update option surging, every open gate that is not closing
 // emits between waves as in the first fill, so the surge pours from all gates.
+// Escalation (src/game/escalation.js): setEscalation({ wavePeriodMultiplier, burstMultiplier })
+// scales the schedule's wave period (never below the shorter of the wave length and the schedule's
+// own period, so waves do not overlap) and burst fraction (at most 1) without touching the schedule
+// the lab sets; both 1, the schedule as it is, by default.
 // Time is the summed deltaSeconds of update (injected), randomness the injected random.
 // Bounds: gates place, drift and bounce inside context.bounds (the playable world bounds,
 // Game.worldBounds; WORLD_BOUNDS by default).
@@ -149,8 +153,30 @@ export class SpawnDirector {
   constructor({ random = Math.random, ...schedule } = {}) {
     this.random = random;
     this.schedule = validatedSchedule({ ...DEFAULT_GATE_SCHEDULE, ...pickSchedule(schedule) });
+    this.wavePeriodMultiplier = 1;
+    this.burstMultiplier = 1;
     this.gates = [];
     this.reset();
+  }
+
+  // Both multipliers positive and finite (see the header); throws RangeError and changes nothing otherwise.
+  setEscalation({ wavePeriodMultiplier = 1, burstMultiplier = 1 } = {}) {
+    for (const [name, value] of [['wavePeriodMultiplier', wavePeriodMultiplier], ['burstMultiplier', burstMultiplier]]) {
+      if (!(Number.isFinite(value) && value > 0)) throw new RangeError(`SpawnDirector ${name} must be positive and finite, got ${value}`);
+    }
+    this.wavePeriodMultiplier = wavePeriodMultiplier;
+    this.burstMultiplier = burstMultiplier;
+  }
+
+  // The wave period in effect: the schedule's times the escalation, floored as the header says.
+  get wavePeriodSeconds() {
+    const { wavePeriodSeconds, waveSeconds } = this.schedule;
+    return Math.max(Math.min(wavePeriodSeconds, waveSeconds), wavePeriodSeconds * this.wavePeriodMultiplier);
+  }
+
+  // The burst fraction in effect: the schedule's times the escalation, at most 1.
+  get burstFraction() {
+    return Math.min(1, this.schedule.burstFraction * this.burstMultiplier);
   }
 
   // For the lab sliders: replaces the given schedule values (any subset of DEFAULT_GATE_SCHEDULE's
@@ -167,7 +193,7 @@ export class SpawnDirector {
   reset() {
     this.gates = [];
     this.needsInitialGates = true;
-    this.waveClock = this.schedule.wavePeriodSeconds;
+    this.waveClock = this.wavePeriodSeconds;
     this.nextGate = null;
     this.activeWave = null;
     this.filling = false;
@@ -220,7 +246,7 @@ export class SpawnDirector {
     if (this.continuous) return null;
     const emitting = this.gates.some((gate) => gate.emit > 0);
     const remainingSeconds = this.filling ? 0 : (this.activeWave?.remaining ?? 0);
-    return { emitting, remainingSeconds, burstFraction: this.schedule.burstFraction };
+    return { emitting, remainingSeconds, burstFraction: this.burstFraction };
   }
 
   // The step's gate table for Simulation.step (the SimParams gates, and the gate renderer): at
@@ -243,8 +269,8 @@ export class SpawnDirector {
     if (this.nextGate !== null && (!this.gates.includes(this.nextGate) || !this.canEmit(this.nextGate, context))) this.nextGate = null;
     if (this.waveClock <= TELEGRAPH_SECONDS && this.nextGate === null) this.nextGate = this.pickWaveGate(context);
     if (this.waveClock <= 0) {
-      this.waveClock += this.schedule.wavePeriodSeconds;
-      if (this.waveClock <= 0) this.waveClock = this.schedule.wavePeriodSeconds;
+      this.waveClock += this.wavePeriodSeconds;
+      if (this.waveClock <= 0) this.waveClock = this.wavePeriodSeconds;
       const gate = this.nextGate ?? this.pickWaveGate(context);
       this.nextGate = null;
       if (gate !== null) {

@@ -19,6 +19,7 @@ import { DEFAULT_PICKUP_BLAST_RADIUS } from '../game/game.js';
 import { BEAM_SHARDS_NEEDED, BEAM_SHARD_WAVE_INTERVAL } from '../game/beam-shards.js';
 import { BEAM_TIME_SECONDS } from '../game/beam-time.js';
 import { RunPhase } from '../game/run.js';
+import { ESCALATION_DEFAULTS } from '../game/escalation.js';
 import { SOLO_ZOOM_DEFAULTS } from '../game/solo-zoom.js';
 import { TIME_WARP_SCALE, TIME_WARP_SECONDS } from '../game/time-warp.js';
 import { DEFAULT_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND } from '../game/weaponTypes.js';
@@ -31,7 +32,7 @@ import {
 } from '../sim/params.js';
 import { DEFAULT_GATE_SCHEDULE } from '../sim/spawn-director.js';
 import { DEFAULT_BEAM_TIME_SURGE, DEFAULT_RAMP } from '../sim/spawner.js';
-import { MIX_VERSION, RULE_FIELDS, RULE_RANGES, decodeMix } from './labPresets.js';
+import { ESCALATION_KNOB_SETTINGS, MIX_VERSION, RULE_FIELDS, RULE_RANGES, decodeMix } from './labPresets.js';
 import { LAB_KNOBS, RENDER_SLIDERS, clampToSpec } from './panelModel.js';
 
 // The shipped ramp's ceiling (owner ruling R37), so Watch shows the swarm the game actually reaches.
@@ -61,6 +62,10 @@ const simulationValue = (key, setter) => ({
 const soloZoomValue = (key, setting) => ({
   read: ({ game }) => game.soloZoom.settings[setting],
   write: ({ game }, value) => game.setSoloZoomSetting(setting, value),
+});
+const escalationValue = (setting) => ({
+  read: ({ game }) => game.escalation.settings[setting],
+  write: ({ game }, value) => game.escalation.set(setting, value),
 });
 const renderSetting = (key) => ({
   read: ({ renderer }) => renderer.settings[key],
@@ -160,6 +165,7 @@ export const LAB_KNOB_BINDINGS = {
   soloZoomRateLimit: soloZoomValue('soloZoomRateLimit', 'rateLimit'),
   soloZoomCrowdReference: soloZoomValue('soloZoomCrowdReference', 'crowdReference'),
   soloZoomFitFraction: soloZoomValue('soloZoomFitFraction', 'fitFraction'),
+  ...Object.fromEntries(Object.entries(ESCALATION_KNOB_SETTINGS).map(([key, setting]) => [key, escalationValue(setting)])),
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, renderSetting(spec.key)])),
 };
 
@@ -201,6 +207,7 @@ export const LAB_KNOB_DEFAULTS = Object.freeze({
   soloZoomRateLimit: SOLO_ZOOM_DEFAULTS.rateLimit,
   soloZoomCrowdReference: SOLO_ZOOM_DEFAULTS.crowdReference,
   soloZoomFitFraction: SOLO_ZOOM_DEFAULTS.fitFraction,
+  ...Object.fromEntries(Object.entries(ESCALATION_KNOB_SETTINGS).map(([key, setting]) => [key, ESCALATION_DEFAULTS[setting]])),
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, DEFAULT_RENDER_SETTINGS[spec.key]])),
   sameSpeciesCohesion: 1,
 });

@@ -10,6 +10,7 @@ import { DEFAULT_RENDER_SETTINGS } from '../../src/render/renderer.js';
 import { SPECIES_COUNT } from '../../src/sim/layout.js';
 import { TimeWarp } from '../../src/game/time-warp.js';
 import { SoloZoomController } from '../../src/game/solo-zoom.js';
+import { Escalation } from '../../src/game/escalation.js';
 import { BeamShards } from '../../src/game/beam-shards.js';
 import { BeamTime } from '../../src/game/beam-time.js';
 import { DEFAULT_BEAM_TIME_SURGE } from '../../src/sim/spawner.js';
@@ -110,6 +111,7 @@ function createContext() {
     beamTimeSurge: DEFAULT_BEAM_TIME_SURGE,
     setBeamTimeSurge(strength) { this.beamTimeSurge = strength; },
     soloZoom: new SoloZoomController(),
+    escalation: new Escalation(),
     setSoloZoomSetting(name, value) { this.soloZoom.set(name, value); },
     simulationRate: 'full',
     setSimulationRate(rate) { this.simulationRate = rate; },
