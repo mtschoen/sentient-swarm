@@ -2,9 +2,8 @@
 // holds a station on a circle around the controlled point (at the aim angle plus its turret offset)
 // and points outward along it. Each station without a gunner takes the nearest live non-gunner
 // ship; a gunner keeps its station index until it dies or the effective count drops below it.
-// Pure and allocation-free after the first call.
-import { railTurretOffsets } from './weapons.js';
-import { MAXIMUM_RAIL_TURRETS } from './weaponTypes.js';
+// Pure; allocation-free once the station list has grown to the count.
+import { MAXIMUM_RAIL_TURRETS, railTurretOffset } from './weaponTypes.js';
 
 // Station radius as a share of the home radius: inside the leash circle, outside the bee cloud.
 export const GUNNER_STATION_REACH = 0.8;
@@ -22,10 +21,9 @@ const holders = new Int16Array(MAXIMUM_RAIL_TURRETS);
 // Fills out[0..count - 1] with { x, y, angle } stations; entries are reused, created only when out
 // is shorter. Returns out.
 export function gunnerStations(count, aimAngle, centerX, centerY, radius, out) {
-  const offsets = railTurretOffsets(count);
   for (let index = 0; index < count; index += 1) {
     if (out[index] === undefined) out[index] = { x: 0, y: 0, angle: 0 };
-    const angle = aimAngle + offsets[index];
+    const angle = aimAngle + railTurretOffset(index, count);
     const entry = out[index];
     entry.angle = angle;
     entry.x = centerX + Math.cos(angle) * radius;

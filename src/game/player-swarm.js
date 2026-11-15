@@ -82,7 +82,8 @@ export class PlayerSwarm {
 
   // The number of rail turrets wanted as gunner ships (clamped to the live ships inside update).
   setGunnerCount(count) {
-    this.gunnerCount = Math.min(MAXIMUM_RAIL_TURRETS, Math.max(0, Math.floor(count)));
+    if (!(Number.isInteger(count) && count >= 0 && count <= MAXIMUM_RAIL_TURRETS)) throw new RangeError(`gunner count must be an integer in [0, ${MAXIMUM_RAIL_TURRETS}], got ${count}`);
+    this.gunnerCount = count;
   }
 
   setBounds(bounds) {

@@ -53,3 +53,24 @@ test("a gunner's wander and buzz are scaled", () => {
   const variance = positions.reduce((sum, position) => sum + (position.x - meanX) ** 2 + (position.y - meanY) ** 2, 0) / positions.length;
   assert.ok(Math.sqrt(variance) < 0.12, String(Math.sqrt(variance)));
 });
+
+test('a gunner ignores cohesion: neighbours inside the cohesion radius leave its step unchanged', () => {
+  const context = { targetX: 5, targetY: 5, firing: false, aimX: 0, aimY: 0, time: 0.5, aliveCount: 12, bounds: WORLD_BOUNDS, margin: 0.02 };
+  const neighbour = (x) => ({ ...temperamentFor(1), alive: true, x, y: 5, velocityX: 0, velocityY: 0, course: 0, heading: 0, gunnerIndex: -1, stationX: 0, stationY: 0, stationAngle: 0 });
+  const stepGunner = (others) => {
+    const gunner = { ...gunnerSlot(5, 5), velocityX: 0, velocityY: 0 };
+    flockStep([gunner, ...others], STEP, { ...context });
+    return [gunner.velocityX, gunner.velocityY];
+  };
+  // Neighbours 0.6 away: outside the 0.3 separation radius, inside the 0.8 cohesion radius.
+  const alone = stepGunner([]);
+  const crowded = stepGunner([neighbour(5.6), neighbour(5.65), neighbour(4.4)]);
+  assert.deepEqual(crowded, alone);
+  // The same ship as a non-gunner is pulled by them.
+  const roamer = (others) => {
+    const ship = { ...gunnerSlot(5, 5, -1), velocityX: 0, velocityY: 0 };
+    flockStep([ship, ...others], STEP, { ...context });
+    return [ship.velocityX, ship.velocityY];
+  };
+  assert.notDeepEqual(roamer([neighbour(5.6), neighbour(5.65), neighbour(4.4)]), roamer([]));
+});

@@ -241,3 +241,19 @@ test('the report counts the ships, those in the cone, those off cooldown, the sh
   fire.distribute(NO_FIRE, [], ORIGIN, ORIGIN, AIM_RIGHT);
   assert.equal(fire.report.ships, 0);
 });
+
+test('railTier 1, 2 and 3 give 1, 2 and 3 needles per gunner volley through distribute', () => {
+  for (const railTier of [1, 2, 3]) {
+    const fire = new SwarmFire({ random: seededRandom() });
+    const ships = shipsHeading(1);
+    ships[0] = { ...ships[0], gunnerIndex: 0, heading: 0 };
+    const control = { ...AIM_RIGHT, kind: 'beam', railTier };
+    const volleys = [];
+    for (let step = 0; step < 60; step += 1) {
+      const { turretSpawns } = fire.distribute(NO_FIRE, ships, ORIGIN, ORIGIN, control);
+      if (turretSpawns.length > 0) volleys.push(turretSpawns.length);
+    }
+    assert.ok(volleys.length >= 2, `tier ${railTier} fired ${volleys.length} volleys`);
+    assert.ok(volleys.every((count) => count === railTier), `tier ${railTier}: ${volleys}`);
+  }
+});

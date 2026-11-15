@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../../src/game/game.js';
 import { RunPhase } from '../../src/game/run.js';
-import { railTurretOffsets } from '../../src/game/weapons.js';
+import { railTurretOffsets } from '../../src/game/weaponTypes.js';
 import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND, PICKUP_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { WORLD_HEIGHT, WORLD_WIDTH, WORLD_BOUNDS } from '../../src/sim/layout.js';
 import { CAMERA_OVERSHOOT_FRACTION } from '../../src/game/camera.js';

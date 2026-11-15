@@ -41,6 +41,18 @@ export const PICKUP_SHAPE_SHARD = 2;
 export const RAIL_TURRET_SPACING_RADIANS = Math.PI / 6;
 export const MAXIMUM_RAIL_TURRETS = 12;
 
+// One turret direction relative to the aim, in radians, for turret index of count: centered on the
+// rear (aim plus pi) and RAIL_TURRET_SPACING_RADIANS apart, so the set grows outward from the back
+// (1 at 180 degrees, 2 at 165 and 195, 3 at 150, 180 and 210; 12 cover every direction).
+export function railTurretOffset(index, count) {
+  return Math.PI + (index - (count - 1) / 2) * RAIL_TURRET_SPACING_RADIANS;
+}
+
+// All count offsets (allocates; the per-step code uses railTurretOffset).
+export function railTurretOffsets(count) {
+  return Array.from({ length: count }, (_, index) => railTurretOffset(index, count));
+}
+
 function tier(values) {
   return Object.freeze({
     fireInterval: 0,

@@ -72,7 +72,8 @@ test('no fire without firing or with zero aim, and the phase restarts afterwards
     assert.equal(total(run(fire, ships, 1, idle)), 0);
     const resumed = run(fire, ships, 0.3);
     const firstVolley = resumed.findIndex((spawns) => spawns.length > 0);
-    assert.ok(firstVolley === -1 || (firstVolley + 1) * STEP >= 0.1 * 0.3, `first volley at step ${firstVolley}`);
+    assert.ok(firstVolley >= 0, 'a volley fires again after the pause');
+    assert.ok((firstVolley + 1) * STEP >= 0.1 * 0.3, `first volley at step ${firstVolley}`);
   }
 });
 
@@ -81,4 +82,28 @@ test('a huge delta fires one volley per gunner, not a backlog', () => {
   const ships = gunners(4);
   fire.fire(ships, AIM);
   assert.equal(fire.fire(ships, { ...AIM, deltaSeconds: 5 }).length, 4);
+});
+
+test('after a huge delta the next normal steps owe one more volley at most, not the missed ones', () => {
+  const fire = new GunnerFire({ random: seededRandom() });
+  const ships = gunners(1);
+  fire.fire(ships, AIM);
+  assert.equal(fire.fire(ships, { ...AIM, deltaSeconds: 5 }).length, 1);
+  // A quarter second is under one 0.3 s interval: one catch-up volley, then the carried remainder.
+  assert.equal(total(run(fire, ships, 0.25)), 1);
+});
+
+test('a slot that stops being a gunner forgets its phase and re-phases by slotHash when promoted again', () => {
+  const fire = new GunnerFire({ random: seededRandom() });
+  const ships = [{ slot: 5, x: 0, y: 0, heading: 0, gunnerIndex: 0 }];
+  run(fire, ships, 1);
+  const demoted = [{ ...ships[0], gunnerIndex: -1 }];
+  run(fire, demoted, 0.1);
+  // Promoted again: the first step schedules (no volley) and the first volley waits out slotHash of the interval.
+  const resumed = run(fire, ships, 0.3);
+  assert.equal(resumed[0].length, 0);
+  const firstVolley = resumed.findIndex((spawns) => spawns.length > 0);
+  assert.ok(firstVolley >= 0);
+  const phase = slotHash(5, 22) * 0.3;
+  assert.ok(Math.abs((firstVolley + 1) * STEP - phase) <= 2 * STEP, `first volley at ${(firstVolley + 1) * STEP}, phase ${phase}`);
 });

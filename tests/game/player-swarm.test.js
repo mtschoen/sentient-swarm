@@ -392,3 +392,12 @@ test('reset clears every gunner', () => {
   assert.ok(swarm.slots.every((slot) => slot.gunnerIndex === -1));
   assert.equal(gunnersOf(swarm).length, 0);
 });
+
+test('setGunnerCount rejects counts that are not integers from 0 to the turret cap', () => {
+  const swarm = new PlayerSwarm({ random: sequenceRandom() });
+  for (const bad of [-1, 1.5, NaN, Infinity, 13, '3', undefined]) {
+    assert.throws(() => swarm.setGunnerCount(bad), RangeError, String(bad));
+  }
+  swarm.setGunnerCount(12);
+  swarm.setGunnerCount(0);
+});

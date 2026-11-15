@@ -90,3 +90,9 @@ test('assignGunners does not allocate', () => {
   assert.equal(Object.keys(slots[0]).join(), keys);
   assert.equal(slots.filter((slot) => slot.gunnerIndex >= 0).length, 12);
 });
+
+test('equidistant ships tie to the lowest slot', () => {
+  const slots = [slotAt(3, 5), slotAt(3, 1), slotAt(1, 3), slotAt(5, 3)];
+  assignGunners(slots, 1, stationList([[3, 3]]));
+  assert.deepEqual(slots.map((slot) => slot.gunnerIndex), [0, -1, -1, -1]);
+});

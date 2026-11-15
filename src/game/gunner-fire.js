@@ -7,7 +7,8 @@
 //   banks at most one step, and one update fires at most one volley per gunner, so a huge
 //   deltaSeconds (a stalled tab) is one volley, not a backlog.
 // - The first volley after fire goes down (or reset) is phased by slotHash over the interval, so
-//   the gunners do not fire in lockstep.
+//   the gunners do not fire in lockstep. A slot that is not a gunner in a call (demoted or dead)
+//   forgets its phase, so a later promotion is phased again.
 import { MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { gunnerShotRecipe } from './swarm-shots.js';
 import { slotHash } from './swarm-hash.js';
@@ -17,12 +18,15 @@ export class GunnerFire {
     this.random = random;
     this.cooldowns = new Float64Array(MAXIMUM_SWARM_SHIPS);
     this.scheduled = new Uint8Array(MAXIMUM_SWARM_SHIPS);
+    // Slots that were gunners in the current call (so a slot that stopped being one is forgotten).
+    this.seen = new Uint8Array(MAXIMUM_SWARM_SHIPS);
     this.reset();
   }
 
   reset() {
     this.cooldowns.fill(0);
     this.scheduled.fill(0);
+    this.seen.fill(0);
   }
 
   // ships: PlayerSwarm.ships entries ({ slot, x, y, heading, gunnerIndex }). Returns the spawns.
@@ -36,6 +40,7 @@ export class GunnerFire {
     const elapsed = deltaSeconds / recipe.intervalSeconds;
     for (const ship of ships) {
       if (ship.gunnerIndex < 0) continue;
+      this.seen[ship.slot] = 1;
       if (this.scheduled[ship.slot] === 0) {
         this.scheduled[ship.slot] = 1;
         this.cooldowns[ship.slot] = slotHash(ship.slot, 22);
@@ -45,6 +50,11 @@ export class GunnerFire {
       if (this.cooldowns[ship.slot] > 0) continue;
       this.cooldowns[ship.slot] += 1;
       this.appendVolley(spawns, ship, recipe);
+    }
+    // A slot that is no longer a gunner (demoted or dead) loses its phase: a later promotion re-phases it.
+    for (let slot = 0; slot < MAXIMUM_SWARM_SHIPS; slot += 1) {
+      if (this.seen[slot] === 0) this.scheduled[slot] = 0;
+      this.seen[slot] = 0;
     }
     return spawns;
   }

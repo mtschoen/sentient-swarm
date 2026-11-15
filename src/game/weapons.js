@@ -1,17 +1,10 @@
-import { MAXIMUM_RAIL_TURRETS, RAIL_TURRET_SPACING_RADIANS, WEAPON_TYPES } from './weaponTypes.js';
+import { MAXIMUM_RAIL_TURRETS, WEAPON_TYPES } from './weaponTypes.js';
 
 const MAXIMUM_TIER = 3;
 const EXPIRY_EPSILON = 1e-9;
 // Volleys one update may fire. Real steps fire at most a few (a quarter second is two base volleys),
 // so this only bounds a huge deltaSeconds (a stalled tab) from looping for seconds.
 export const MAXIMUM_SHOTS_PER_UPDATE = 8;
-
-// Turret directions relative to the aim, in radians: centered on the rear (aim plus pi) and
-// RAIL_TURRET_SPACING_RADIANS apart, so the set grows outward from the back (1 at 180 degrees,
-// 2 at 165 and 195, 3 at 150, 180 and 210; 12 cover every direction).
-export function railTurretOffsets(count) {
-  return Array.from({ length: count }, (_, index) => Math.PI + (index - (count - 1) / 2) * RAIL_TURRET_SPACING_RADIANS);
-}
 
 // Fire control: pure accumulator (no immediate first shot), charge drains only while firing.
 // The armed weapon (base, beam, scatter, pulse, sidewinders) swaps, tiers and expires; rail
