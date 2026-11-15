@@ -35,7 +35,8 @@ export const PICKUP_SHAPE_CLOCK = 1;
 export const PICKUP_SHAPE_SHARD = 2;
 
 // Rail pickups are add-on turrets, not an armed weapon (owner ruling R29): each adds one turret,
-// the turrets sit this far apart around the rear of the aim (and rotate with it), and past the cap
+// a gunner ship (src/game/swarm-gunners.js) whose station sits this far apart around the rear of
+// the aim (and rotates with it), and past the cap
 // (all 360 degrees covered) each further pickup raises the turrets' rail tier instead.
 export const RAIL_TURRET_SPACING_RADIANS = Math.PI / 6;
 export const MAXIMUM_RAIL_TURRETS = 12;

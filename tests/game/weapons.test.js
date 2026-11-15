@@ -261,14 +261,6 @@ test('swapping weapons mid-fire discards the half-built volley of the old weapon
   assert.equal(weapons.update(0.01, aim).spawns.length, 9);
 });
 
-test('swapping weapons mid-fire leaves the turrets accumulator alone', () => {
-  const weapons = makeWeapons();
-  weapons.collect('rail');
-  assert.equal(weapons.update(0.2, aim).turretSpawns.length, 0);
-  weapons.collect('scatter');
-  assert.equal(weapons.update(0.1, aim).turretSpawns.length, 1);
-});
-
 // Owner ruling R29: rail pickups stack into rear-firing turrets that fan out from the back, 30
 // degrees apart, until 12 cover every direction; later pickups raise the turrets' rail tier.
 const DEGREES = Math.PI / 180;
@@ -317,52 +309,19 @@ test('the thirteenth rail pickup raises the turret tier and the count stays 12',
   assert.deepEqual([weapons.railTurrets, weapons.railTier], [12, 3]);
 });
 
-test('turrets fire rail shots at the rail interval while firing and not while idle', () => {
+test('update no longer returns turret spawns', () => {
   const weapons = makeWeapons();
-  collectRails(weapons, 3);
-  const idle = run(weapons, 1, { ...aim, firing: false });
-  assert.ok(idle.every((result) => result.turretSpawns.length === 0));
-  const results = run(weapons, 1.2, aim);
-  const volleys = results.filter((result) => result.turretSpawns.length > 0);
-  const values = WEAPON_TYPES.rail.tiers[0];
-  assert.equal(volleys.length, Math.floor(1.2 / values.fireInterval + 1e-9));
-  const [volley] = volleys;
-  assert.equal(volley.turretSpawns.length, 3);
-  for (const spawn of volley.turretSpawns) {
-    assert.equal(spawn.kind, PROJECTILE_KINDS.rail);
-    assert.deepEqual([spawn.x, spawn.y, spawn.radius, spawn.lifetime], [2, 3, values.radius, values.lifetime]);
-    assert.ok(Math.abs(Math.hypot(spawn.velocityX, spawn.velocityY) - values.speed) < 1e-9);
-  }
-  // Aim along +x: the turrets point at 150, 180 and 210 degrees.
-  assert.deepEqual(sortedDegrees(volley.turretSpawns.map((spawn) => Math.atan2(spawn.velocityY, spawn.velocityX))).map(Math.round), [150, 180, 210]);
+  collectRails(weapons, 12);
+  for (const result of run(weapons, 1, aim)) assert.equal('turretSpawns' in result, false);
 });
 
-test('turret directions rotate with the aim', () => {
+test('a frame with a beam and turrets returns the beam and the base shots only', () => {
   const weapons = makeWeapons();
   weapons.collect('rail');
-  const [spawn] = weapons.update(1, { ...aim, aimX: 0, aimY: 1 }).turretSpawns;
-  assert.ok(Math.abs(spawn.velocityX) < 1e-9);
-  assert.ok(Math.abs(spawn.velocityY + WEAPON_TYPES.rail.tiers[0].speed) < 1e-9);
-});
-
-test('higher turret tiers fire parallel rails per turret', () => {
-  const weapons = makeWeapons();
-  collectRails(weapons, 13);
-  const { turretSpawns } = weapons.update(WEAPON_TYPES.rail.tiers[1].fireInterval, aim);
-  assert.equal(turretSpawns.length, 12 * WEAPON_TYPES.rail.tiers[1].projectilesPerShot);
-});
-
-test('a frame with weapon and turret shots returns both spawn sets, the beam included', () => {
-  const weapons = makeWeapons();
-  weapons.collect('rail');
-  const result = weapons.update(0.3, aim);
-  assert.equal(result.spawns.length, 2 * WEAPON_TYPES.base.tiers[0].projectilesPerShot);
-  assert.ok(result.spawns.every((spawn) => spawn.kind === PROJECTILE_KINDS.bullet));
-  assert.equal(result.turretSpawns.length, 1);
   weapons.collect('beam');
-  const beamFrame = weapons.update(0.3, aim);
-  assert.notEqual(beamFrame.beam, null);
-  assert.equal(beamFrame.turretSpawns.length, 1);
+  const result = weapons.update(0.3, aim);
+  assert.notEqual(result.beam, null);
+  assert.deepEqual(Object.keys(result).sort(), ['beam', 'expired', 'spawns']);
 });
 
 test('dropAll clears the turrets and their tier; expiry keeps them', () => {
@@ -381,10 +340,6 @@ test('fire on a huge delta spawns at most MAXIMUM_SHOTS_PER_UPDATE volleys', () 
   const result = weapons.update(1000, aim);
   assert.equal(result.spawns.length, MAXIMUM_SHOTS_PER_UPDATE * 3);
   assert.equal(weapons.accumulator < 0.12, true);
-  const turreted = makeWeapons();
-  turreted.collect('rail');
-  const turretResult = turreted.update(1000, aim);
-  assert.equal(turretResult.turretSpawns.length, MAXIMUM_SHOTS_PER_UPDATE);
 });
 
 test('the volley cap exceeds any real step so ordinary play is unchanged', () => {
@@ -400,7 +355,6 @@ test('zero aim while firing resets the accumulator', () => {
   assert.equal(weapons.accumulator > 0, true);
   weapons.update(0.05, { ...aim, aimX: 0, aimY: 0 });
   assert.equal(weapons.accumulator, 0);
-  assert.equal(weapons.railAccumulator, 0);
 });
 
 test('beam time arms the beam at full charge that does not drain, and ending it restores the loadout', () => {
@@ -447,14 +401,12 @@ test('collecting during beam time changes the stashed loadout and leaves the bea
   assert.deepEqual([tiering.armed, tiering.tier], ['scatter', 3]);
 });
 
-test('rail pickups during beam time add turrets that fire beside the beam', () => {
+test('rail pickups during beam time add turrets and leave the beam armed', () => {
   const weapons = makeWeapons();
   weapons.beginBeamTime(1);
   weapons.collect('rail');
   assert.equal(weapons.railTurrets, 1);
   assert.equal(weapons.armed, 'beam');
-  const results = run(weapons, 1, aim);
-  assert.ok(results.some((result) => result.turretSpawns.length > 0));
   weapons.endBeamTime();
   assert.equal(weapons.railTurrets, 1);
 });

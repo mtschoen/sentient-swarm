@@ -15,8 +15,9 @@ export function railTurretOffsets(count) {
 
 // Fire control: pure accumulator (no immediate first shot), charge drains only while firing.
 // The armed weapon (base, beam, scatter, pulse, sidewinders) swaps, tiers and expires; rail
-// pickups instead add turrets (railTurrets, up to MAXIMUM_RAIL_TURRETS, then railTier), which fire
-// rail shots alongside it on their own accumulator, have no charge and are lost only by dropAll.
+// pickups instead add turrets (railTurrets, up to MAXIMUM_RAIL_TURRETS, then railTier): this class
+// keeps only their count and tier, have no charge and are lost only by dropAll. The turrets are
+// gunner ships whose fire is GunnerFire's (src/game/gunner-fire.js).
 export class WeaponState {
   #held = null;
 
@@ -90,24 +91,20 @@ export class WeaponState {
     this.dropArmed();
     this.railTurrets = 0;
     this.railTier = 1;
-    this.railAccumulator = 0;
   }
 
-  // spawns are the armed weapon's shots and turretSpawns the turrets' rail shots, both fired
-  // while firing along a nonzero aim.
+  // spawns are the armed weapon's shots, fired while firing along a nonzero aim.
   update(deltaSeconds, { firing, aimX, aimY, x, y }) {
-    const result = { spawns: [], turretSpawns: [], beam: null, expired: false };
+    const result = { spawns: [], beam: null, expired: false };
     const definition = this.types[this.armed];
     const values = definition.tiers[this.tier - 1];
     if (!firing) {
       this.accumulator = 0;
-      this.railAccumulator = 0;
       return result;
     }
     const length = Math.hypot(aimX, aimY);
     if (length === 0) {
       this.accumulator = 0;
-      this.railAccumulator = 0;
       return result;
     }
     const directionX = aimX / length;
@@ -128,7 +125,6 @@ export class WeaponState {
         this.#appendShot(result.spawns, definition.kind, values, { x, y, directionX, directionY });
       }
     }
-    this.fireTurrets(deltaSeconds, result.turretSpawns, { x, y, directionX, directionY });
 
     if (!this.isBase && this.#held === null) {
       this.charge -= deltaSeconds / values.chargeSeconds;
@@ -138,27 +134,6 @@ export class WeaponState {
       }
     }
     return result;
-  }
-
-  fireTurrets(deltaSeconds, spawns, { x, y, directionX, directionY }) {
-    if (this.railTurrets === 0) return;
-    const definition = this.types.rail;
-    const values = definition.tiers[this.railTier - 1];
-    const aimAngle = Math.atan2(directionY, directionX);
-    this.railAccumulator += deltaSeconds;
-    let volleys = 0;
-    while (this.railAccumulator >= values.fireInterval) {
-      if (volleys === MAXIMUM_SHOTS_PER_UPDATE) {
-        this.railAccumulator = 0;
-        break;
-      }
-      this.railAccumulator -= values.fireInterval;
-      volleys += 1;
-      for (const offset of railTurretOffsets(this.railTurrets)) {
-        const angle = aimAngle + offset;
-        this.#appendShot(spawns, definition.kind, values, { x, y, directionX: Math.cos(angle), directionY: Math.sin(angle) });
-      }
-    }
   }
 
   #appendShot(spawns, kind, values, { x, y, directionX, directionY }) {
