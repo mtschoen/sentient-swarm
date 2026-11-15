@@ -34,7 +34,7 @@ test('no pickup before 10 s on base gun, one at 10 s, another at 20 s', () => {
   run(director, 0.2);
   assert.equal(director.pickups.length, 1);
   const [first] = director.pickups;
-  assert.equal(director.collect(first.x, first.y), 'beam');
+  assert.equal(director.collect(first.x, first.y), 'scatter');
   run(director, 9.7);
   assert.equal(director.pickups.length, 0);
   run(director, 0.2);
@@ -53,23 +53,23 @@ test('timers do not advance outside the playing phase', () => {
   const director = makeDirector();
   run(director, 30, { phasePlaying: false });
   assert.equal(director.pickups.length, 0);
-  assert.equal(director.offeredType, 'beam');
+  assert.equal(director.offeredType, 'scatter');
 });
 
 test('a milestone spawns immediately', () => {
   const director = makeDirector();
   director.update(STEP, { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: true, phasePlaying: true });
   assert.equal(director.pickups.length, 1);
-  assert.equal(director.pickups[0].type, 'beam');
+  assert.equal(director.pickups[0].type, 'scatter');
 });
 
 test('offered type rotates every 20 s', () => {
   const director = makeDirector();
-  assert.equal(director.offeredType, 'beam');
-  run(director, 20.1, { onBaseGun: false });
   assert.equal(director.offeredType, 'scatter');
-  run(director, 20, { onBaseGun: false });
+  run(director, 20.1, { onBaseGun: false });
   assert.equal(director.offeredType, 'rail');
+  run(director, 20, { onBaseGun: false });
+  assert.equal(director.offeredType, 'pulse');
 });
 
 test('placement stays within [3, 5] of the player and inside the arena at a corner', () => {
@@ -108,7 +108,7 @@ test('collect returns the type and removes the nearest pickup within radius', ()
   const [pickup] = director.pickups;
   assert.equal(director.collect(pickup.x + 2, pickup.y), null);
   assert.equal(director.pickups.length, 1);
-  assert.equal(director.collect(pickup.x + 0.2, pickup.y), 'beam');
+  assert.equal(director.collect(pickup.x + 0.2, pickup.y), 'scatter');
   assert.equal(director.pickups.length, 0);
   assert.equal(director.collect(pickup.x, pickup.y), null);
 });
@@ -118,7 +118,7 @@ test('reset clears pickups, timers and rotation', () => {
   run(director, 25);
   director.reset();
   assert.equal(director.pickups.length, 0);
-  assert.equal(director.offeredType, 'beam');
+  assert.equal(director.offeredType, 'scatter');
   run(director, 9.9);
   assert.equal(director.pickups.length, 0);
 });
@@ -173,17 +173,19 @@ test('without densityAt the first valid candidate wins, as before', () => {
   assert.deepEqual(withBias.pickups[0], plain.pickups[0]);
 });
 
-// Owner ruling R31: the time warp joins the rotation after the weapons, one slot in six.
-test('the rotation offers the weapons in their order, then timewarp, one slot in six', async () => {
-  const { PICKUP_TYPE_NAMES, WEAPON_TYPE_NAMES } = await import('../../src/game/weaponTypes.js');
-  assert.deepEqual(PICKUP_TYPE_NAMES, [...WEAPON_TYPE_NAMES, 'timewarp']);
+// Owner ruling R31: the time warp joins the rotation after the weapons, one slot in five; the beam
+// is earned through shards and is never offered.
+test('the rotation offers scatter, rail, pulse, sidewinders then timewarp, one slot in five, and never the beam', async () => {
+  const { PICKUP_TYPE_NAMES } = await import('../../src/game/weaponTypes.js');
+  assert.deepEqual([...PICKUP_TYPE_NAMES], ['scatter', 'rail', 'pulse', 'sidewinders', 'timewarp']);
   const director = makeDirector();
   const offered = [director.offeredType];
-  for (let slot = 1; slot < 12; slot += 1) {
+  for (let slot = 1; slot < 10; slot += 1) {
     run(director, 20, { onBaseGun: false });
     offered.push(director.offeredType);
   }
   assert.deepEqual(offered, [...PICKUP_TYPE_NAMES, ...PICKUP_TYPE_NAMES]);
+  assert.equal(offered.includes('beam'), false);
   assert.equal(offered.filter((type) => type === 'timewarp').length, 2);
   director.update(STEP, { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: true, phasePlaying: true });
   assert.equal(director.pickups.at(-1).type, 'timewarp', 'a time warp slot spawns a time warp pickup');
@@ -192,11 +194,11 @@ test('the rotation offers the weapons in their order, then timewarp, one slot in
 // Review fix round 1: the recovery guard always offers a weapon; the rotation is unchanged.
 test('a pity spawn on the time warp slot offers the next weapon instead; a milestone still offers the time warp', () => {
   const director = makeDirector();
-  run(director, 5 * 20 + 0.1, { onBaseGun: false });
+  run(director, 4 * 20 + 0.1, { onBaseGun: false });
   assert.equal(director.offeredType, 'timewarp');
   run(director, 10, { onBaseGun: true });
   assert.equal(director.pickups.length, 1);
-  assert.equal(director.pickups[0].type, 'beam', 'the pity spawn skips the time warp slot');
+  assert.equal(director.pickups[0].type, 'scatter', 'the pity spawn skips the time warp slot');
   assert.equal(director.offeredType, 'timewarp', 'the rotation index is unchanged');
   director.update(STEP, { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: true, phasePlaying: true });
   assert.equal(director.pickups.at(-1).type, 'timewarp');
@@ -259,13 +261,13 @@ test('collect takes the nearer of two pickups in reach, whichever order they wer
 test('the rotation moving on does not retype a pickup already on the field', () => {
   const director = new PickupDirector({ random: sequenceRandom(), fadeSeconds: 100 });
   director.update(STEP, { ...FAR_FROM_EVERYTHING, milestone: true, phasePlaying: true });
-  assert.equal(director.pickups[0].type, 'beam');
+  assert.equal(director.pickups[0].type, 'scatter');
   run(director, 20, FAR_FROM_EVERYTHING);
-  assert.equal(director.offeredType, 'scatter');
+  assert.equal(director.offeredType, 'rail');
   director.update(STEP, { ...FAR_FROM_EVERYTHING, milestone: true, phasePlaying: true });
-  assert.deepEqual(director.pickups.map((pickup) => pickup.type), ['beam', 'scatter']);
+  assert.deepEqual(director.pickups.map((pickup) => pickup.type), ['scatter', 'rail']);
   run(director, 20, FAR_FROM_EVERYTHING);
-  assert.deepEqual(director.pickups.map((pickup) => pickup.type), ['beam', 'scatter']);
+  assert.deepEqual(director.pickups.map((pickup) => pickup.type), ['scatter', 'rail']);
 });
 
 test('pickups spawn inside narrow bounds, and setBounds changes where they may land', () => {

@@ -24,11 +24,15 @@ export const WEAPON_HUES = Object.freeze({
 export const WEAPON_TYPE_NAMES = Object.freeze(['beam', 'scatter', 'rail', 'pulse', 'sidewinders']);
 
 // The pickup rotation (owner ruling R31): the weapons in their order, then the time warp, so a
-// time warp is offered one slot in six. Its pickup is a cold white-violet clock (pickups.wgsl
-// draws the clock when PICKUP_SHAPE_CLOCK is added to the hue slot).
-export const PICKUP_TYPE_NAMES = Object.freeze([...WEAPON_TYPE_NAMES, 'timewarp']);
-export const PICKUP_HUES = Object.freeze({ timewarp: 0.72 });
+// time warp is offered one slot in five (a share of 20 of 100 s). The beam is not in the rotation:
+// it is earned by collecting shards (`beam-shards.js`), so it is filtered out here. The time warp
+// pickup is a cold white-violet clock (pickups.wgsl draws the clock when PICKUP_SHAPE_CLOCK is
+// added to the hue slot); a beam shard pickup is drawn with PICKUP_SHAPE_SHARD in the beam's hue.
+export const PICKUP_TYPE_NAMES = Object.freeze([...WEAPON_TYPE_NAMES.filter((name) => name !== 'beam'), 'timewarp']);
+export const BEAM_SHARD_TYPE = 'beamshard';
+export const PICKUP_HUES = Object.freeze({ timewarp: 0.72, [BEAM_SHARD_TYPE]: WEAPON_HUES.beam });
 export const PICKUP_SHAPE_CLOCK = 1;
+export const PICKUP_SHAPE_SHARD = 2;
 
 // Rail pickups are add-on turrets, not an armed weapon (owner ruling R29): each adds one turret,
 // the turrets sit this far apart around the rear of the aim (and rotate with it), and past the cap

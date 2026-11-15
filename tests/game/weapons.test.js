@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WeaponState, railTurretOffsets, MAXIMUM_SHOTS_PER_UPDATE } from '../../src/game/weapons.js';
-import { WEAPON_TYPES, WEAPON_TYPE_NAMES, PROJECTILE_KINDS, RAIL_TURRET_SPACING_RADIANS, MAXIMUM_RAIL_TURRETS, WEAPON_HUES, PICKUP_TYPE_NAMES, PICKUP_HUES, PICKUP_SHAPE_CLOCK, DEFAULT_BASE_KILL_BUDGET, MAXIMUM_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES, BEAM_SWEEP_MINIMUM_REACH_SCALE } from '../../src/game/weaponTypes.js';
+import { WEAPON_TYPES, WEAPON_TYPE_NAMES, PROJECTILE_KINDS, RAIL_TURRET_SPACING_RADIANS, MAXIMUM_RAIL_TURRETS, WEAPON_HUES, PICKUP_TYPE_NAMES, PICKUP_HUES, PICKUP_SHAPE_CLOCK, PICKUP_SHAPE_SHARD, BEAM_SHARD_TYPE, DEFAULT_BASE_KILL_BUDGET, MAXIMUM_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, MAXIMUM_BEAM_SWEEP_THRESHOLD_DEGREES, BEAM_SWEEP_MINIMUM_REACH_SCALE } from '../../src/game/weaponTypes.js';
 
 const STEP = 1 / 60;
 const aim = { firing: true, aimX: 1, aimY: 0, x: 2, y: 3 };
@@ -194,9 +194,12 @@ test('every weapon table entry is pinned by exact value', () => {
 test('the projectile kind numbers and the weapon hues are pinned by exact value', () => {
   assert.deepEqual({ ...PROJECTILE_KINDS }, { bullet: 0, scatter: 1, rail: 2, pulseOrb: 3, pulseRing: 4, sidewinder: 5, beam: 6 });
   assert.deepEqual({ ...WEAPON_HUES }, { base: 0.5, beam: 0.92, scatter: 0.07, rail: 0.6, pulse: 0.35, sidewinders: 0.78 });
-  assert.deepEqual([...PICKUP_TYPE_NAMES], ['beam', 'scatter', 'rail', 'pulse', 'sidewinders', 'timewarp']);
-  assert.deepEqual({ ...PICKUP_HUES }, { timewarp: 0.72 });
+  assert.deepEqual([...PICKUP_TYPE_NAMES], ['scatter', 'rail', 'pulse', 'sidewinders', 'timewarp']);
+  assert.deepEqual({ ...PICKUP_HUES }, { timewarp: 0.72, beamshard: 0.92 });
+  assert.equal(PICKUP_HUES.beamshard, WEAPON_HUES.beam);
   assert.equal(PICKUP_SHAPE_CLOCK, 1);
+  assert.equal(PICKUP_SHAPE_SHARD, 2);
+  assert.equal(BEAM_SHARD_TYPE, 'beamshard');
 });
 
 test('the lab knob defaults and limits are pinned by exact value', () => {
