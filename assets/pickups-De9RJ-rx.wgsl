@@ -1,8 +1,9 @@
 // Pickups: one instanced quad per pickup (at most MAXIMUM_PICKUPS, drawn as the instance count),
 // read from a small uniform array. A slowly rotating hexagon outline in the weapon's hue with a
-// soft pulse and a glowing core, alpha times the pickup's fade. A hue of 1 or more is the time warp
-// (PICKUP_SHAPE_CLOCK added in pickups.js): a paler ring with a sweeping hand and a brighter core,
-// a clock. Common and quad headers prepended (hsvToRgb, segmentDistance).
+// soft pulse and a glowing core, alpha times the pickup's fade. floor(hue) is the shape
+// (PICKUP_SHAPE_CLOCK and PICKUP_SHAPE_SHARD added in pickups.js): 0 hexagon, 1 the time warp, a
+// paler ring with a sweeping hand and a brighter core, a clock, 2 a beam shard, a bright rotating
+// diamond that pulses fast with a thick outline. Common and quad headers prepended (hsvToRgb, segmentDistance).
 
 // Uniform layout, total 544 bytes; PickupRenderer in pickups.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
@@ -31,6 +32,14 @@ const CLOCK_HAND_SHARE: f32 = 0.8;
 const CLOCK_SATURATION: f32 = 0.45;
 const CLOCK_CORE: f32 = 1.4;
 const WEAPON_CORE: f32 = 0.8;
+const SHAPE_CLOCK: f32 = 1.0;
+const SHAPE_SHARD: f32 = 2.0;
+// The beam shard diamond: L1 radius inside the half extent, a faster pulse, a thicker outline.
+const SHARD_RADIUS: f32 = 0.30;
+const SHARD_PULSE_RATE: f32 = PULSE_RATE * 2.0;
+const SHARD_OUTLINE_HALF_WIDTH: f32 = OUTLINE_HALF_WIDTH * 1.4;
+const SHARD_SATURATION: f32 = 0.7;
+const SHARD_CORE: f32 = 1.8;
 
 struct PickupVaryings {
   @builtin(position) position: vec4f,
@@ -70,18 +79,35 @@ fn pickupFragment(input: PickupVaryings) -> @location(0) vec4f {
   let cosine = cos(angle);
   let sine = sin(angle);
   let rotated = vec2f(cosine * input.offset.x + sine * input.offset.y, -sine * input.offset.x + cosine * input.offset.y);
-  let pulse = 1.0 + 0.1 * sin(view.time * PULSE_RATE + input.phase);
-  let clock = input.hue >= 1.0;
+  let shape = floor(input.hue);
+  let clock = shape == SHAPE_CLOCK;
+  let shard = shape == SHAPE_SHARD;
+  let pulseRate = select(PULSE_RATE, SHARD_PULSE_RATE, shard);
+  let pulse = 1.0 + 0.1 * sin(view.time * pulseRate + input.phase);
+  let halfWidth = select(OUTLINE_HALF_WIDTH, SHARD_OUTLINE_HALF_WIDTH, shard);
   var outline = abs(hexagonDistance(rotated, HEXAGON_RADIUS * pulse));
   if (clock) {
     let handAngle = view.time * CLOCK_HAND_RATE + input.phase;
     let hand = vec2f(sin(handAngle), cos(handAngle)) * HEXAGON_RADIUS * CLOCK_HAND_SHARE;
     outline = min(abs(length(input.offset) - HEXAGON_RADIUS * pulse), segmentDistance(input.offset, vec2f(0.0), hand));
   }
-  let band = 1.0 - smoothstep(OUTLINE_HALF_WIDTH, OUTLINE_HALF_WIDTH + feather * 2.0, outline);
-  let glow = exp(-max(outline - OUTLINE_HALF_WIDTH, 0.0) * 16.0) * 0.6;
-  let core = exp(-length(input.offset) * 14.0) * select(WEAPON_CORE, CLOCK_CORE, clock);
-  let tint = hsvToRgb(fract(input.hue), select(SATURATION, CLOCK_SATURATION, clock), 1.0);
+  if (shard) {
+    outline = abs(abs(rotated.x) + abs(rotated.y) - SHARD_RADIUS * pulse) * 0.70710678;
+  }
+  let band = 1.0 - smoothstep(halfWidth, halfWidth + feather * 2.0, outline);
+  let glow = exp(-max(outline - halfWidth, 0.0) * 16.0) * 0.6;
+  var coreStrength = WEAPON_CORE;
+  var saturation = SATURATION;
+  if (clock) {
+    coreStrength = CLOCK_CORE;
+    saturation = CLOCK_SATURATION;
+  }
+  if (shard) {
+    coreStrength = SHARD_CORE;
+    saturation = SHARD_SATURATION;
+  }
+  let core = exp(-length(input.offset) * 14.0) * coreStrength;
+  let tint = hsvToRgb(fract(input.hue), saturation, 1.0);
   let color = tint * (band * 1.5 + glow + core) + vec3f(band * 0.4);
   return vec4f(color * input.fade, 0.0);
 }
