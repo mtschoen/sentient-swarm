@@ -44,6 +44,12 @@
    other's text changes; in a narrow band the text wraps inside it instead of being clipped. */
 .hud-seat { width: 26ch; max-width: 100%; box-sizing: border-box; text-align: left; font-variant-numeric: tabular-nums;
   text-shadow: 0 0 6px currentColor; }
+/* Hives readout (hud-hives.js): laid out for a whole hives run, under the multiplier. */
+.hud-hives { display: flex; flex-direction: column; gap: 4px; font-size: 13px; line-height: 16px; }
+.hud-hives[hidden] { display: none; }
+.hud-hive-pips { display: flex; gap: 6px; align-items: center; min-height: 16px; }
+.hud-hive-pip { width: 14px; height: 14px; box-sizing: border-box; border: 2px solid rgba(200, 200, 215, 0.75); border-radius: 50%; }
+.hud-hive-countdown { white-space: nowrap; font-variant-numeric: tabular-nums; min-height: 16px; }
 .hud-lives { color: #19e6ff; text-shadow: 0 0 8px #19e6ff; }
 .hud-bombs { color: #ff8a1f; text-shadow: 0 0 8px #ff8a1f; }
 

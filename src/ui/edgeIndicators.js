@@ -5,11 +5,13 @@
 // pure geometry: world to CSS pixels through the view bounds and the arena rect, then the ray from
 // the rect center to the target clamped to the rect inset by EDGE_INDICATOR_INSET_CSS_PIXELS.
 import { BEAM_SHARD_TYPE, PICKUP_HUES, WEAPON_HUES } from '../game/weaponTypes.js';
+import { SEAT_COLORS } from '../game/seat-colors.js';
 
 export const EDGE_INDICATOR_SLOTS = 12;
 export const EDGE_INDICATOR_INSET_CSS_PIXELS = 24;
 const CHEVRON_SIZE_CSS_PIXELS = 14;
 const GATE_COLOR = 'hsl(8, 95%, 62%)';
+const HIVE_NEUTRAL_COLOR = 'rgba(200, 200, 215, 0.9)';
 const FADE = 'opacity 0.2s linear';
 
 // { visible, left, top, angle } in CSS pixels and radians for target { x, y } (world units);
@@ -35,10 +37,14 @@ export function edgeIndicatorPlacement(target, viewBounds, rect, inset = EDGE_IN
 }
 
 // The targets to indicate: every pickup but a beam shard (which has its own pointer, beam-shard-pointer.js),
-// colored by its hue, then every gate with a telegraph.
+// colored by its hue, then every gate with a telegraph. In hives every hive row (a gate with a hive,
+// hive-seats.js) is indicated, in its owner's color or a pale neutral, telegraphed or not.
 export function edgeIndicatorTargets(pickups, gates) {
   const targets = pickups.filter((pickup) => pickup.type !== BEAM_SHARD_TYPE).map((pickup) => ({ x: pickup.x, y: pickup.y, color: `hsl(${Math.round(360 * (WEAPON_HUES[pickup.type] ?? PICKUP_HUES[pickup.type] ?? 0))}, 90%, 66%)` }));
-  for (const gate of gates) if (gate.telegraph > 0) targets.push({ x: gate.x, y: gate.y, color: GATE_COLOR });
+  for (const gate of gates) {
+    if (gate.hive !== undefined) targets.push({ x: gate.x, y: gate.y, color: gate.hive.owner === null ? HIVE_NEUTRAL_COLOR : SEAT_COLORS[gate.hive.owner].css });
+    else if (gate.telegraph > 0) targets.push({ x: gate.x, y: gate.y, color: GATE_COLOR });
+  }
   return targets.slice(0, EDGE_INDICATOR_SLOTS);
 }
 

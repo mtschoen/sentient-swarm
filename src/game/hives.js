@@ -16,8 +16,8 @@ import { HIVE_TUNING } from './hive-tuning.js';
 
 export const HIVE_COUNT = 3;
 // The hive sites in bounds ({ minX, minY, maxX, maxY }) for seats starting startOffset either side of
-// the center on x (VERSUS_START_OFFSET): [{ x, y, radius }], seat 1's hive (sideOffset below seat 1's
-// start), seat 2's hive (sideOffset above seat 2's start) and the contested one at the center. The
+// the center on x (VERSUS_START_OFFSET): [{ x, y, radius }], seat 1's hive (sideOffset above seat 1's
+// start on screen, smaller y), seat 2's hive (sideOffset below seat 2's) and the contested one at the center. The
 // layout is point-symmetric about the center, so neither seat's side is favored, and every site is
 // at least sideOffset from both starts.
 export function hiveSites(bounds, startOffset, { radius = HIVE_TUNING.radius, sideOffset = HIVE_TUNING.sideOffset } = {}) {

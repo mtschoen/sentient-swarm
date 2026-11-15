@@ -87,7 +87,7 @@ test('the title always lays out the mode item, ghosted and skipped by the focus 
   assert.equal(calls.start, 0, 'a click on the ghosted item does not start the run');
 });
 
-test('with player 2 the mode item toggles by confirm and by click, and never starts the run', () => {
+test('with player 2 the mode item steps co-op, versus, hives by confirm and by click, and never starts the run', () => {
   const { control, menu, calls } = titleWithMode();
   control.update({ joined: true });
   const button = modeButton(menu);
@@ -98,6 +98,9 @@ test('with player 2 the mode item toggles by confirm and by click, and never sta
   menu.handleAction('confirm');
   assert.equal(control.mode, 'versus');
   assert.equal(button.textContent, 'MODE: VERSUS');
+  button.fire('click');
+  assert.equal(control.mode, 'hives');
+  assert.equal(button.textContent, 'MODE: HIVES');
   button.fire('click');
   assert.equal(control.mode, 'coop');
   assert.equal(calls.start, 0);

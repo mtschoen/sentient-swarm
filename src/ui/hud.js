@@ -1,6 +1,7 @@
 import { BEAM_SHARDS_NEEDED } from '../game/beam-shards.js';
 import { SEAT_COLORS } from '../game/seat-colors.js';
 import { LIFE_ICON, seatReadoutText, tierNumeral, weaponText } from './hud-seat.js';
+import { createHiveReadout } from './hud-hives.js';
 
 // HUD: plain DOM in the letterbox bands (or along the arena top edge when the bands are narrow,
 // as on a phone in landscape). Everything is pointer-events none except the game-over overlay,
@@ -96,7 +97,9 @@ export function createHud(rootElement, {
   });
   const seats = row('hud-seats', seatRows);
   seats.hidden = true;
-  const leftPanel = row('hud-panel hud-left', [score, multiplier]);
+  // Hives runs only (hud-hives.js): the hive pips and the hold countdown under the multiplier.
+  const hiveReadout = createHiveReadout(make);
+  const leftPanel = row('hud-panel hud-left', [score, multiplier, hiveReadout.element]);
   const rightPanel = row('hud-panel hud-right', [weapon, turrets, warp, beamPips, beam, charge, offer, row('hud-icons', [lives, bombs]), seats]);
 
   const finalScore = make('div', 'hud-final-score');
@@ -201,6 +204,7 @@ export function createHud(rootElement, {
       const seatStates = state.seats?.length === 2 ? state.seats : null;
       seats.hidden = !seatStates;
       if (seatStates) seatRows.forEach((seatRow, index) => setText(seatRow, seatReadoutText(seatStates[index], index)));
+      hiveReadout.update(state.hives ?? null);
       const offered = state.offeredType;
       setText(offer, offered ? `NEXT ${OFFER_LABELS[offered] ?? String(offered).toUpperCase()}` : '');
       const armedNow = state.armed && state.armed !== 'base';

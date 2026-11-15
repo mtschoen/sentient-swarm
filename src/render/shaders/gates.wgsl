@@ -19,6 +19,16 @@ struct GateView {
 
 @group(0) @binding(0) var<uniform> view: GateView;
 
+// Hives (stage 3), read by hiveFragment only (the plain gate pipeline's layout leaves it out); total
+// 96 bytes, packHiveView in gates.js writes it: the two seat colors (rgb, 0), then per gate row
+// (hive 1 or 0, owner seat plus 1, capture progress 0 to 1, capturer seat plus 1).
+struct HiveView {
+  seatColors: array<vec4f, 2>,
+  rows: array<vec4f, 4>,
+}
+
+@group(0) @binding(1) var<uniform> hives: HiveView;
+
 // The quad reaches this multiple of the gate radius, room for the outer glow.
 const QUAD_REACH: f32 = 1.4;
 const RING_HALF_WIDTH: f32 = 0.035;
@@ -68,5 +78,43 @@ fn gateFragment(input: GateVaryings) -> @location(0) vec4f {
   let brightness = open * (BASE_BRIGHTNESS + TELEGRAPH_BRIGHTNESS * telegraph + EMIT_BRIGHTNESS * emit);
   let tint = hsvToRgb(input.state.x, SATURATION, 1.0);
   let color = tint * (ring + haze + core) * brightness + vec3f(ring * 0.15 * brightness);
+  return vec4f(color, 0.0);
+}
+
+const NEUTRAL_HIVE_TINT: vec3f = vec3f(0.75, 0.75, 0.8);
+const HIVE_RING_HALF_WIDTH: f32 = 0.05;
+// The progress arc sits just outside the ring, inside the quad's reach.
+const PROGRESS_ARC_SCALE: f32 = 1.2;
+const PROGRESS_ARC_HALF_WIDTH: f32 = 0.07;
+
+fn seatTint(seatPlusOne: f32) -> vec3f {
+  return hives.seatColors[u32(seatPlusOne) - 1u].rgb;
+}
+
+// A hive: neutral is a pale dashed ring; owned a solid ring with a haze in the owner's color; capture
+// progress an arc in the capturer's color, clockwise from the top; emission flares as for a gate.
+@fragment
+fn hiveFragment(input: GateVaryings) -> @location(0) vec4f {
+  let row = hives.rows[min(u32(input.state.w), 3u)];
+  let radius = input.shape.z;
+  let emit = input.state.y;
+  let telegraph = input.state.z;
+  let distance = length(input.offset);
+  let owned = row.y >= 1.0;
+  let tint = select(NEUTRAL_HIVE_TINT, seatTint(max(row.y, 1.0)), owned);
+  let angle = atan2(input.offset.y, input.offset.x);
+  let dash = select(smoothstep(0.15, 0.45, 0.5 + 0.5 * cos(angle * GATE_DASHES + view.time * ROTATION_RATE * GATE_DASHES)), 1.0, owned);
+  let ring = exp(-max(abs(distance - radius) - HIVE_RING_HALF_WIDTH, 0.0) * 24.0) * (0.3 + 0.7 * dash);
+  let haze = (1.0 - smoothstep(0.0, radius, distance)) * select(0.06, 0.22, owned);
+  let core = exp(-distance / max(radius, 0.01) * 4.0) * emit * (0.6 + 0.4 * sin(view.time * 24.0));
+  let brightness = select(0.45, 0.8, owned) + TELEGRAPH_BRIGHTNESS * telegraph + EMIT_BRIGHTNESS * emit;
+  var color = tint * (ring + haze + core) * brightness;
+  if (row.w >= 1.0 && row.z > 0.0) {
+    // Clockwise on screen from the top (world y grows downward): 0 at the top, rising toward +x.
+    let sweep = fract(atan2(input.offset.x, -input.offset.y) / TAU + 1.0);
+    let onArc = step(sweep, row.z);
+    let arc = exp(-max(abs(distance - radius * PROGRESS_ARC_SCALE) - PROGRESS_ARC_HALF_WIDTH, 0.0) * 30.0);
+    color = max(color, seatTint(row.w) * arc * (0.25 + 0.95 * onArc));
+  }
   return vec4f(color, 0.0);
 }

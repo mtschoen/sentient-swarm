@@ -10,7 +10,7 @@
 // An item may carry an id, a className and enabled: false (ghosted: aria-disabled, the menu-disabled
 // class, skipped by the focus ring, its click and confirm do nothing); setItem(id, { label, enabled })
 // changes one in place, so the list never gains or loses a button. The title menu's optional
-// modeItem (the co-op or versus choice, mode-choice.js) is such an item, second in the focus order.
+// modeItem (the co-op, versus or hives choice, mode-choice.js) is such an item, second in the focus order.
 export const SOURCE_URL = 'https://github.com/mtschoen/sentient-swarm';
 
 function buildMenu({ documentObject, className, title, items, footerLink = null, onBackdrop = null, onAltConfirm = null, onBack = null }) {
