@@ -13,7 +13,7 @@
 //          inside its range; the lab (lab.js LAB_KNOB_BINDINGS) applies them, clamped to its slider
 //          ranges (panelModel.js LAB_KNOBS), through SpawnPressure.setRamp, SpawnDirector.setSchedule,
 //          the Simulation setters (spawn, particles, walls, comfort radius, seek range (0 is
-//          unlimited), coarse-field pressure 0 or 1), the projectile budgets, the pickup blast, the watch alive target, same-species
+//          unlimited), coarse-field pressure 0 or 1), the projectile budgets, the pickup blast, the beam shards needed, waves per shard, beam time seconds and spawn surge, the watch alive target, same-species
 //          cohesion (0 or 1) and the renderer settings (exposure included). A knob the map leaves
 //          out (every knob, for a mix without the map) is applied at its shipped default. effects,
 //          shake and trails (settings panel percents) are accepted but the lab sets the raw
@@ -45,6 +45,7 @@ export const KNOB_RANGES = {
   pickupBlastRadius: [0, 4], baseKillBudget: [0, 64], beamSweepThresholdDegrees: [0, 90],
   beamTurnRevolutionsPerSecond: [0, 4],
   timeWarpSeconds: [1, 20], timeWarpScale: [0.1, 1],
+  beamShardsNeeded: [1, 8], beamShardWaveInterval: [1, 60], beamTimeSeconds: [1, 30], beamTimeSurge: [1, 6],
   trailDecay: [0, 0.99], bloomStrength: [0, 3], warpDensityWeight: [0, 1], warpThreatWeight: [0, 2],
   shipArenaFraction: [0.012, 0.04],
   wallMargin: [0, 2], wallStiffness: [0, 160], comfortRadius: [0, 4], seekRange: [0, 40],

@@ -62,3 +62,10 @@ test('slider specs name real species fields and render settings, defaults inside
     assert.ok(value >= spec.minimum && value <= spec.maximum, spec.key);
   }
 });
+
+test('the Beam knob group lists the four beam knobs with integer shard and wave knobs', async () => {
+  const { LAB_KNOB_GROUPS } = await import('../../src/ui/panelModel.js');
+  const group = LAB_KNOB_GROUPS.find((entry) => entry.title === 'Beam');
+  assert.deepEqual(group.knobs.map((knob) => knob.key), ['beamShardsNeeded', 'beamShardWaveInterval', 'beamTimeSeconds', 'beamTimeSurge']);
+  assert.deepEqual(group.knobs.map((knob) => Boolean(knob.integer)), [true, true, false, false]);
+});

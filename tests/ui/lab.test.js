@@ -12,6 +12,9 @@ import { DEFAULT_RENDER_SETTINGS } from '../../src/render/renderer.js';
 import { SPECIES_COUNT } from '../../src/sim/layout.js';
 import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND } from '../../src/game/weaponTypes.js';
 import { TIME_WARP_SCALE, TIME_WARP_SECONDS, TimeWarp } from '../../src/game/time-warp.js';
+import { BEAM_SHARDS_NEEDED, BEAM_SHARD_WAVE_INTERVAL, BeamShards } from '../../src/game/beam-shards.js';
+import { BEAM_TIME_SECONDS, BeamTime } from '../../src/game/beam-time.js';
+import { DEFAULT_BEAM_TIME_SURGE, MAXIMUM_BEAM_TIME_SURGE } from '../../src/sim/spawner.js';
 
 const CAPACITY = 65536;
 
@@ -63,6 +66,13 @@ function createContext() {
     pickupBlastRadius: 1.5,
     setPickupBlastRadius(value) { this.pickupBlastRadius = value; },
     timeWarp: new TimeWarp(),
+    beamShards: new BeamShards(),
+    beamTime: new BeamTime(),
+    beamTimeSurge: DEFAULT_BEAM_TIME_SURGE,
+    setBeamTimeSurge(strength) {
+      if (!(strength >= 1 && strength <= MAXIMUM_BEAM_TIME_SURGE)) throw new RangeError('surge');
+      this.beamTimeSurge = strength;
+    },
     simulationRate: 'full',
     setSimulationRate(rate) { this.simulationRate = rate; },
     watchFractions: [],
@@ -396,4 +406,62 @@ test('the beam turn rate is a lab knob with the shipped default, written to the 
   writeKnob(context, specFor('beamTurnRevolutionsPerSecond'), 0.5);
   restoreLabState(context, state);
   assert.equal(context.game.beamTurnRevolutionsPerSecond, 3);
+});
+
+test('the beam knobs have the specified ranges, steps and shipped defaults', () => {
+  const expected = {
+    beamShardsNeeded: [1, 8, 1, BEAM_SHARDS_NEEDED, true],
+    beamShardWaveInterval: [1, 60, 1, BEAM_SHARD_WAVE_INTERVAL, true],
+    beamTimeSeconds: [1, 30, 0.5, BEAM_TIME_SECONDS, undefined],
+    beamTimeSurge: [1, 6, 0.25, DEFAULT_BEAM_TIME_SURGE, undefined],
+  };
+  for (const [key, [minimum, maximum, step, shipped, integer]] of Object.entries(expected)) {
+    const spec = specFor(key);
+    assert.ok(spec, key);
+    assert.deepEqual([spec.minimum, spec.maximum, spec.step, spec.integer], [minimum, maximum, step, integer], key);
+    assert.deepEqual(KNOB_RANGES[key], [minimum, maximum], key);
+    assert.equal(LAB_KNOB_DEFAULTS[key], shipped, key);
+  }
+});
+
+test('the beam knobs read and write the game objects and round-trip through a shared mix', () => {
+  const source = createContext();
+  assert.equal(readKnob(source, specFor('beamShardsNeeded')), BEAM_SHARDS_NEEDED);
+  writeKnob(source, specFor('beamShardsNeeded'), 4.4);
+  writeKnob(source, specFor('beamShardWaveInterval'), 12.6);
+  writeKnob(source, specFor('beamTimeSeconds'), 12.5);
+  writeKnob(source, specFor('beamTimeSurge'), 2.25);
+  assert.equal(source.game.beamShards.needed, 4);
+  assert.equal(source.game.beamShards.waveInterval, 13);
+  assert.equal(source.game.beamTime.durationSeconds, 12.5);
+  assert.equal(source.game.beamTimeSurge, 2.25);
+  const mix = decodeMix(encodeMix(captureMix(source)));
+  assert.deepEqual(
+    ['beamShardsNeeded', 'beamShardWaveInterval', 'beamTimeSeconds', 'beamTimeSurge'].map((key) => mix.knobs[key]),
+    [4, 13, 12.5, 2.25],
+  );
+  const target = createContext();
+  applyMix(target, mix);
+  assert.deepEqual(
+    [target.game.beamShards.needed, target.game.beamShards.waveInterval, target.game.beamTime.durationSeconds, target.game.beamTimeSurge],
+    [4, 13, 12.5, 2.25],
+  );
+});
+
+test('a mix without the knobs map applies the beam defaults', () => {
+  const context = createContext();
+  writeKnob(context, specFor('beamShardsNeeded'), 2);
+  writeKnob(context, specFor('beamTimeSurge'), 5);
+  applyMix(context, { ...decodeMix(encodeMix(captureMix(createContext()))), knobs: undefined });
+  assert.equal(context.game.beamShards.needed, BEAM_SHARDS_NEEDED);
+  assert.equal(context.game.beamShards.waveInterval, BEAM_SHARD_WAVE_INTERVAL);
+  assert.equal(context.game.beamTime.durationSeconds, BEAM_TIME_SECONDS);
+  assert.equal(context.game.beamTimeSurge, DEFAULT_BEAM_TIME_SURGE);
+});
+
+test('decodeMix rejects a beam knob outside its range', () => {
+  const base = captureMix(createContext());
+  for (const [key, value] of [['beamShardsNeeded', 9], ['beamShardsNeeded', 0], ['beamShardWaveInterval', 61], ['beamTimeSeconds', 31], ['beamTimeSurge', 0.5], ['beamTimeSurge', 6.5]]) {
+    assert.equal(isValidMix({ ...base, knobs: { ...base.knobs, [key]: value } }), false, `${key} ${value}`);
+  }
 });

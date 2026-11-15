@@ -68,6 +68,8 @@ test('decodeMix returns null for wrong shapes', () => {
     unknownKnob: { ...good, knobs: { nonsense: 1 } },
     knobRange: { ...good, knobs: { spawnDensityBias: 5 } },
     seekRangeHigh: { ...good, knobs: { seekRange: 41 } },
+    beamShardsNeededHigh: { ...good, knobs: { beamShardsNeeded: 9 } },
+    beamTimeSurgeLow: { ...good, knobs: { beamTimeSurge: 0.5 } },
     seekRangeLow: { ...good, knobs: { seekRange: -1 } },
     knobType: { ...good, knobs: { rampSeconds: '60' } },
     knobsArray: { ...good, knobs: [1] },

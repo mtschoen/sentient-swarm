@@ -101,6 +101,13 @@ export const LAB_KNOB_GROUPS = [
     { key: 'timeWarpSeconds', label: 'time warp seconds', minimum: 1, maximum: 20, step: 0.5 },
     { key: 'timeWarpScale', label: 'time warp speed', minimum: 0.1, maximum: 1, step: 0.05 },
   ] },
+  // Beam shards and beam time: shards needed, waves per shard, beam time real seconds, spawn surge multiplier.
+  { title: 'Beam', knobs: [
+    { key: 'beamShardsNeeded', label: 'shards needed', minimum: 1, maximum: 8, step: 1, integer: true },
+    { key: 'beamShardWaveInterval', label: 'waves per shard', minimum: 1, maximum: 60, step: 1, integer: true },
+    { key: 'beamTimeSeconds', label: 'beam time seconds', minimum: 1, maximum: 30, step: 0.5 },
+    { key: 'beamTimeSurge', label: 'beam time spawn surge', minimum: 1, maximum: 6, step: 0.25 },
+  ] },
 ];
 
 export const LAB_KNOBS = LAB_KNOB_GROUPS.flatMap((group) => group.knobs);

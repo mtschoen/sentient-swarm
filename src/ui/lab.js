@@ -16,6 +16,8 @@
 // Settings change made inside the lab survives the restore. The backquote key may enter the lab
 // only from the title (canEnter).
 import { DEFAULT_PICKUP_BLAST_RADIUS } from '../game/game.js';
+import { BEAM_SHARDS_NEEDED, BEAM_SHARD_WAVE_INTERVAL } from '../game/beam-shards.js';
+import { BEAM_TIME_SECONDS } from '../game/beam-time.js';
 import { RunPhase } from '../game/run.js';
 import { TIME_WARP_SCALE, TIME_WARP_SECONDS } from '../game/time-warp.js';
 import { DEFAULT_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND } from '../game/weaponTypes.js';
@@ -27,7 +29,7 @@ import {
   DEFAULT_SEEK_RANGE, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS,
 } from '../sim/params.js';
 import { DEFAULT_GATE_SCHEDULE } from '../sim/spawn-director.js';
-import { DEFAULT_RAMP } from '../sim/spawner.js';
+import { DEFAULT_BEAM_TIME_SURGE, DEFAULT_RAMP } from '../sim/spawner.js';
 import { MIX_VERSION, RULE_FIELDS, RULE_RANGES, decodeMix } from './labPresets.js';
 import { LAB_KNOBS, RENDER_SLIDERS, clampToSpec } from './panelModel.js';
 
@@ -125,6 +127,22 @@ export const LAB_KNOB_BINDINGS = {
     read: ({ game }) => game.timeWarp.targetScale,
     write: ({ game }, value) => game.timeWarp.setScale(value),
   },
+  beamShardsNeeded: {
+    read: ({ game }) => game.beamShards.needed,
+    write: ({ game }, value) => game.beamShards.setNeeded(value),
+  },
+  beamShardWaveInterval: {
+    read: ({ game }) => game.beamShards.waveInterval,
+    write: ({ game }, value) => game.beamShards.setWaveInterval(value),
+  },
+  beamTimeSeconds: {
+    read: ({ game }) => game.beamTime.durationSeconds,
+    write: ({ game }, value) => game.beamTime.setDuration(value),
+  },
+  beamTimeSurge: {
+    read: ({ game }) => game.beamTimeSurge,
+    write: ({ game }, value) => game.setBeamTimeSurge(value),
+  },
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, renderSetting(spec.key)])),
 };
 
@@ -153,6 +171,10 @@ export const LAB_KNOB_DEFAULTS = Object.freeze({
   beamTurnRevolutionsPerSecond: DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND,
   timeWarpSeconds: TIME_WARP_SECONDS,
   timeWarpScale: TIME_WARP_SCALE,
+  beamShardsNeeded: BEAM_SHARDS_NEEDED,
+  beamShardWaveInterval: BEAM_SHARD_WAVE_INTERVAL,
+  beamTimeSeconds: BEAM_TIME_SECONDS,
+  beamTimeSurge: DEFAULT_BEAM_TIME_SURGE,
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, DEFAULT_RENDER_SETTINGS[spec.key]])),
   sameSpeciesCohesion: 1,
 });

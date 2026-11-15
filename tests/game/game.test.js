@@ -490,6 +490,12 @@ test('debugArm arms a weapon at a tier with a full charge, rail adds that many t
   assert.equal(game.state.armed, 'base');
 });
 
+test('debugArm arms the beam that left the pickup rotation, as the lab arm weapon control does', async () => {
+  const { game } = await createGame();
+  game.debugArm('beam', 2);
+  assert.deepEqual([game.state.armed, game.state.tier], ['beam', 2]);
+});
+
 test('debugInvulnerable keeps contact off while playing until it is turned off again', async () => {
   const { game, simulation } = await createGame();
   game.start();
