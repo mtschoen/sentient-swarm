@@ -43,9 +43,8 @@
 .pad-status-pressed::before { opacity: 1; }
 .pad-status[hidden] { display: none; }
 
-/* The ONLINE item (online-title.js) is an ordinary list item. The list has a fixed width and Play a two-line height so the long connected labels (WAITING FOR PLAYER 2 TO LOAD) wrap in place instead of resizing the list. */
-.menu-title-screen .menu-list { width: min(300px, 80vw); }
-.menu-title-screen .menu-item { white-space: normal; line-height: 1.15; }
-.menu-title-screen .menu-primary { display: flex; align-items: center; justify-content: center; min-height: 3.2em; font-size: clamp(16px, 4.6vmin, 30px); }
-/* The connected status line: seat 2 color (set in script), above the source link, always laid out, never taking a touch. */
-.online-status { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 48px); transform: translateX(-50%); width: min(560px, 86vw); min-height: 1.4em; text-align: center; font-size: clamp(11px, 2.4vmin, 15px); font-weight: 700; letter-spacing: 0.08em; line-height: 1.4; text-shadow: 0 0 10px currentColor; pointer-events: none; }
+/* The connected title (online-title.js): the status line is seat 2 color (set in script), in the bottom right corner (clear of the centered list, the source link and the pad status rows on the left), always laid out, never taking a touch. */
+.online-status { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); width: min(250px, 28vw); min-height: 2.8em; text-align: right; font-size: clamp(9px, 2vmin, 13px); font-weight: 700; letter-spacing: 0.06em; line-height: 1.4; text-shadow: 0 0 10px currentColor; pointer-events: none; }
+/* Only while a session exists (.menu-online is set by online-title.js): Play gets one fixed box that holds every connected label, so a label change never moves the list. The couch title is not styled here. */
+.menu-online .menu-list { width: min(300px, 80vw); }
+.menu-online .menu-primary { box-sizing: border-box; display: flex; align-items: center; justify-content: center; height: 4.6em; padding: 6px 16px; font-size: clamp(12px, 3.2vmin, 20px); line-height: 1.15; white-space: normal; text-align: center; }

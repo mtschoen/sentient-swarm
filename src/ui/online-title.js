@@ -40,6 +40,8 @@ export function createOnlineTitle(menuElement, { documentObject = document } = {
   return {
     element,
     update(view, { visible }) {
+      // The class that sizes Play for the connected labels is set only while a session exists.
+      menuElement.classList?.toggle('menu-online', view.statusLine !== '');
       if (view.statusLine !== lastText) {
         element.textContent = view.statusLine;
         lastText = view.statusLine;

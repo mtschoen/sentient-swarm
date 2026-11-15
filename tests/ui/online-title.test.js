@@ -19,15 +19,22 @@ test('the status line is always laid out, in seat 2 color, and changes visibilit
   const made = [];
   const documentObject = { createElement: () => { const node = { style: {}, textContent: '', hidden: false, className: '' }; made.push(node); return node; } };
   const appended = [];
-  const title = createOnlineTitle({ append: (node) => appended.push(node) }, { documentObject });
+  const classes = new Set();
+  const menuElement = {
+    append: (node) => appended.push(node),
+    classList: { toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) },
+  };
+  const title = createOnlineTitle(menuElement, { documentObject });
   assert.deepEqual(appended, [title.element]);
   assert.equal(title.element.className, 'online-status');
   assert.equal(title.element.style.color, SEAT_COLORS[1].css);
   title.update(onlineTitleView({ connected: true, role: 'host', roundTripMilliseconds: 42 }), { visible: true });
   assert.equal(title.element.textContent, 'PLAYER 2 CONNECTED ONLINE (42 MS)');
   assert.equal(title.element.style.visibility, 'visible');
+  assert.equal(classes.has('menu-online'), true, 'the connected sizing class is set only with a session');
   title.update(onlineTitleView({ connected: false, role: null }), { visible: false });
   assert.equal(title.element.style.visibility, 'hidden');
+  assert.equal(classes.has('menu-online'), false);
   assert.equal(title.element.hidden, false);
   assert.equal(made.length, 1);
 });
