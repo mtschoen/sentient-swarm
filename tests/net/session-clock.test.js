@@ -133,3 +133,18 @@ test('resetMatch returns the match time to 0', () => {
   host.resetMatch();
   assert.equal(host.matchSeconds, 0);
 });
+
+test('resetMatch clears the match samples so a stale offset does not outlive a match', () => {
+  const { state, host, guest } = pair();
+  host.setMatchRunning(true);
+  guest.advanceMatch(2);
+  state.seconds += 1;
+  const ping = host.ping();
+  state.seconds += 0.04;
+  const pong = guest.pong(ping);
+  state.seconds += 0.04;
+  host.receivePong(pong);
+  assert.notEqual(host.matchOffsetSeconds, 0);
+  host.resetMatch();
+  assert.equal(host.matchOffsetSeconds, 0);
+});

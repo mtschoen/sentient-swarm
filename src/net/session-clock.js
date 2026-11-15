@@ -48,6 +48,7 @@ export class SessionClock {
 
   resetMatch() {
     this.#matchSeconds = 0;
+    this.#matchSamples = [];
   }
 
   setMatchRunning(running) {
