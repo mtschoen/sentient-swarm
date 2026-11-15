@@ -11,8 +11,8 @@
 //   - Title leaves the lab: the menu shows and the inspect zoom is off again;
 //   - on a phone in landscape (844 by 390, touch) the Lab button opens a panel that fits the
 //     viewport height, scrolls, is marked data-touch-exclusive and has touch-sized rows.
-//   - the solo zoom (lab knobs, default off) stays 1 off, rises above 1 crowded, falls below 1 for a
-//     negative punch-in, returns to 1 under reduced motion and after leaving the lab; saves
+//   - the solo zoom (lab knobs, default on) stays 1 with the knob turned off, rises above 1 crowded, falls below 1 for a
+//     negative punch-in, returns to 1 under reduced motion, and leaving the lab restores the shipped default (on); saves
 //     artifacts/solo-zoom-in.png and solo-zoom-out.png.
 // Saves artifacts/lab-panel-1280x720.png and artifacts/lab-panel-844x390.png (page screenshots; the
 // WebGPU canvas may be blank in headless Chromium).
@@ -226,7 +226,7 @@ async function checkProbePlay(baseUrl) {
   }
 }
 
-// The solo zoom (lab knobs, default off): zoom stays 1 with the knob off, rises above 1 when enabled
+// The solo zoom (lab knobs, default on): zoom stays 1 with the knob turned off, rises above 1 when enabled
 // and crowded, falls below 1 for a negative punch-in, returns to 1 under reduced motion, and the lab
 // leaves the knobs at their defaults. Time is counted in animation frames.
 const ZOOM_HOLD_FRAMES = 120;
@@ -255,12 +255,14 @@ async function checkSoloZoom(baseUrl) {
     await waitFrames(page, SETTLE_FRAMES);
     const phase = () => page.evaluate(() => window.__murmuration.game.run.phase);
     expect(await phase() === 'playing', 'solo zoom: Play should start the run');
+    await setSlider(page, 'soloZoomEnabled', 0);
     await waitFrames(page, ZOOM_HOLD_FRAMES);
     const off = await readZoom(page);
     expect(off === 1, `solo zoom: with the knob off the zoom must stay 1, got ${off}`);
 
     const reference = await page.evaluate(() => Number(document.querySelector('.lab-panel input[data-knob="soloZoomCrowdReference"]').min));
     await setSlider(page, 'soloZoomEnabled', 1);
+    await setSlider(page, 'soloZoomMaximum', 1.6);
     await setSlider(page, 'soloZoomCrowdReference', reference);
     await setSlider(page, 'soloZoomPullOut', 0);
     await setSlider(page, 'soloZoomPunchIn', 0.6);
@@ -288,11 +290,11 @@ async function checkSoloZoom(baseUrl) {
     const left = await page.evaluate(() => window.__murmuration.game.soloZoom.settings);
     const defaults = await page.evaluate(async () => (await import('/src/game/solo-zoom.js')).SOLO_ZOOM_DEFAULTS);
     expect(JSON.stringify(left) === JSON.stringify(defaults), `solo zoom: leaving the lab should restore the defaults, got ${JSON.stringify(left)}`);
-    expect(left.enabled === false, 'solo zoom: leaving the lab should turn the knob off');
+    expect(left.enabled === true, 'solo zoom: leaving the lab should restore the shipped default (on)');
     await page.click('.menu-title-screen .menu-item.menu-primary');
     await waitFrames(page, ZOOM_HOLD_FRAMES);
     const normal = await readZoom(page);
-    expect(Math.abs(normal - 1) < 1e-3, `solo zoom: a normal run after the lab should stay at zoom 1, got ${normal}`);
+    expect(normal >= left.minimum - 1e-3 && normal <= left.maximum + 1e-3, `solo zoom: a normal run after the lab should zoom inside the shipped limits, got ${normal}`);
     expectNoErrors(page, 'solo zoom');
     console.log(`smoke-lab: solo zoom ok (off ${off}, in ${zoomedIn.toFixed(3)}, out ${zoomedOut.toFixed(3)}, reduced ${reduced.toFixed(4)}, after the lab ${normal.toFixed(4)})`);
   } finally {
