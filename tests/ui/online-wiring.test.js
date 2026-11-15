@@ -34,10 +34,17 @@ function allNodes(node) {
   return [node].concat((node.children ?? []).flatMap(allNodes));
 }
 
-// Lets the promise chains of the panel and the wiring settle.
-async function settle() {
-  for (let index = 0; index < 20; index += 1) await new Promise((resolve) => setImmediate(resolve));
+// Waits until condition holds: the signal codec's CompressionStream runs on Node's thread pool, so
+// a fixed number of turns is not enough under load. The cap only keeps a broken test from hanging.
+const MAXIMUM_SETTLE_TURNS = 5000;
+async function settleUntil(condition, label) {
+  for (let turn = 0; turn < MAXIMUM_SETTLE_TURNS && !condition(); turn += 1) {
+    await new Promise((resolve) => setTimeout(resolve, turn < 20 ? 0 : 1));
+  }
+  assert.ok(condition(), `settled: ${label}`);
 }
+
+const panelStatus = (online) => allNodes(online.panel.element).find((node) => node.className === 'online-panel-status').textContent;
 
 function createTimers() {
   let seconds = 0;
@@ -191,7 +198,8 @@ test('a join link that arrives mid-run waits for the title and leaves the addres
   assert.equal(online.panel.visible, true);
   assert.equal(online.role, 'guest');
   assert.equal(factory.count, 1);
-  await settle();
+  await settleUntil(() => online.panel.messageText !== '', 'the broken invite message');
+  assert.equal(online.panel.messageText, 'That invite link is broken. Ask your friend for a new one.');
 });
 
 test('a second join link during a session is ignored with a toast', () => {
@@ -239,13 +247,13 @@ test('the guest connect timeout counts from Copy reply', async () => {
   const offer = await encodeSignal({ kind: 'offer', sdp: SAMPLE_SDP });
   online.openFromHash(`#join=${offer}`);
   online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
-  await settle();
+  await settleUntil(() => online.replyText !== null, 'the reply is ready to copy');
   assert.ok(online.replyText !== null, 'the reply is ready to copy');
   timers.advanceTo(30);
   assert.equal(online.panel.messageText, '', 'no timeout before Copy reply');
   const copyReply = allNodes(online.panel.element).find((node) => node.tagName === 'BUTTON' && node.textContent === 'Copy reply');
   await copyReply.fire('click');
-  await settle();
+  await settleUntil(() => fakes.clipboard.written.length === 1, 'the reply copied');
   timers.advanceTo(30 + 9.99);
   assert.equal(online.panel.messageText, '');
   timers.advanceTo(30 + 10);
@@ -259,10 +267,10 @@ test('after a guest connect timeout the panel keeps the start until it is cancel
   const offer = await encodeSignal({ kind: 'offer', sdp: SAMPLE_SDP });
   online.openFromHash(`#join=${offer}`);
   online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
-  await settle();
+  await settleUntil(() => online.replyText !== null, 'the reply is ready to copy');
   const copyReply = allNodes(online.panel.element).find((node) => node.tagName === 'BUTTON' && node.textContent === 'Copy reply');
   await copyReply.fire('click');
-  await settle();
+  await settleUntil(() => fakes.clipboard.written.length === 1, 'the reply copied');
   timers.advanceTo(10);
   assert.equal(online.panel.messageText, 'Your two networks cannot connect directly.');
   assert.equal(online.panel.visible, true);
@@ -299,14 +307,14 @@ test('the host connect timeout counts from an accepted reply and returns a fresh
   const { fakes, timers } = createFakes();
   const online = createOnlineWiring({ ...fakes, createConnection: factory.create });
   online.toggleOnline();
-  await settle();
+  await settleUntil(() => online.inviteUrl !== null, 'the invite');
   assert.ok(online.inviteUrl.startsWith('https://example.test/game/#join='));
   timers.advanceTo(20);
   const answer = await encodeSignal({ kind: 'answer', sdp: SAMPLE_SDP });
   const box = allNodes(online.panel.element).find((node) => node.tagName === 'TEXTAREA');
   box.value = answer;
   await box.fire('keydown', { key: 'Enter' });
-  await settle();
+  await settleUntil(() => factory.connections[0].answers.length === 1 && panelStatus(online) === 'Connecting...', 'the reply accepted');
   assert.deepEqual(factory.connections[0].answers, [SAMPLE_SDP]);
   timers.advanceTo(29.99);
   assert.equal(factory.count, 1);
@@ -314,7 +322,7 @@ test('the host connect timeout counts from an accepted reply and returns a fresh
   assert.equal(factory.connections[0].closed, true);
   assert.equal(factory.count, 2, 'a fresh invite');
   assert.equal(online.panel.messageText, 'Your two networks cannot connect directly.');
-  await settle();
+  await settleUntil(() => online.inviteUrl !== null, 'the fresh invite');
 });
 
 test('the session actions drive the pause note, the countdown and the title', () => {
@@ -390,5 +398,5 @@ test('cancelling the panel, or a connection that fails before it opens, leaves n
   sessions.at(-1).act({ type: 'end', reason: 'lost' });
   assert.equal(online.panel.messageText, 'Your two networks cannot connect directly.');
   assert.equal(factory.count, 3, 'the host gets a fresh invite');
-  await settle();
+  await settleUntil(() => online.inviteUrl !== null, 'the fresh invite');
 });
