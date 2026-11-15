@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLifeWatcher, createRumble } from '../../src/input/rumble.js';
+import { createLifeWatcher, createRumble, rumblePadFor } from '../../src/input/rumble.js';
 import { readGamepad, setGamepadDeadZone, DEAD_ZONE } from '../../src/input/gamepad.js';
 
 function fakeActuator(effects, { rejectTrigger = false } = {}) {
@@ -130,4 +130,13 @@ test('the life watcher rumbles extra lives on the pad it is given for seat 1', (
   watcher.update({ phase: 'playing', lives: 1 });
   watcher.update({ phase: 'playing', lives: 2 });
   assert.deepEqual(calls, [3]);
+});
+
+test('rumblePadFor routes the local seat to the first pad, the couch partner to its pad and a remote seat nowhere', () => {
+  const couchPadForSeat = (seat) => (seat === 0 ? undefined : 3);
+  const none = new Set();
+  assert.equal(rumblePadFor(0, { localSeatIndex: 0, remoteSeats: none, couchPadForSeat }), undefined);
+  assert.equal(rumblePadFor(1, { localSeatIndex: 0, remoteSeats: none, couchPadForSeat }), 3);
+  assert.equal(rumblePadFor(1, { localSeatIndex: 1, remoteSeats: new Set([0]), couchPadForSeat }), undefined);
+  assert.equal(rumblePadFor(0, { localSeatIndex: 1, remoteSeats: new Set([0]), couchPadForSeat }), null);
 });

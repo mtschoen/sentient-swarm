@@ -58,6 +58,13 @@ export function createRumble({ navigatorObject = typeof navigator === 'undefined
 
 // The game has no extra-life cue, so a rise in lives while playing (not a restart, which resets
 // them from a different phase) is detected from the game state each rendered frame.
+// The pad that rumbles for a seat: null for a seat played on another machine, else the couch pad
+// (couchPadForSeat: 0 the first pad, 1 seat 2's pad), the local seat taking the first.
+export function rumblePadFor(seat, { localSeatIndex, remoteSeats, couchPadForSeat }) {
+  if (remoteSeats.has(seat)) return null;
+  return couchPadForSeat(seat === localSeatIndex ? 0 : 1);
+}
+
 export function createLifeWatcher(rumble, padForSeatOne = () => undefined) {
   let previous = null;
   return {

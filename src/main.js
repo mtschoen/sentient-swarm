@@ -26,7 +26,7 @@ import { beamShardTargets, createBeamShardPointers } from './ui/beam-shard-point
 import { createBeamTimeTitle } from './ui/beam-time-title.js';
 import { STICK_RADIUS } from './input/touch.js';
 import { setGamepadDeadZone } from './input/gamepad.js';
-import { createLifeWatcher, createRumble } from './input/rumble.js';
+import { createLifeWatcher, createRumble, rumblePadFor } from './input/rumble.js';
 import {
   bloomStrengthFor, createSettingsPanel, killBurstParticlesFor, shakeMultiplierFor, trailDecayFor,
 } from './ui/settings.js';
@@ -140,7 +140,10 @@ async function boot() {
   // on the game state rumbles them.
   let liveSettings = settings;
   const rumble = createRumble({ isEnabled: () => liveSettings.rumble });
-  const lifeWatcher = createLifeWatcher(rumble, () => coopJoin?.padForSeat(0));
+  // No online session yet: no seat is remote (the online wiring supplies the set).
+  const remoteSeats = Object.freeze(new Set());
+  const padForSeat = (seat) => rumblePadFor(seat, { localSeatIndex: game.localSeatIndex, remoteSeats, couchPadForSeat: (couchSeat) => coopJoin?.padForSeat(couchSeat) });
+  const lifeWatcher = createLifeWatcher(rumble, () => padForSeat(game.localSeatIndex));
   // Press-to-join state; seat 2's pad also picks the rumble target (coopJoin is created with the menus).
   let coopJoin = null;
   game = await Game.create({
@@ -149,7 +152,7 @@ async function boot() {
     renderer,
     input,
     capacity: simulation.capacity,
-    effects: withHaptics(audio.cues, undefined, rumble, { padForSeat: (seat) => coopJoin?.padForSeat(seat) }),
+    effects: withHaptics(audio.cues, undefined, rumble, { padForSeat }),
     frameTimer,
   });
   showProgress('game', 1, 1);
