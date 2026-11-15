@@ -69,6 +69,8 @@ function createContext() {
     wallMargin: 0.5,
     wallStiffness: 40,
     comfortRadius: 1,
+    seekRange: 0,
+    setSeekRange(value) { this.seekRange = value; },
     coarseFieldPressure: true,
     setSpeciesCalls: 0,
     setShares(shares) { this.shares = normalizeShares(shares); },

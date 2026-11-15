@@ -24,7 +24,7 @@ import { DEFAULT_RENDER_SETTINGS } from '../render/renderer.js';
 import { SPECIES_COUNT } from '../sim/layout.js';
 import {
   DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES,
-  DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS,
+  DEFAULT_SEEK_RANGE, DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS,
 } from '../sim/params.js';
 import { DEFAULT_GATE_SCHEDULE } from '../sim/spawn-director.js';
 import { DEFAULT_RAMP } from '../sim/spawner.js';
@@ -92,6 +92,7 @@ export const LAB_KNOB_BINDINGS = {
   wallMargin: simulationValue('wallMargin', 'setWallMargin'),
   wallStiffness: simulationValue('wallStiffness', 'setWallStiffness'),
   comfortRadius: simulationValue('comfortRadius', 'setComfortRadius'),
+  seekRange: simulationValue('seekRange', 'setSeekRange'),
   coarseFieldPressure: {
     read: ({ game }) => (game.simulation.coarseFieldPressure ? 1 : 0),
     write: ({ game }, value) => game.simulation.setCoarseFieldPressure(value >= 0.5),
@@ -136,6 +137,7 @@ export const LAB_KNOB_DEFAULTS = Object.freeze({
   wallMargin: DEFAULT_WALL_MARGIN,
   wallStiffness: DEFAULT_WALL_STIFFNESS,
   comfortRadius: DEFAULT_COMFORT_RADIUS,
+  seekRange: DEFAULT_SEEK_RANGE,
   coarseFieldPressure: 1,
   ...DEFAULT_RAMP,
   ...DEFAULT_GATE_SCHEDULE,

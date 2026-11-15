@@ -40,6 +40,8 @@ function createContext() {
     wallMargin: 0.5,
     wallStiffness: 40,
     comfortRadius: 1,
+    seekRange: 0,
+    setSeekRange(value) { this.seekRange = value; },
     coarseFieldPressure: true,
     setWallMargin(value) { this.wallMargin = value; },
     setWallStiffness(value) { this.wallStiffness = value; },
@@ -221,8 +223,8 @@ test('every mix knob has a shipped default inside its slider range; the new knob
     assert.ok(value >= spec.minimum && value <= spec.maximum, `${spec.key} ${value}`);
   }
   assert.deepEqual(
-    ['wallMargin', 'wallStiffness', 'comfortRadius', 'coarseFieldPressure', 'exposure'].map((key) => LAB_KNOB_DEFAULTS[key]),
-    [0.5, 40, 1, 1, 1],
+    ['wallMargin', 'wallStiffness', 'comfortRadius', 'seekRange', 'coarseFieldPressure', 'exposure'].map((key) => LAB_KNOB_DEFAULTS[key]),
+    [0.5, 40, 1, 0, 1, 1],
   );
   // The fake context holds the shipped values, so its knobs read as the defaults.
   const context = createContext();
@@ -241,6 +243,29 @@ test('the wall, comfort, coarse-field and exposure knobs round-trip through a sh
   const simulation = target.game.simulation;
   assert.deepEqual([simulation.wallMargin, simulation.wallStiffness, simulation.comfortRadius, simulation.coarseFieldPressure], [1.5, 90, 2.25, false]);
   assert.equal(target.renderer.settings.exposure, 2);
+});
+
+test('the seek range round-trips through a shared mix; an old mix without it loads unlimited', () => {
+  const source = createContext();
+  writeKnob(source, specFor('seekRange'), 18.5);
+  const mix = decodeMix(encodeMix(captureMix(source)));
+  assert.equal(mix.knobs.seekRange, 18.5);
+  const target = createContext();
+  applyMix(target, mix);
+  assert.equal(target.game.simulation.seekRange, 18.5);
+  const oldKnobs = { ...mix.knobs };
+  delete oldKnobs.seekRange;
+  applyMix(target, { ...mix, knobs: oldKnobs });
+  assert.equal(target.game.simulation.seekRange, 0);
+});
+
+test('LabMode: leaving the lab puts the seek range back', () => {
+  const { lab, game } = createLab();
+  lab.enter();
+  writeKnob(lab.context, specFor('seekRange'), 18.5);
+  assert.equal(game.simulation.seekRange, 18.5);
+  lab.leave();
+  assert.equal(game.simulation.seekRange, 0);
 });
 
 test('applying a mix without a knobs map (a bundled mix) resets every knob to its default first', () => {

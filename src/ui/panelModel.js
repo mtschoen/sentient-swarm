@@ -62,6 +62,7 @@ export const LAB_KNOB_GROUPS = [
     { key: 'wallMargin', label: 'wall margin', minimum: 0, maximum: 2, step: 0.05 },
     { key: 'wallStiffness', label: 'wall push', minimum: 0, maximum: 160, step: 1 },
     { key: 'comfortRadius', label: 'comfort radius', minimum: 0, maximum: 4, step: 0.05 },
+    { key: 'seekRange', label: 'seek range (0 = unlimited)', minimum: 0, maximum: 40, step: 0.5 },
     { key: 'coarseFieldPressure', label: 'coarse-field pressure', minimum: 0, maximum: 1, step: 1, integer: true, toggle: true },
   ] },
   { title: 'Spawn ramp', knobs: [
