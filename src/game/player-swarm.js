@@ -21,7 +21,9 @@ import { WORLD_BOUNDS, MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { blendShips } from './swarm-blend.js';
 import { faceStep } from './swarm-facing.js';
 import { FOLLOW_SMOOTH_SECONDS, SWARM_FOLLOW } from './swarm-motion.js';
-import { SWARM_CRUISE_SPEED, SWARM_MAXIMUM_SPEED, flockStep, temperamentFor } from './swarm-flocking.js';
+import { SWARM_CRUISE_SPEED, SWARM_MAXIMUM_SPEED, flockStep, homeRadiusFor, temperamentFor } from './swarm-flocking.js';
+import { GUNNER_STATION_REACH, assignGunners, gunnerStations } from './swarm-gunners.js';
+import { MAXIMUM_RAIL_TURRETS } from './weaponTypes.js';
 
 export { MAXIMUM_SWARM_SHIPS };
 export const INITIAL_SWARM_SHIPS = 12;
@@ -41,7 +43,7 @@ const NO_AIM = Object.freeze({ firing: false, aimX: 0, aimY: 0 });
 function deadSlot() {
   return {
     alive: false, x: 0, y: 0, previousX: 0, previousY: 0, velocityX: 0, velocityY: 0, course: 0, heading: 0,
-    bornSequence: null, bornTime: 0, ...temperamentFor(0),
+    bornSequence: null, bornTime: 0, gunnerIndex: -1, stationX: 0, stationY: 0, stationAngle: 0, ...temperamentFor(0),
   };
 }
 
@@ -57,7 +59,7 @@ export class PlayerSwarm {
     this.slots = Array.from({ length: MAXIMUM_SWARM_SHIPS }, deadSlot);
     // Reused outputs: contactShips' per-slot table, ships' alive list and its entries.
     this.contactTable = Array.from({ length: MAXIMUM_SWARM_SHIPS }, () => ({ x: 0, y: 0, alive: false, fresh: false }));
-    this.shipEntries = Array.from({ length: MAXIMUM_SWARM_SHIPS }, () => ({ slot: 0, x: 0, y: 0, previousX: 0, previousY: 0, age: 0, heading: 0 }));
+    this.shipEntries = Array.from({ length: MAXIMUM_SWARM_SHIPS }, () => ({ slot: 0, x: 0, y: 0, previousX: 0, previousY: 0, age: 0, heading: 0, gunnerIndex: -1 }));
     this.shipList = [];
     this.drawnShips = [];
     this.aliveCountValue = 0;
@@ -71,6 +73,16 @@ export class PlayerSwarm {
     // carries the flock (flockStep's carry).
     this.pointVelocityX = 0;
     this.pointVelocityY = 0;
+    // Rail gunners: the turret count wanted, the last nonzero aim angle the station ring follows,
+    // and the reused station list.
+    this.gunnerCount = 0;
+    this.stationAimAngle = 0;
+    this.stations = [];
+  }
+
+  // The number of rail turrets wanted as gunner ships (clamped to the live ships inside update).
+  setGunnerCount(count) {
+    this.gunnerCount = Math.min(MAXIMUM_RAIL_TURRETS, Math.max(0, Math.floor(count)));
   }
 
   setBounds(bounds) {
@@ -81,8 +93,8 @@ export class PlayerSwarm {
     return this.aliveCountValue;
   }
 
-  // Alive ships for rendering and firing: { slot, x, y, age, heading } (age in seconds since spawn,
-  // heading in radians, where the ship points). The array and its entries are reused: valid until the
+  // Alive ships for rendering and firing: { slot, x, y, age, heading, gunnerIndex } (age in seconds since spawn,
+  // heading in radians, where the ship points, gunnerIndex the rail station or -1). The array and its entries are reused: valid until the
   // next call.
   get ships() {
     const ships = this.shipList;
@@ -97,6 +109,7 @@ export class PlayerSwarm {
       entry.previousY = slot.previousY;
       entry.age = this.time - slot.bornTime;
       entry.heading = slot.heading;
+      entry.gunnerIndex = slot.gunnerIndex;
       ships.push(entry);
     });
     return ships;
@@ -153,6 +166,7 @@ export class PlayerSwarm {
       heading: angle,
       bornSequence: null,
       bornTime: this.time,
+      gunnerIndex: -1,
     });
     // No previous step: drawn where it is until it has moved.
     this.slots[index].previousX = this.slots[index].x;
@@ -194,6 +208,11 @@ export class PlayerSwarm {
       slot.previousX = slot.x;
       slot.previousY = slot.y;
     }
+    if (controls.aimX !== 0 || controls.aimY !== 0) this.stationAimAngle = Math.atan2(controls.aimY, controls.aimX);
+    const effectiveCount = Math.min(this.gunnerCount, this.aliveCountValue);
+    const stationRadius = homeRadiusFor(this.aliveCountValue) * GUNNER_STATION_REACH;
+    gunnerStations(effectiveCount, this.stationAimAngle, targetX, targetY, stationRadius, this.stations);
+    assignGunners(this.slots, effectiveCount, this.stations);
     flockStep(this.slots, deltaSeconds, context);
     faceStep(this.slots, deltaSeconds, controls);
   }

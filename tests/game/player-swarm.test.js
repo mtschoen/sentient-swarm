@@ -285,3 +285,110 @@ test('update, contactShips and ships reuse their arrays', () => {
   assert.equal(swarm.centroid.x > 0, true);
   swarm.update(0, 8, 4.5);
 });
+
+// Gunner ships (src/game/swarm-gunners.js).
+function gunnersOf(swarm) {
+  return swarm.ships.filter((ship) => ship.gunnerIndex >= 0);
+}
+
+function gunnerSwarm(ships, gunners) {
+  const swarm = new PlayerSwarm({ random: sequenceRandom() });
+  swarm.reset(8, 4.5, ships);
+  swarm.setGunnerCount(gunners);
+  return swarm;
+}
+
+test('gunners are the requested count of live ships', () => {
+  const swarm = gunnerSwarm(12, 5);
+  swarm.update(STEP, 8, 4.5);
+  const gunners = gunnersOf(swarm);
+  assert.equal(gunners.length, 5);
+  assert.deepEqual(gunners.map((ship) => ship.gunnerIndex).sort(), [0, 1, 2, 3, 4]);
+});
+
+test('fewer ships than turrets: every ship is a gunner', () => {
+  const swarm = gunnerSwarm(3, 12);
+  hold(swarm, 1, 8, 4.5);
+  const gunners = gunnersOf(swarm);
+  assert.equal(gunners.length, 3);
+  assert.equal(new Set(gunners.map((ship) => ship.gunnerIndex)).size, 3);
+  for (const ship of swarm.ships) assert.ok([ship.x, ship.y, ship.heading].every(Number.isFinite));
+  // The stations use the smaller count: three stations 30 degrees apart around the rear of the aim.
+  const offsets = [150, 180, 210].map((degrees) => (degrees * Math.PI) / 180);
+  gunners.sort((first, second) => first.gunnerIndex - second.gunnerIndex)
+    .forEach((ship, index) => assert.ok(Math.abs(Math.cos(ship.heading - offsets[index]) - 1) < 1e-9));
+});
+
+test('zero aim keeps the last aim angle and stays finite', () => {
+  const swarm = gunnerSwarm(12, 3);
+  swarm.update(STEP, 8, 4.5, { firing: false, aimX: 0, aimY: 0 });
+  const offsets = [150, 180, 210].map((degrees) => (degrees * Math.PI) / 180);
+  const headings = () => gunnersOf(swarm).sort((a, b) => a.gunnerIndex - b.gunnerIndex).map((ship) => ship.heading);
+  headings().forEach((heading, index) => assert.ok(Math.abs(Math.cos(heading - offsets[index]) - 1) < 1e-9));
+  swarm.update(STEP, 8, 4.5, { firing: true, aimX: 0, aimY: 1 });
+  swarm.update(STEP, 8, 4.5, { firing: false, aimX: 0, aimY: 0 });
+  headings().forEach((heading, index) => assert.ok(Math.abs(Math.cos(heading - (offsets[index] + Math.PI / 2)) - 1) < 1e-9));
+  for (const ship of swarm.ships) assert.ok([ship.x, ship.y, ship.heading].every(Number.isFinite));
+});
+
+test("a killed gunner's turret passes on and the count holds", () => {
+  const swarm = gunnerSwarm(12, 3);
+  swarm.update(STEP, 8, 4.5);
+  swarm.contactShips(1);
+  const gunner = gunnersOf(swarm)[0];
+  const deadSlot = gunner.slot;
+  const index = gunner.gunnerIndex;
+  assert.equal(swarm.applyHits(maskFor([deadSlot]), 2).length, 1);
+  swarm.update(STEP, 8, 4.5);
+  const gunners = gunnersOf(swarm);
+  assert.equal(gunners.length, 3);
+  assert.ok(gunners.every((ship) => ship.slot !== deadSlot));
+  assert.ok(gunners.some((ship) => ship.gunnerIndex === index));
+});
+
+test('gunners hold the station ring while the point is still', () => {
+  const swarm = gunnerSwarm(12, 4);
+  hold(swarm, 5, 8, 4.5, () => {}, { firing: false, aimX: 1, aimY: 0 });
+  const radius = homeRadiusFor(12) * 0.8;
+  const gunners = gunnersOf(swarm);
+  assert.equal(gunners.length, 4);
+  const offsets = [-45, -15, 15, 45].map((degrees) => Math.PI + (degrees * Math.PI) / 180);
+  for (const ship of gunners) {
+    const angle = offsets[ship.gunnerIndex];
+    const stationX = 8 + Math.cos(angle) * radius;
+    const stationY = 4.5 + Math.sin(angle) * radius;
+    assert.ok(Math.hypot(ship.x - stationX, ship.y - stationY) < 0.3, `gunner ${ship.gunnerIndex}`);
+    assert.ok(Math.abs(Math.cos(ship.heading - angle) - 1) < 1e-9);
+  }
+});
+
+test('the count dropping to zero returns every ship to normal', () => {
+  const swarm = gunnerSwarm(12, 4);
+  swarm.update(STEP, 8, 4.5);
+  assert.equal(gunnersOf(swarm).length, 4);
+  swarm.setGunnerCount(0);
+  swarm.update(STEP, 8, 4.5);
+  assert.equal(gunnersOf(swarm).length, 0);
+});
+
+test('shipsAt carries gunnerIndex and a full swarm with gunners reuses its arrays', () => {
+  const swarm = gunnerSwarm(256, 12);
+  swarm.update(STEP, 8, 4.5);
+  const drawn = swarm.shipsAt(0.5);
+  assert.equal(drawn.filter((ship) => ship.gunnerIndex >= 0).length, 12);
+  assert.equal(drawn.filter((ship) => ship.gunnerIndex === -1).length, 244);
+  const table = swarm.contactShips(1);
+  const ships = swarm.ships;
+  swarm.update(STEP, 8, 4.5);
+  assert.equal(swarm.contactShips(2), table);
+  assert.equal(swarm.ships, ships);
+  assert.equal(swarm.shipsAt(0.5), drawn);
+});
+
+test('reset clears every gunner', () => {
+  const swarm = gunnerSwarm(12, 4);
+  swarm.update(STEP, 8, 4.5);
+  swarm.reset(8, 4.5);
+  assert.ok(swarm.slots.every((slot) => slot.gunnerIndex === -1));
+  assert.equal(gunnersOf(swarm).length, 0);
+});
