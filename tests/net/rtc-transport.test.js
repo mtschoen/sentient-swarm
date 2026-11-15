@@ -211,3 +211,63 @@ test('close waits for the events channel to drain, or for the 1 s cap', () => {
   assert.ok(stuck.peer.peerClosed);
   assert.equal(stuck.connection.transport.state, 'closed');
 });
+
+test('a channel closing from the remote side releases the peer and both channels once, and stops delivery', () => {
+  const { connection, peer } = build();
+  openAll(peer);
+  const received = [];
+  connection.transport.onMessage((channel) => received.push(channel));
+  let peerCloses = 0;
+  peer.close = () => { peerCloses += 1; };
+  peer.channels[0].readyState = 'closed';
+  peer.channels[0].emit('close');
+  assert.equal(connection.transport.state, 'closed');
+  assert.equal(peerCloses, 1);
+  assert.ok(peer.channels.every((channel) => channel.closed));
+  peer.channels[1].emit('message', { data: Uint8Array.of(1).buffer });
+  assert.deepEqual(received, []);
+  connection.close();
+  assert.equal(peerCloses, 1);
+});
+
+test('a failed connection releases the peer and channels', () => {
+  const { peer } = build();
+  openAll(peer);
+  peer.setConnection('failed');
+  assert.ok(peer.peerClosed);
+  assert.ok(peer.channels.every((channel) => channel.closed));
+});
+
+test('a bad answer paste does not block a retry, but an accepted answer does', async () => {
+  const { connection, peer } = build();
+  const original = peer.setRemoteDescription.bind(peer);
+  peer.setRemoteDescription = async () => { throw new Error('bad sdp'); };
+  await assert.rejects(() => connection.acceptAnswer('junk'), /bad sdp/);
+  peer.setRemoteDescription = original;
+  await connection.acceptAnswer('good');
+  await assert.rejects(() => connection.acceptAnswer('good'), /already answered/);
+});
+
+test('send on a channel that is not open is dropped without throwing', () => {
+  const { connection, peer } = build();
+  openAll(peer);
+  peer.channels[0].readyState = 'closing';
+  peer.channels[1].send = () => { throw new Error('should not be called'); };
+  peer.channels[1].readyState = 'closing';
+  connection.transport.send('state', Uint8Array.of(1));
+  connection.transport.send('events', Uint8Array.of(2));
+  assert.deepEqual(peer.channels[0].sent, []);
+});
+
+test('close cancels a pending gather timer', async () => {
+  const { connection, peer, timers } = build();
+  let offer = null;
+  const pending = connection.createOffer().then((sdp) => { offer = sdp; });
+  await settle();
+  assert.equal(timers.pending().length, 1);
+  connection.close();
+  assert.equal(timers.pending().length, 0);
+  await pending;
+  assert.equal(offer, 'local-sdp');
+  assert.ok(peer.peerClosed);
+});

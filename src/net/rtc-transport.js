@@ -27,9 +27,22 @@ export function createRtcConnection({
   let answered = false;
   let closing = false;
 
+  let released = false;
+  const cancellers = new Set();
+
+  // Releases the peer and both channels exactly once, however the connection ended, and settles any pending waits.
+  function release() {
+    if (released) return;
+    released = true;
+    for (const cancel of [...cancellers]) cancel();
+    for (const channel of Object.values(channels)) channel.close();
+    peer.close();
+  }
+
   function setState(next) {
     if (state === next || state === TransportState.Closed) return;
     state = next;
+    if (next === TransportState.Closed) release();
     for (const handler of [...stateHandlers]) handler(next);
   }
 
@@ -59,6 +72,7 @@ export function createRtcConnection({
     // A closed channel cannot recover, and a departed page closes its channels promptly, so this ends the connection at once.
     channel.addEventListener('close', () => setState(TransportState.Closed));
     channel.addEventListener('message', (event) => {
+      if (state === TransportState.Closed) return;
       const bytes = new Uint8Array(event.data.slice(0));
       for (const handler of [...messageHandlers]) handler(name, bytes);
     });
@@ -72,10 +86,12 @@ export function createRtcConnection({
       }
       let timer = null;
       const finish = () => {
+        cancellers.delete(finish);
         peer.removeEventListener('icegatheringstatechange', onChange);
         if (timer !== null) clearTimer(timer);
-        resolve(peer.localDescription.sdp);
+        resolve(peer.localDescription?.sdp);
       };
+      cancellers.add(finish);
       const onChange = () => { if (peer.iceGatheringState === 'complete') finish(); };
       peer.addEventListener('icegatheringstatechange', onChange);
       timer = setTimer(finish, gatherCapSeconds);
@@ -96,13 +112,17 @@ export function createRtcConnection({
   async function acceptAnswer(answerSdp) {
     if (answered) throw new Error('the invite was already answered');
     answered = true;
-    await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+    try {
+      await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+    } catch (error) {
+      answered = false; // a bad paste leaves the invite open for another try
+      throw error;
+    }
   }
 
   function shutDown() {
-    for (const channel of Object.values(channels)) channel.close();
-    peer.close();
     setState(TransportState.Closed);
+    release();
   }
 
   // Waits for the events channel to drain (so a quit message is delivered) or the cap, then closes.
@@ -116,11 +136,13 @@ export function createRtcConnection({
     }
     let timer = null;
     const finish = () => {
+      cancellers.delete(finish);
       events.removeEventListener('bufferedamountlow', finish);
       if (timer !== null) clearTimer(timer);
       shutDown();
     };
     events.bufferedAmountLowThreshold = 0;
+    cancellers.add(finish);
     events.addEventListener('bufferedamountlow', finish);
     timer = setTimer(finish, CLOSE_FLUSH_CAP_SECONDS);
   }
@@ -134,7 +156,7 @@ export function createRtcConnection({
         if (channel === TransportChannel.Events) pendingEvents.push(copy);
         return;
       }
-      channels[channel].send(copy);
+      if (channels[channel].readyState === 'open') channels[channel].send(copy);
     },
     onMessage: (handler) => { messageHandlers.push(handler); },
     onStateChange: (handler) => { stateHandlers.push(handler); },
