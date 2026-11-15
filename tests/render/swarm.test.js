@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { packSwarmView, SWARM_VIEW_BYTES } from '../../src/render/swarm.js';
 import { WORLD_VIEW_FLOATS } from '../../src/render/world-view.js';
 import { SWARM_SHIP_SIZE } from '../../src/game/player-swarm.js';
@@ -64,4 +65,12 @@ test('packSwarmView marks are rewritten each call', () => {
 test('packSwarmView carries the rail hue', () => {
   const { floats } = pack(viewportAtZoom(1));
   assert.equal(floats[WORLD_VIEW_FLOATS + 7], Math.fround(WEAPON_HUES.rail));
+});
+
+test('swarm.wgsl pins the gunner ring at 0.17 inside a 0.22 gunner quad, and other ships keep the 0.16 quad', () => {
+  const source = readFileSync(new URL('../../src/render/shaders/swarm.wgsl', import.meta.url), 'utf8');
+  assert.match(source, /const GUNNER_RING_RADIUS: f32 = 0\.17;/);
+  assert.match(source, /const GUNNER_HALF_EXTENT: f32 = 0\.22;/);
+  assert.match(source, /const SHIP_HALF_EXTENT: f32 = 0\.16;/);
+  assert.match(source, /select\(SHIP_HALF_EXTENT, GUNNER_HALF_EXTENT, gunnerMark > 0\.5\)/);
 });

@@ -108,3 +108,22 @@ test('windows the law gives too few shots are not judged, and a release or the b
   }
   assert.equal(log.thin.length, MAXIMUM_THIN);
 });
+
+test('an all-gunner swarm opens no silent entry, and one shooter among gunners opens no thin window', async () => {
+  const { SwarmFire } = await import('../../src/game/swarm-fire.js');
+  const withGunners = (gunnerCount) => Array.from({ length: 12 }, (_, slot) => ({
+    slot, x: 8 + slot * 0.01, y: 4.5, heading: 0, gunnerIndex: slot < gunnerCount ? slot : -1,
+  }));
+  const control = { firing: true, aimX: 1, aimY: 0, deltaSeconds: STEP, kind: 'base', tier: 1 };
+  const noFire = { spawns: [], turretSpawns: [], beam: null, expired: false };
+  for (const gunnerCount of [12, 11]) {
+    const fire = new SwarmFire({ random: () => 0.5 });
+    const ships = withGunners(gunnerCount);
+    const log = new FireLog();
+    for (let step = 0; step < 60 * 6; step += 1) {
+      fire.distribute(noFire, ships, { x: 8, y: 4.5 }, control);
+      log.sample(STEP, sample({ report: fire.report }));
+    }
+    assert.deepEqual([log.silences, log.thin], [[], []], `${gunnerCount} gunners`);
+  }
+});

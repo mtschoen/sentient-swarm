@@ -238,7 +238,7 @@ test('the report counts the ships, those in the cone, those off cooldown, the sh
   assert.ok(fire.report.ready >= 8, 'the ships outside the cone stay off cooldown');
   assert.ok(Math.abs(fire.report.shotsPerSecond - BASE_SHOTS_PER_SECOND) < 1e-9, `${fire.report.shotsPerSecond}`);
   fire.distribute(NO_FIRE, ships, ORIGIN, { ...AIM_RIGHT, kind: 'beam' });
-  assert.deepEqual(fire.report, { ships: 12, inCone: 0, ready: 0, fired: 0, shotsPerSecond: 0 });
+  assert.deepEqual(fire.report, { ships: 12, shooters: 12, inCone: 0, ready: 0, fired: 0, shotsPerSecond: 0 });
   fire.distribute(NO_FIRE, [], ORIGIN, AIM_RIGHT);
   assert.equal(fire.report.ships, 0);
 });
@@ -303,4 +303,15 @@ test('the beam leaves the centroid of the non-gunners, or the controlled point w
   assert.deepEqual([mixed.x, mixed.y], [4, 6]);
   const all = fire.distribute({ ...NO_FIRE, beam }, ships.map((ship) => ({ ...ship, gunnerIndex: 0 })), { x: 9, y: 9 }, control).beam;
   assert.deepEqual([all.x, all.y], [9, 9]);
+});
+
+test('an all-gunner swarm expects nothing from the armed weapon, and a few shooters cap the expected rate at one shot per step', () => {
+  const fire = new SwarmFire({ random: seededRandom() });
+  fire.distribute(NO_FIRE, withGunners(12, 12), ORIGIN, AIM_RIGHT);
+  assert.equal(fire.report.shooters, 0);
+  assert.equal(fire.report.shotsPerSecond, 0);
+  // One shooter among 12 ships: the law says 65 per second but one ship fires at most 60 per second at this step.
+  fire.distribute(NO_FIRE, withGunners(12, 11), ORIGIN, AIM_RIGHT);
+  assert.equal(fire.report.shooters, 1);
+  assert.ok(Math.abs(fire.report.shotsPerSecond - 1 / STEP) < 1e-9, `${fire.report.shotsPerSecond}`);
 });

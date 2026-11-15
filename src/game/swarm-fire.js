@@ -27,7 +27,8 @@
 //   none) along the aim (the projectile system has one beam slot).
 // - report describes the newest distribute for the fire log (src/game/fire-log.js): the ships, how
 //   many of the non-gunners point inside the cone, how many of them are off cooldown, the ship shots
-//   fired and the aggregate rate the law gives (0 while nothing is due to fire).
+//   fired and the rate expected: the law's aggregate, capped at one shot per shooter per step (0 while
+//   nothing is due to fire or no ship is a shooter); shooters counts the non-gunners.
 import { MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { perShipInterval } from './swarm-fire-rate.js';
 import { swarmShotRecipe } from './swarm-shots.js';
@@ -61,7 +62,7 @@ export class SwarmFire {
     this.gunnerFire = new GunnerFire({ random });
     this.cooldowns = new Float64Array(MAXIMUM_SWARM_SHIPS);
     this.scheduled = new Uint8Array(MAXIMUM_SWARM_SHIPS);
-    this.report = { ships: 0, inCone: 0, ready: 0, fired: 0, shotsPerSecond: 0 };
+    this.report = { ships: 0, shooters: 0, inCone: 0, ready: 0, fired: 0, shotsPerSecond: 0 };
     this.reset();
   }
 
@@ -83,6 +84,8 @@ export class SwarmFire {
     const count = ships.length;
     const report = this.report;
     report.ships = count;
+    report.shooters = 0;
+    for (const ship of ships) if (ship.gunnerIndex < 0) report.shooters += 1;
     report.inCone = 0;
     report.ready = 0;
     report.fired = 0;
@@ -105,6 +108,8 @@ export class SwarmFire {
     // law's aggregate for ALL the ships (count), which the gunners' share does not reduce.
     let inverseSum = 0;
     for (const ship of ships) if (ship.gunnerIndex < 0) inverseSum += 1 / COOLDOWN_FACTORS[ship.slot];
+    // Every ship a gunner: the armed weapon is quiet and expects nothing (no 0 / 0 rate).
+    if (this.report.shooters === 0) return;
     const interval = (perShipInterval(recipe.baseShotsPerSecond, recipe.exponent, count) * inverseSum) / count;
     for (const ship of ships) {
       if (ship.gunnerIndex >= 0) {
@@ -123,7 +128,8 @@ export class SwarmFire {
       this.cooldowns[ship.slot] = slotHash(ship.slot, 21);
     }
     const report = this.report;
-    report.shotsPerSecond = inverseSum / interval;
+    // A ship fires at most once per step, so a few shooters cap the rate at shooters per step.
+    report.shotsPerSecond = Math.min(inverseSum / interval, report.shooters / deltaSeconds);
     const start = this.rotation % count;
     let last = -1;
     for (let visited = 0; visited < count; visited += 1) {

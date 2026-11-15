@@ -85,7 +85,8 @@ export class FireLog {
     this.wasFiring = inputFiring;
 
     const expected = inputFiring && phase === 'playing';
-    if (!expected || report.fired > 0) {
+    // A swarm of only gunners has no ship shots to miss: its armed weapon is quiet by design.
+    if (!expected || report.fired > 0 || report.shooters === 0) {
       this.silentSeconds = 0;
       this.openSilence = null;
     } else {
