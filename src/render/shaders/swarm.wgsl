@@ -63,13 +63,13 @@ fn swarmVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
   output.heading = 0.0;
   output.gunnerMark = 0.0;
   if (!isMarker) {
-    let ship = view.ships[min(instanceIndex, MAXIMUM_SWARM_SHIPS - 1u)];
+    let shipIndex = min(instanceIndex, MAXIMUM_SWARM_SHIPS - 1u);
+    let ship = view.ships[shipIndex];
     center = ship.xy;
     halfExtent = SHIP_HALF_EXTENT * view.shipSize;
     output.age = ship.z;
     output.heading = ship.w;
-    let markIndex = min(instanceIndex, MAXIMUM_SWARM_SHIPS - 1u);
-    output.gunnerMark = view.gunnerMarks[markIndex / 4u][markIndex % 4u];
+    output.gunnerMark = view.gunnerMarks[shipIndex / 4u][shipIndex % 4u];
   }
   output.offset = corner * halfExtent;
   output.marker = select(0.0, 1.0, isMarker);

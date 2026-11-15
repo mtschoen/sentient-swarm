@@ -261,7 +261,7 @@ test('swapping weapons mid-fire discards the half-built volley of the old weapon
   assert.equal(weapons.update(0.01, aim).spawns.length, 9);
 });
 
-// Owner ruling R29: rail pickups stack into rear-firing turrets that fan out from the back, 30
+// Owner ruling R29: rail pickups stack into gunner turrets that fan out from the back, 30
 // degrees apart, until 12 cover every direction; later pickups raise the turrets' rail tier.
 const DEGREES = Math.PI / 180;
 const sortedDegrees = (radians) => radians.map((angle) => ((angle / DEGREES) % 360 + 360) % 360).sort((first, second) => first - second);

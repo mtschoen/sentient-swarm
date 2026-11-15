@@ -20,7 +20,7 @@
 //      swarm moves, followCamera eases the camera toward cameraFocus (the point and the swarm
 //      centroid; held still while watching); a start, a quit and a respawn cut it there.
 //   3. pickups.update, then collect at the player into weapons.collect (before charge expiry; a
-//      rail pickup adds a turret and leaves the armed weapon alone, owner ruling R29); a
+//      rail pickup adds a turret (a gunner ship of the swarm) and leaves the armed weapon alone, owner ruling R29); a
 //      collection plays the pickup effect and, with pickupBlastRadius above 0, fires the pickup
 //      blast (owner ruling R22): simulation.requestRadialKill at the ship for this step (unscored,
 //      like a bomb) and a PICKUP_BLAST_IMPULSE_STRENGTH shockwave; with the blast off it queues
@@ -31,11 +31,11 @@
 //      starts beamTime and plays pickup('beamtime') with a BEAM_TIME_IMPULSE_STRENGTH shockwave.
 //   4. weapons.update (the armed kind, tier, charge and cue cadence; its own volley spawns are not
 //      queued); SwarmFire fires one projectile per ship shot from the ships by the armed recipe and
-//      the rate law, and its shots and then the rail turrets' spawns go to
+//      the rate law, and its shots and then the gunners' rail needles (turretSpawns) go to
 //      projectiles.queueSpawn and the beam to setBeam (null on the expiry frame even when the
 //      weapon still returned one). A frame that fires plays one weaponFire cue: the armed weapon's
 //      kind and tier when it fired (spawns or a beam), else 'rail' at the turret tier when only the
-//      turrets fired; then the expiry cue (expiry keeps the turrets). During beam time every seat
+//      gunners fired; then the expiry cue (expiry keeps the turrets). During beam time every seat
 //      that is not down has the beam armed (weapons.beginBeamTime); tickBeamTime counts it in real
 //      time next to the time warp and its end plays the expiry cue.
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
@@ -682,7 +682,7 @@ export class Game {
 
   // Debug hook: arms the weapon type at the tier with a full charge, reaching the tier the way
   // pickups do (the same type again adds a tier). 'rail' is the turrets: base gun plus tier
-  // turrets (past 12 each further one raises the turret tier).
+  // gunner ships (past 12 each further one raises the turret tier).
   debugArm(type, tier = 1) {
     this.weapons.dropAll();
     if (type === 'base') return;

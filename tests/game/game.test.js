@@ -1005,7 +1005,7 @@ test('watch mode without a pointer moves the point with the move stick', async (
   assert.equal(game.state.phase, RunPhase.Ready);
 });
 
-// Owner ruling R29: rail pickups add rear-firing turrets on top of the armed weapon.
+// Owner ruling R29: rail pickups add gunner-ship turrets on top of the armed weapon.
 test('a collected rail pickup adds a turret and keeps the armed weapon, its tier and its charge', async () => {
   const { game } = await createGame();
   game.start();

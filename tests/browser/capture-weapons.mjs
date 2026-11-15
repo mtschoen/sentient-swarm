@@ -1,7 +1,7 @@
 // Visual capture for the weapon taste pass (task C0c): writes 1x PNGs of the ship, the rail shot,
 // the sidewinders and the pulse ring under artifacts/. Not part of the checks. The turrets subject
-// (task R29, not in the default set) writes artifacts/r29-turrets.png: TURRET_COUNT rail turrets
-// (debugArm('rail', count)) firing beside the base gun, the turret ticks on the ship's ring.
+// (task R29, not in the default set) writes artifacts/r29-turrets.png: TURRET_COUNT rail gunner ships
+// (debugArm('rail', count)) firing beside the base gun, the gunner ships' rings around the swarm.
 // Usage: SMOKE_PORT=5189 node tests/browser/capture-weapons.mjs <before|after> [ship rail sidewinders pulse turrets]
 import { mkdir, writeFile } from 'node:fs/promises';
 import { launchWebGpuBrowser } from './launch.mjs';
