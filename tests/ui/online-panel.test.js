@@ -160,3 +160,32 @@ test('status, connecting and messages are text changes', () => {
   assert.equal(panel.messageText, 'hello');
   assert.equal(allNodes(panel.element).length, count);
 });
+
+test('showing the panel again ghosts the copy buttons until the new text arrives', async () => {
+  const { panel, clipboard, copies } = setup();
+  panel.setInvite('old-invite');
+  panel.setReply('old-reply');
+  panel.showHost();
+  await button(panel, 'Copy invite link').fire('click');
+  assert.equal(button(panel, 'Copy invite link').attributes['aria-disabled'], 'true');
+  panel.showJoin();
+  await button(panel, 'Copy reply').fire('click');
+  assert.equal(button(panel, 'Copy reply').attributes['aria-disabled'], 'true');
+  assert.deepEqual(clipboard.written, []);
+  assert.equal(copies.length, 0);
+});
+
+test('a rejected paste keeps the box text, and Paste reply after acceptance leaves the box alone', async () => {
+  const { panel, clipboard, replies } = setup();
+  box(panel).value = 'hello';
+  await box(panel).fire('keydown', { key: 'Enter' });
+  assert.equal(box(panel).value, 'hello');
+  clipboard.text = await encodeSignal({ kind: 'answer', sdp: SAMPLE_SDP });
+  await button(panel, 'Paste reply').fire('click');
+  assert.equal(replies.length, 1);
+  clipboard.text = 'something else';
+  clipboard.reject = true;
+  await button(panel, 'Paste reply').fire('click');
+  assert.equal(box(panel).value, await encodeSignal({ kind: 'answer', sdp: SAMPLE_SDP }));
+  assert.equal(panel.messageText, '');
+});

@@ -82,6 +82,7 @@ export function createOnlinePanel(parent, { documentObject = document, clipboard
   copyInvite.addEventListener('click', () => copy(inviteText));
   copyReply.addEventListener('click', () => copy(replyText, onCopyReply));
   pasteReply.addEventListener('click', async () => {
+    if (accepted) return;
     let text;
     try {
       text = await clipboard.readText();
@@ -89,17 +90,18 @@ export function createOnlinePanel(parent, { documentObject = document, clipboard
       message.textContent = CLIPBOARD_REFUSED;
       return;
     }
+    if (accepted) return;
     replyBox.value = text;
     await submit(text);
   });
   replyBox.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter') return undefined;
+    if (event.key !== 'Enter' || accepted) return undefined;
     event.preventDefault?.();
     return submit(replyBox.value);
   });
   replyBox.addEventListener('paste', (event) => {
     const text = event.clipboardData?.getData('text');
-    if (typeof text !== 'string') return undefined;
+    if (accepted || typeof text !== 'string') return undefined;
     replyBox.value = text;
     event.preventDefault?.();
     return submit(text);
@@ -116,6 +118,8 @@ export function createOnlinePanel(parent, { documentObject = document, clipboard
       visible = true;
       element.hidden = false;
       setMode(true);
+      inviteText = null;
+      setGhosted(copyInvite, true);
       status.textContent = 'Send your friend the invite link, then paste their reply.';
       message.textContent = '';
       replyBox.value = '';
@@ -124,6 +128,8 @@ export function createOnlinePanel(parent, { documentObject = document, clipboard
       visible = true;
       element.hidden = false;
       setMode(false);
+      replyText = null;
+      setGhosted(copyReply, true);
       status.textContent = 'Send your reply back to your friend.';
       message.textContent = '';
     },
