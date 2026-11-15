@@ -4,7 +4,7 @@
 // during play) fade by opacity, so nothing pops in or out of layout. edgeIndicatorPlacement is the
 // pure geometry: world to CSS pixels through the view bounds and the arena rect, then the ray from
 // the rect center to the target clamped to the rect inset by EDGE_INDICATOR_INSET_CSS_PIXELS.
-import { PICKUP_HUES, WEAPON_HUES } from '../game/weaponTypes.js';
+import { BEAM_SHARD_TYPE, PICKUP_HUES, WEAPON_HUES } from '../game/weaponTypes.js';
 
 export const EDGE_INDICATOR_SLOTS = 12;
 export const EDGE_INDICATOR_INSET_CSS_PIXELS = 24;
@@ -34,9 +34,10 @@ export function edgeIndicatorPlacement(target, viewBounds, rect, inset = EDGE_IN
   return { visible: true, left: centerX + offsetX * scale, top: centerY + offsetY * scale, angle };
 }
 
-// The targets to indicate: every pickup (colored by its hue), then every gate with a telegraph.
+// The targets to indicate: every pickup but a beam shard (which has its own pointer, beam-shard-pointer.js),
+// colored by its hue, then every gate with a telegraph.
 export function edgeIndicatorTargets(pickups, gates) {
-  const targets = pickups.map((pickup) => ({ x: pickup.x, y: pickup.y, color: `hsl(${Math.round(360 * (WEAPON_HUES[pickup.type] ?? PICKUP_HUES[pickup.type] ?? 0))}, 90%, 66%)` }));
+  const targets = pickups.filter((pickup) => pickup.type !== BEAM_SHARD_TYPE).map((pickup) => ({ x: pickup.x, y: pickup.y, color: `hsl(${Math.round(360 * (WEAPON_HUES[pickup.type] ?? PICKUP_HUES[pickup.type] ?? 0))}, 90%, 66%)` }));
   for (const gate of gates) if (gate.telegraph > 0) targets.push({ x: gate.x, y: gate.y, color: GATE_COLOR });
   return targets.slice(0, EDGE_INDICATOR_SLOTS);
 }

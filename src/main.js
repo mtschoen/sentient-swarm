@@ -22,6 +22,7 @@ import { installAudio } from './audio/audio-hook.js';
 import { createHud } from './ui/hud.js';
 import { createTouchOverlay, withHaptics } from './ui/touchOverlay.js';
 import { createEdgeIndicators, edgeIndicatorTargets } from './ui/edgeIndicators.js';
+import { beamShardTargets, createBeamShardPointers } from './ui/beam-shard-pointer.js';
 import { STICK_RADIUS } from './input/touch.js';
 import { setGamepadDeadZone } from './input/gamepad.js';
 import { createLifeWatcher, createRumble } from './input/rumble.js';
@@ -171,6 +172,7 @@ async function boot() {
     game.simulation.setKillBurstParticles(killBurstParticlesFor(current));
     input.touch.setTuning({ deadZone: current.stickDeadZone, radius: STICK_RADIUS * current.stickRadius });
     setGamepadDeadZone(current.stickDeadZone);
+    document.documentElement.toggleAttribute('data-reduced-motion', Boolean(current.reducedMotion));
   };
   applySettings(settings);
   // The select shows the preset in effect (the stored one is null until the probe settles).
@@ -245,6 +247,7 @@ async function boot() {
   const touchOverlay = createTouchOverlay(document.getElementById('touch-overlay'), { touch: input.touch, canvas });
   // Chevrons on the view edge for off-screen pickups and the telegraphed wave gate.
   const edgeIndicators = createEdgeIndicators(document.body);
+  const beamShardPointers = createBeamShardPointers(document.body);
 
   // Menus (owner ruling R17). The title menu is the one input from load to play: its buttons, a tap
   // on the arena, Enter, Space or a gamepad face button start the run, and audio unlocks inside
@@ -372,6 +375,7 @@ async function boot() {
     const state = game.state;
     hud.update(state);
     edgeIndicators.update(edgeIndicatorTargets(game.pickups.pickups, game.simulation.spawnGates?.gates ?? []), viewport.visibleBounds, cssArenaRect());
+    beamShardPointers.update(beamShardTargets(game.pickups.pickups), viewport.visibleBounds, cssArenaRect());
     touchOverlay.update(state);
     fireDebug?.update(fireLog);
     lifeWatcher.update(state);

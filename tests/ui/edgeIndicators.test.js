@@ -72,3 +72,8 @@ test('the slots persist and fade: an off-screen target shows its slot, the rest 
   assert.equal(slots[0].style.opacity, '0');
   assert.equal(indicators.element.children.length, EDGE_INDICATOR_SLOTS);
 });
+
+test('shards are left to the beam shard pointer, not the generic slots', () => {
+  const targets = edgeIndicatorTargets([{ x: 1, y: 2, type: 'beamshard' }, { x: 3, y: 4, type: 'scatter' }], []);
+  assert.deepEqual(targets.map(({ x, y }) => [x, y]), [[3, 4]]);
+});
