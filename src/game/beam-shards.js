@@ -151,17 +151,25 @@ export function placeShard(context, random = Math.random) {
     return chosen;
   }
 
-  // Nothing is off screen (a view as large as the world): the inset corner farthest from the anchor.
-  let farthest = { x: left, y: top };
-  let farthestDistance = -1;
-  for (const x of [left, right]) {
-    for (const y of [top, bottom]) {
-      const distance = Math.hypot(x - anchor.x, y - anchor.y);
-      if (distance > farthestDistance) {
-        farthestDistance = distance;
-        farthest = { x, y };
-      }
+  // Nothing is off screen (a view as large as the world): of the inset corners and edge midpoints,
+  // the one whose nearest neighbour (the anchor or a waiting shard) is farthest, so shards spread out.
+  const middleX = (left + right) / 2;
+  const middleY = (top + bottom) / 2;
+  const spots = [];
+  for (const x of [left, middleX, right]) {
+    for (const y of [top, middleY, bottom]) {
+      if (x !== middleX || y !== middleY) spots.push({ x, y });
     }
   }
-  return farthest;
+  const crowding = (spot) => Math.min(...[anchor, ...shards].map((other) => Math.hypot(spot.x - other.x, spot.y - other.y)));
+  let best = spots[0];
+  let bestClearance = -1;
+  for (const spot of spots) {
+    const clearance = crowding(spot);
+    if (clearance > bestClearance) {
+      bestClearance = clearance;
+      best = spot;
+    }
+  }
+  return best;
 }

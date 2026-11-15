@@ -199,6 +199,17 @@ test('fallback 3: a view as large as the world gives the inset corner farthest f
   assert.deepEqual(other, { x: WORLD_BOUNDS.minX + 1, y: WORLD_BOUNDS.minY + 1 });
 });
 
+test('fallback 3: successive shards under a view as large as the world do not stack', () => {
+  const view = { centerX: 16, centerY: 9, width: 64, height: 36 };
+  const anchor = { x: 16, y: 9 };
+  const shards = [];
+  for (let index = 0; index < 6; index += 1) {
+    const point = placeShard(context({ view, anchor, shards: [...shards] }), seededRandom(3));
+    for (const shard of shards) assert.ok(Math.hypot(point.x - shard.x, point.y - shard.y) > 1, `shard ${index} stacked on a waiting one`);
+    shards.push(point);
+  }
+});
+
 test('an anchor in a world corner still yields an off-screen point', () => {
   const view = { centerX: 8, centerY: 4.5, width: 16, height: 9 };
   for (let index = 0; index < 50; index += 1) {
