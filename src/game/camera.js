@@ -1,10 +1,13 @@
 // Follow camera: a center in world units and a zoom (1 unless a targetZoom is passed) that the renderer's Viewport
 // draws around. Pure: no GPU, DOM or clock; time is the deltaSeconds passed to update, and nothing
 // here is random. The simulation never reads the camera (spawning, walls and kills use the world).
-// update(deltaSeconds, { focusX, focusY, viewWidth, viewHeight, bounds, targetZoom = 1 }) moves the
-// center toward the focus (the view extents below are viewWidth / zoom and viewHeight / zoom; the
-// zoom eases to targetZoom by the same closed form with CAMERA_ZOOM_SMOOTH_SECONDS, clamped to
-// [MINIMUM_CAMERA_ZOOM, 1]; the solo game never passes a target, so its zoom stays exactly 1):
+// update(deltaSeconds, { focusX, focusY, viewWidth, viewHeight, bounds, targetZoom = 1,
+// zoomMinimum = MINIMUM_CAMERA_ZOOM, zoomMaximum = 1, zoomSmoothSeconds = CAMERA_ZOOM_SMOOTH_SECONDS })
+// moves the center toward the focus (the view extents below are viewWidth / zoom and viewHeight / zoom;
+// the zoom eases to targetZoom by the same closed form with zoomSmoothSeconds, clamped to
+// [zoomMinimum, zoomMaximum], which the camera remembers for sample and which default to
+// [MINIMUM_CAMERA_ZOOM, 1]; the solo game passes a target and wider limits only when the lab's solo
+// zoom is on, so by default its zoom stays exactly 1):
 //   - dead zone: a focus within deadZoneFraction of the view's width and height of the current
 //     center (on each axis) does not move the camera; past it the target is the focus less the
 //     dead zone, so the focus sits on the zone's edge;
@@ -117,14 +120,18 @@ export class Camera {
     this.velocityY = 0;
     this.zoom = 1;
     this.zoomVelocity = 0;
+    this.zoomMinimum = MINIMUM_CAMERA_ZOOM;
+    this.zoomMaximum = 1;
     this.lastDeltaSeconds = 0;
     this.lastView = null;
   }
 
-  update(deltaSeconds, { focusX, focusY, viewWidth, viewHeight, bounds, targetZoom = 1 }) {
+  update(deltaSeconds, { focusX, focusY, viewWidth, viewHeight, bounds, targetZoom = 1, zoomMinimum = MINIMUM_CAMERA_ZOOM, zoomMaximum = 1, zoomSmoothSeconds = CAMERA_ZOOM_SMOOTH_SECONDS }) {
     const omega = 2 / this.smoothSeconds;
-    [this.zoom, this.zoomVelocity] = criticallyDampedStep(this.zoom, this.zoomVelocity, clamp(targetZoom, MINIMUM_CAMERA_ZOOM, 1), 2 / CAMERA_ZOOM_SMOOTH_SECONDS, deltaSeconds);
-    this.zoom = clamp(this.zoom, MINIMUM_CAMERA_ZOOM, 1);
+    this.zoomMinimum = zoomMinimum;
+    this.zoomMaximum = zoomMaximum;
+    [this.zoom, this.zoomVelocity] = criticallyDampedStep(this.zoom, this.zoomVelocity, clamp(targetZoom, zoomMinimum, zoomMaximum), 2 / zoomSmoothSeconds, deltaSeconds);
+    this.zoom = clamp(this.zoom, zoomMinimum, zoomMaximum);
     const extentX = viewWidth / this.zoom;
     const extentY = viewHeight / this.zoom;
     const targetX = clampAxis(deadZoneTarget(this.centerX, focusX, this.deadZoneFraction * extentX), extentX, bounds.minX, bounds.maxX);
@@ -137,8 +144,10 @@ export class Camera {
     this.lastView = { viewWidth, viewHeight, bounds };
   }
 
-  cut(focusX, focusY, { viewWidth, viewHeight, bounds, zoom = 1 }) {
-    this.zoom = clamp(zoom, MINIMUM_CAMERA_ZOOM, 1);
+  cut(focusX, focusY, { viewWidth, viewHeight, bounds, zoom = 1, zoomMinimum = MINIMUM_CAMERA_ZOOM, zoomMaximum = 1 }) {
+    this.zoomMinimum = zoomMinimum;
+    this.zoomMaximum = zoomMaximum;
+    this.zoom = clamp(zoom, zoomMinimum, zoomMaximum);
     this.zoomVelocity = 0;
     this.centerX = clampAxis(focusX, viewWidth / this.zoom, bounds.minX, bounds.maxX);
     this.centerY = clampAxis(focusY, viewHeight / this.zoom, bounds.minY, bounds.maxY);
@@ -153,7 +162,7 @@ export class Camera {
     const seconds = alpha * this.lastDeltaSeconds;
     let centerX = this.centerX + this.velocityX * seconds;
     let centerY = this.centerY + this.velocityY * seconds;
-    const zoom = clamp(this.zoom + this.zoomVelocity * seconds, MINIMUM_CAMERA_ZOOM, 1);
+    const zoom = clamp(this.zoom + this.zoomVelocity * seconds, this.zoomMinimum, this.zoomMaximum);
     if (this.lastView !== null) {
       const { viewWidth, viewHeight, bounds } = this.lastView;
       centerX = clampAxis(centerX, viewWidth / zoom, bounds.minX, bounds.maxX);

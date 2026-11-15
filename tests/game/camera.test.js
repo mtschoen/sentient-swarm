@@ -212,3 +212,68 @@ test('cut with a zoom sets it at once; sample extrapolates and clamps the zoom t
   camera.zoomVelocity = 1000;
   assert.equal(camera.sample(1).zoom, 1);
 });
+
+function zoomRun(camera, seconds, options) {
+  const steps = Math.round(seconds / STEP);
+  for (let index = 0; index < steps; index += 1) camera.update(STEP, { focusX: 16, focusY: 9, ...VIEW, ...options });
+}
+
+test('defaults keep the zoom inside [MINIMUM_CAMERA_ZOOM, 1]', () => {
+  const high = new Camera({ centerX: 16, centerY: 9 });
+  zoomRun(high, 10, { targetZoom: 3 });
+  assert.equal(high.zoom, 1);
+  const low = new Camera({ centerX: 16, centerY: 9 });
+  zoomRun(low, 10, { targetZoom: 0.1 });
+  assert.ok(Math.abs(low.zoom - MINIMUM_CAMERA_ZOOM) < 1e-6);
+});
+
+test('zoomMaximum raises the ceiling', () => {
+  const camera = new Camera({ centerX: 16, centerY: 9 });
+  zoomRun(camera, 10, { targetZoom: 1.6, zoomMaximum: 1.6 });
+  assert.ok(Math.abs(camera.zoom - 1.6) < 1e-6, `zoom ${camera.zoom}`);
+  assert.ok(Math.abs(camera.sample(0).zoom - 1.6) < 1e-6);
+});
+
+test('zoomMinimum lowers the floor', () => {
+  const camera = new Camera({ centerX: 16, centerY: 9 });
+  zoomRun(camera, 10, { targetZoom: 0.3, zoomMinimum: 0.3 });
+  assert.ok(Math.abs(camera.zoom - 0.3) < 1e-6, `zoom ${camera.zoom}`);
+});
+
+test('zoomSmoothSeconds sets the zoom rise', () => {
+  const slow = new Camera({ centerX: 16, centerY: 9 });
+  const normal = new Camera({ centerX: 16, centerY: 9 });
+  zoomRun(slow, 0.5, { targetZoom: 1.6, zoomMaximum: 1.6, zoomSmoothSeconds: 2 });
+  zoomRun(normal, 0.5, { targetZoom: 1.6, zoomMaximum: 1.6 });
+  assert.ok(slow.zoom - 1 < (normal.zoom - 1) / 2, `slow ${slow.zoom} normal ${normal.zoom}`);
+});
+
+test('cut honors the limits', () => {
+  const camera = new Camera();
+  camera.cut(16, 9, { ...VIEW, zoom: 1.5, zoomMaximum: 1.6 });
+  assert.equal(camera.zoom, 1.5);
+  camera.cut(16, 9, { ...VIEW, zoom: 1.5 });
+  assert.equal(camera.zoom, 1);
+});
+
+test('sample clamps with the last limits', () => {
+  const camera = new Camera({ centerX: 16, centerY: 9 });
+  camera.zoom = 1.59;
+  camera.zoomVelocity = 5;
+  camera.update(STEP, { focusX: 16, focusY: 9, ...VIEW, targetZoom: 1.6, zoomMaximum: 1.6 });
+  camera.zoomVelocity = 5;
+  camera.zoom = 1.599;
+  assert.ok(camera.sample(1).zoom <= 1.6);
+  assert.ok(camera.sample(1).zoom > 1);
+});
+
+test('an omitted option is today\'s behavior', () => {
+  const plain = new Camera({ centerX: 10, centerY: 9 });
+  const explicit = new Camera({ centerX: 10, centerY: 9 });
+  for (let index = 0; index < 120; index += 1) {
+    const targetZoom = index < 60 ? 0.6 : 2;
+    plain.update(STEP, { focusX: 22, focusY: 5, ...VIEW, targetZoom });
+    explicit.update(STEP, { focusX: 22, focusY: 5, ...VIEW, targetZoom, zoomMinimum: MINIMUM_CAMERA_ZOOM, zoomMaximum: 1, zoomSmoothSeconds: CAMERA_ZOOM_SMOOTH_SECONDS });
+  }
+  assert.deepEqual([plain.zoom, plain.centerX, plain.centerY], [explicit.zoom, explicit.centerX, explicit.centerY]);
+});
