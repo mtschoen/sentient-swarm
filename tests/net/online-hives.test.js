@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { STEP, createOnlinePair, seededRandom } from './online-harness.js';
 import { HOST_STATE_UPDATE_INTERVAL } from '../../src/net/protocol.js';
-import { encodeSnapshot } from '../../src/net/snapshot-codec.js';
+import { decodeSnapshot, encodeSnapshot } from '../../src/net/snapshot-codec.js';
 import { seatAt } from './net-fixtures.js';
 
 const CAPTURE_STRENGTH = 0.4;
@@ -67,8 +67,31 @@ test('the guest capturing its own hive is computed on the host from the guest sh
   assert.equal(captureShockwaves(guest).length, 1);
 });
 
+// The host-state sequences the host sends and the guest's transport delivers, in delivery order.
+function traceHostStates(pair) {
+  const sent = [];
+  const delivered = [];
+  const sequenceOf = (channel, bytes) => (channel === 'state' ? decodeSnapshot(bytes).hostState?.sequence ?? null : null);
+  const send = pair.host.send.bind(pair.host);
+  pair.host.send = (channel, bytes) => {
+    const sequence = sequenceOf(channel, bytes);
+    if (sequence !== null) sent.push(sequence);
+    send(channel, bytes);
+  };
+  pair.guest.onMessage((channel, bytes) => {
+    const sequence = sequenceOf(channel, bytes);
+    if (sequence !== null) delivered.push(sequence);
+  });
+  const outOfOrder = () => delivered.filter((sequence, index) => delivered.slice(0, index).some((earlier) => earlier > sequence)).length;
+  return { sent, delivered, outOfOrder };
+}
+
+// Reorder above the 0.1 s between host states, so a newer state often lands before an older one.
+const REORDER_SECONDS = 0.25;
+
 test('state channel loss during a capture still converges and never steps back', async () => {
-  const { host, guest, pair, stepBoth, startMatch } = await createOnlinePair({ lossFraction: 0.5, reorderSeconds: 0.05, random: seededRandom(7) });
+  const { host, guest, pair, stepBoth, startMatch } = await createOnlinePair({ lossFraction: 0.5, reorderSeconds: REORDER_SECONDS, random: seededRandom(7) });
+  const trace = traceHostStates(pair);
   await startMatch('hives');
   const hostCenter = hivesOn(host).hives[2];
   const guestCenter = hivesOn(guest).hives[2];
@@ -89,6 +112,8 @@ test('state channel loss during a capture still converges and never steps back',
     previousGuest = guestCenter.progress;
   }
   assert.ok(guestRises > 10, `the guest followed the capture (${guestRises} rises)`);
+  assert.ok(trace.delivered.length < trace.sent.length, `some host states were dropped (${trace.delivered.length} of ${trace.sent.length})`);
+  assert.ok(trace.outOfOrder() > 0, 'some host states arrived after a newer one');
   // Once the guest shows the owner it never shows the hive neutral again.
   let guestOwned = false;
   for (let update = 0; update < Math.round(0.5 / STEP); update += 1) {
@@ -100,7 +125,7 @@ test('state channel loss during a capture still converges and never steps back',
   assert.equal(guestCenter.owner, hostCenter.owner);
   // Loss stops: within one host-state interval (plus the reorder) the guest matches the host.
   pair.setLossFraction(0);
-  stepHolding(stepBoth, host.game.seats[0], hostCenter, (HOST_STATE_UPDATE_INTERVAL + 1) * STEP + 0.05);
+  stepHolding(stepBoth, host.game.seats[0], hostCenter, (HOST_STATE_UPDATE_INTERVAL + 1) * STEP + REORDER_SECONDS);
   holdAt(host.game.seats[0], hostCenter.x, hostCenter.y);
   stepHolding(stepBoth, host.game.seats[0], hostCenter, HOST_STATE_UPDATE_INTERVAL * STEP);
   hivesOn(host).hives.forEach((hive, index) => {
