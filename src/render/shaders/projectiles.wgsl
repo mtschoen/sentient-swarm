@@ -11,6 +11,9 @@
 //              a beam slot lifetime under 1 (the lab's beam sweep budget, its kill reach scale) cuts
 //              the laser and the fan at that fraction of the current ray's length, as the collide
 //              pass cuts the kill sector
+// Versus: a projectile whose flags name an owner seat (projectileOwner) leans OWNER_TINT_STRENGTH
+// of the way toward its seat's color at the same peak brightness (tintForOwner); unowned ones (solo,
+// co-op) are drawn untouched.
 // Slot 0 is the beam; the CPU rewrites it every frame while firing, with the previous step's unit
 // direction in seed and extra (projectiles_collide.wgsl kills the same sector).
 
@@ -55,6 +58,10 @@ const BEAM_FAN_HEAD: f32 = 1.0;
 const BEAM_FAN_HEAT: f32 = 0.6;
 // Longer than any ray in the arena: the draw limit of a beam at full reach (lifetime 1).
 const BEAM_UNLIMITED_REACH: f32 = 1e9;
+// The seats' body colors (SEAT_COLORS in src/game/seat-colors.js; a test keeps them equal).
+const SEAT_ONE_TINT: vec3f = vec3f(1.0, 1.0, 1.0);
+const SEAT_TWO_TINT: vec3f = vec3f(0.45, 1.0, 0.55);
+const OWNER_TINT_STRENGTH: f32 = 0.7;
 
 struct ProjectileVaryings {
   @builtin(position) position: vec4f,
@@ -68,6 +75,8 @@ struct ProjectileVaryings {
   // Beam only: xy the ship position the beam starts from, z the distance past which nothing is
   // drawn (BEAM_UNLIMITED_REACH at full reach), w unused.
   @location(5) @interpolate(flat) beamOrigin: vec4f,
+  // The owner seat plus 1, NO_PROJECTILE_OWNER for none.
+  @location(6) @interpolate(flat) owner: u32,
 }
 
 fn kindHue(kind: u32) -> f32 {
@@ -105,6 +114,7 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
   output.shape = vec4f(0.0);
   output.beamDirections = vec4f(0.0);
   output.beamOrigin = vec4f(0.0);
+  output.owner = NO_PROJECTILE_OWNER;
   let projectile = projectiles[instanceIndex];
   if ((projectile.flags & PROJECTILE_FLAG_ALIVE) == 0u) {
     return output;
@@ -177,6 +187,7 @@ fn projectileVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_i
   output.local = select(local + vec2f(dot(center - projectile.position, direction), 0.0), world - projectile.position, kind == PROJECTILE_KIND_BEAM);
   output.hue = kindHue(select(kind, PROJECTILE_KIND_SIDEWINDER, kind == PROJECTILE_KIND_PULSE_RING && isMissileRing));
   output.kind = kind;
+  output.owner = projectileOwner(projectile.flags);
   output.shape = vec4f(projectile.radius, halfExtent.x, projectile.seed, fade);
   return output;
 }
@@ -252,6 +263,16 @@ fn energyBall(distance: f32, radius: f32, feather: f32) -> vec3f {
   let haloExtent = max(radius * (BALL_HALO_FACTOR - 1.0), 0.001);
   let halo = pow(clamp(1.0 - max(distance - radius, 0.0) / haloExtent, 0.0, 1.0), 2.0) * (1.0 - body);
   return vec3f(core, body, halo);
+}
+
+// An owned projectile's color moved toward its seat's tint at the same peak brightness.
+fn tintForOwner(color: vec3f, owner: u32) -> vec3f {
+  if (owner == NO_PROJECTILE_OWNER) {
+    return color;
+  }
+  let tint = select(SEAT_TWO_TINT, SEAT_ONE_TINT, owner == 1u);
+  let brightness = max(color.r, max(color.g, color.b));
+  return mix(color, tint * brightness, OWNER_TINT_STRENGTH);
 }
 
 fn neon(hue: f32, saturation: f32) -> vec3f {
@@ -366,5 +387,5 @@ fn projectileFragment(input: ProjectileVaryings) -> @location(0) vec4f {
       }
     }
   }
-  return vec4f(color, 0.0);
+  return vec4f(tintForOwner(color, input.owner), 0.0);
 }

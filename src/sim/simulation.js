@@ -20,6 +20,7 @@
 // to agentsOut plus integrate; kill-all (only in the step after requestKillAll, or radial after
 // requestRadialKill; a kill-all requested in the same step wins); registered passes
 // in registration order (registerPass); player contact (once setPlayerState has been called);
+// versus hits (only while setVersusProjectiles holds a buffer and contact is on; versus-hits.js);
 // debug kill on agentsOut (skipped when no kill is armed; the arm lasts one step, so callers
 // re-arm every frame while the button is held); particle step; stats on agentsOut; copy stats
 // into the staging ring; swap, so agentsBuffer is the newest output. So a bomb kills before
@@ -43,7 +44,7 @@ import { DensityReadback } from './density-readback.js';
 import { SpatialGrid } from './grid.js';
 import { DebugKillPass, KillAllPass, PlayerContactPass, SWARM_UNIFORM_BYTES, packSwarmShips } from './kill.js';
 import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
-import { SHADER_CONSTANTS, SPECIES_COUNT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, agentBufferBytes, gridDimensions } from './layout.js';
+import { MAXIMUM_PLAYER_SEATS, SHADER_CONSTANTS, SPECIES_COUNT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, agentBufferBytes, gridDimensions } from './layout.js';
 import {
   DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES,
   DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, SIM_PARAMS_BYTES, DEFAULT_SEEK_RANGE, validatedSeekRange,
@@ -53,8 +54,9 @@ import {
 } from './params.js';
 import { Spawner } from './spawn.js';
 import { DEFAULT_SHARES, defaultMatrix, defaultSpecies, normalizeShares, densityScaleFor, packSpeciesTable } from './species.js';
-import { STATS_BYTES, STATS_PERSISTENT_OFFSET_BYTES, StatsPass, decodeStats } from './stats.js';
+import { STATS_BYTES, STATS_PERSISTENT_OFFSET_BYTES, StatsPass, decodeOwnerKills, decodeStats } from './stats.js';
 import { Steering } from './steer.js';
+import { VersusHitPass } from './versus-hits.js';
 
 // PlayerShip's default radius (src/game/player.js).
 export const DEFAULT_PLAYER_RADIUS = 0.12;
@@ -94,6 +96,7 @@ export class Simulation {
       simulation.killPass.initialize(),
       simulation.killAllPass.initialize(),
       simulation.playerContactPass.initialize(),
+      simulation.versusHitPass.initialize(),
       simulation.particlePoolValue.initialize(),
     ], onProgress);
     return simulation;
@@ -117,6 +120,9 @@ export class Simulation {
     this.killPass = new DebugKillPass(gpu, { common });
     this.killAllPass = new KillAllPass(gpu, { common });
     this.playerContactPass = new PlayerContactPass(gpu, { common });
+    this.versusHitPass = new VersusHitPass(gpu, { common });
+    // The projectile buffer the versus hit pass tests against the swarms (setVersusProjectiles), or null.
+    this.versusProjectiles = null;
     this.particlePoolValue = new ParticlePool(gpu, { capacity: particleCapacity, common });
     // A pool resize destroys its buffer; the kill passes' bind groups name it, so they are evicted.
     [this.killPass, this.killAllPass, this.playerContactPass]
@@ -148,6 +154,8 @@ export class Simulation {
     this.frameSequenceValue = 0;
     this.timeValue = 0;
     this.lastKillsTotal = 0;
+    // The last read per-seat owner kill counters (stats ownerKills), for ownerKillsSinceLastRead.
+    this.lastOwnerKills = new Array(MAXIMUM_PLAYER_SEATS).fill(0);
     this.sameSpeciesCohesion = true;
     // Multiplier on every species' seek weight; the game sets it from SpawnPressure every step.
     this.seekScale = 1;
@@ -241,6 +249,13 @@ export class Simulation {
     });
     const bytes = packSwarmShips(this.swarmSeats.map((seat) => seat.ships), { radius: this.swarmSeats[0].radius, armedSeats }, this.swarmBytes);
     return { bytes, seatCount: this.swarmSeats.length };
+  }
+
+  // Versus (stage 2): from the next step on, the projectiles in this buffer (Projectiles.buffer) whose
+  // flags name an owner seat hit the other seat's swarm ships (versus_hits.wgsl, after contact); null
+  // (the default, solo and co-op) dispatches nothing.
+  setVersusProjectiles(projectileBuffer) {
+    this.versusProjectiles = projectileBuffer ?? null;
   }
 
   // Releases the hit latch once the GPU's playerHitSequence is at or below frameSequence. Never
@@ -435,6 +450,9 @@ export class Simulation {
     if (this.playerContact !== null) {
       const { bytes, seatCount } = this.contactUpload();
       this.playerContactPass.encode(encoder, { ...killBuffers, gridBuffers: this.grid.buffers }, bytes, seatCount);
+      if (this.versusProjectiles !== null && seatCount === MAXIMUM_PLAYER_SEATS) {
+        this.versusHitPass.encode(encoder, { paramsBuffer: params, swarmBuffer: this.playerContactPass.swarmBuffer, projectileBuffer: this.versusProjectiles, statsBuffer: this.statsBufferValue });
+      }
     }
     if (killRadius > 0) this.killPass.encode(encoder, killBuffers);
     this.particlePoolValue.encodeStep(encoder, params);
@@ -507,6 +525,9 @@ export class Simulation {
       const stats = decodeStats(bytes);
       stats.killsSinceLastRead = (stats.killsTotal - this.lastKillsTotal) >>> 0;
       this.lastKillsTotal = stats.killsTotal;
+      stats.ownerKills = decodeOwnerKills(bytes);
+      stats.ownerKillsSinceLastRead = Array.from(stats.ownerKills, (total, seat) => (total - this.lastOwnerKills[seat]) >>> 0);
+      this.lastOwnerKills = Array.from(stats.ownerKills);
       return stats;
     });
   }
@@ -626,6 +647,8 @@ export class Simulation {
     next.swarmSeats = this.swarmSeats.map((seat) => ({ ...seat }));
     // The kills counter came over with the tail, so differences continue from the last read.
     next.lastKillsTotal = this.lastKillsTotal;
+    next.lastOwnerKills = [...this.lastOwnerKills];
+    next.versusProjectiles = this.versusProjectiles;
     next.killAllRequested = this.killAllRequested;
     next.radialKill = this.radialKill === null ? null : { ...this.radialKill };
     next.deathFloodRequested = this.deathFloodRequested;

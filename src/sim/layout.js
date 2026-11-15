@@ -19,6 +19,17 @@ export const AGENT_SPAWN_FRAMES_MASK = 0xff00;
 export const PROJECTILE_FLAG_ALIVE = 1;
 // Bit 1: a pulse ring made by a sidewinder detonation (drawn in the sidewinder hue).
 export const PROJECTILE_FLAG_MISSILE_RING = 2;
+// Bits 2 and 3: the owner seat plus 1 (0 is no owner). Only versus tags owners (Projectiles.queueSpawn
+// and setBeam with an owner seat), so solo and co-op projectiles carry 0 here.
+export const PROJECTILE_OWNER_SHIFT = 2;
+export const PROJECTILE_OWNER_MASK = 0xc;
+
+// The flag bits for a projectile owned by seat (0 or 1), or 0 for null (no owner).
+export function projectileOwnerFlags(seat) {
+  if (seat === null || seat === undefined) return 0;
+  if (!(seat === 0 || seat === 1)) throw new RangeError(`projectile owner must be seat 0 or 1, got ${seat}`);
+  return (seat + 1) << PROJECTILE_OWNER_SHIFT;
+}
 
 export function agentBufferBytes(capacity) {
   return capacity * AGENT_STRIDE_BYTES;
@@ -46,8 +57,12 @@ export const STATS_INDICES = {
   // slot's bit while the slot is dead or in its first uploaded step.
   swarmHitMask: 24,
   // Seat 2's mask (words 32 to 39) follows the first, so word swarmHitMask + slot / 32 addresses both
-  // seats' slots (seat k's slot s is contact slot k * MAXIMUM_SWARM_SHIPS + s). Words 40 to 47 are spare.
+  // seats' slots (seat k's slot s is contact slot k * MAXIMUM_SWARM_SHIPS + s).
   secondSwarmHitMask: 32,
+  // Versus kill credit (projectiles_collide.wgsl): word ownerKills + k is the cumulative count of
+  // agents killed by projectiles owned by seat k (u32, wraps; readers take differences). Only
+  // owned projectiles add here, so it stays 0 in solo and co-op. Words 42 to 47 are spare.
+  ownerKills: 40,
 };
 export const STATS_PERSISTENT_WORD = 16;
 export const STATS_WORD_COUNT = 48;
@@ -80,6 +95,7 @@ export const SHADER_CONSTANTS = {
   STAT_PLAYER_HIT_SEQUENCE: STATS_INDICES.playerHitSequence,
   STAT_HIT_LATCH: STATS_INDICES.hitLatch,
   STAT_SWARM_HIT_MASK: STATS_INDICES.swarmHitMask,
+  STAT_OWNER_KILLS: STATS_INDICES.ownerKills,
   MAXIMUM_SWARM_SHIPS,
   MAXIMUM_CONTACT_SLOTS,
   PROJECTILE_KIND_BULLET: PROJECTILE_KINDS.bullet,
@@ -91,4 +107,5 @@ export const SHADER_CONSTANTS = {
   PROJECTILE_KIND_BEAM: PROJECTILE_KINDS.beam,
   PROJECTILE_FLAG_ALIVE,
   PROJECTILE_FLAG_MISSILE_RING,
+  PROJECTILE_OWNER_SHIFT,
 };

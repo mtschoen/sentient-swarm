@@ -26,6 +26,8 @@
 //     with seat 2 invulnerable a fresh seat 2 ship on an agent sets no bit while a fresh seat 1 ship
 //     on another agent still hits; after clearSwarmShips(1) the seat 2 bits stay as they were (seat 2
 //     is no longer dispatched).
+// (v1) to (v5) versus hits and the owner kill credit: see versus-hits-case.js.
+import { runVersusCase } from './versus-hits-case.js';
 import { createGpuContext } from '/src/gpu/device.js';
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, WORLD_HEIGHT, WORLD_WIDTH, MAXIMUM_SWARM_SHIPS, SPECIES_COUNT } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
@@ -300,6 +302,7 @@ async function runCheck() {
   if (lostReason !== null) verdicts.push([false, `device lost: ${lostReason}`]);
   simulation.destroy();
   verdicts.push(...await runBlastCase(gpu));
+  verdicts.push(...await runVersusCase(gpu));
   if (lostReason !== null) verdicts.push([false, `device lost: ${lostReason}`]);
   const detail = verdictLine(verdicts);
   return { pass: !detail.includes('FAIL'), detail };

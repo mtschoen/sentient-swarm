@@ -32,6 +32,7 @@ const STAT_PLAYER_HIT_SEQUENCE: u32 = __STAT_PLAYER_HIT_SEQUENCE__u;
 const STAT_HIT_LATCH: u32 = __STAT_HIT_LATCH__u;
 // First of the two swarm hit mask words (low, then high).
 const STAT_SWARM_HIT_MASK: u32 = __STAT_SWARM_HIT_MASK__u;
+const STAT_OWNER_KILLS: u32 = __STAT_OWNER_KILLS__u;
 const MAXIMUM_SWARM_SHIPS: u32 = __MAXIMUM_SWARM_SHIPS__u;
 
 const FLAG_ALIVE: u32 = 1u;
@@ -314,6 +315,14 @@ const PROJECTILE_KIND_SIDEWINDER: u32 = __PROJECTILE_KIND_SIDEWINDER__u;
 const PROJECTILE_KIND_BEAM: u32 = __PROJECTILE_KIND_BEAM__u;
 const PROJECTILE_FLAG_ALIVE: u32 = __PROJECTILE_FLAG_ALIVE__u;
 const PROJECTILE_FLAG_MISSILE_RING: u32 = __PROJECTILE_FLAG_MISSILE_RING__u;
+// Flag bits 2 and 3 hold the owner seat plus 1 (versus only; 0 is no owner).
+const PROJECTILE_OWNER_SHIFT: u32 = __PROJECTILE_OWNER_SHIFT__u;
+const NO_PROJECTILE_OWNER: u32 = 0u;
+
+// The owner seat plus 1 (1 or 2), or NO_PROJECTILE_OWNER.
+fn projectileOwner(flags: u32) -> u32 {
+  return (flags >> PROJECTILE_OWNER_SHIFT) & 3u;
+}
 
 // Pulse ring shape, shared by the orb detonation (projectiles_step.wgsl) and the sidewinder
 // detonation (projectiles_collide.wgsl). A missile ring lives MISSILE_RING_LIFETIME, so it grows

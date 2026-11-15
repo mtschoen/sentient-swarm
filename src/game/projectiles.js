@@ -15,10 +15,13 @@
 // base bullet's extra (the collide pass spends it and kills the bullet at 0); setBeamSweepThreshold
 // shrinks the beam's kill reach on fast turns through each beam slot's lifetime (its reach scale,
 // 1 = to the arena edge; nothing else reads a beam's lifetime).
+// Versus: queueSpawn and setBeam take an owner seat (null, the default, for none) that goes into the
+// flag bits (projectileOwnerFlags); only owned projectiles hit swarm ships (versus_hits.wgsl) and
+// credit their kills to a seat. Solo and co-op never pass one, so their slots are written as before.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer, createUniformBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
-import { PROJECTILE_FLAG_ALIVE, SHADER_CONSTANTS, SPECIES_COUNT, WORKGROUP_SIZE } from '../sim/layout.js';
+import { PROJECTILE_FLAG_ALIVE, SHADER_CONSTANTS, SPECIES_COUNT, WORKGROUP_SIZE, projectileOwnerFlags } from '../sim/layout.js';
 import { SPECIES_FIELDS } from '../sim/species.js';
 import {
   BEAM_SWEEP_MINIMUM_REACH_SCALE, DEFAULT_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, MAXIMUM_BASE_KILL_BUDGET,
@@ -43,12 +46,13 @@ const HUES_UNIFORM_BYTES = 32;
 const SPECIES_ROW_BYTES = SPECIES_FIELDS.length * BYTES_PER_FLOAT;
 const HUE_FIELD_BYTES = SPECIES_FIELDS.indexOf('hue') * BYTES_PER_FLOAT;
 
-// Writes one Projectile at byteOffset: position and previousPosition both (x, y), alive.
-export function packProjectile(view, byteOffset, { x, y, velocityX, velocityY, radius, lifetime, kind, seed = 0, extra = 0 }) {
+// Writes one Projectile at byteOffset: position and previousPosition both (x, y), alive, with the
+// owner seat's flag bits when owner is a seat.
+export function packProjectile(view, byteOffset, { x, y, velocityX, velocityY, radius, lifetime, kind, seed = 0, extra = 0, owner = null }) {
   const floats = [x, y, x, y, velocityX, velocityY, radius, lifetime];
   floats.forEach((value, index) => view.setFloat32(byteOffset + index * BYTES_PER_FLOAT, value, true));
   view.setUint32(byteOffset + 32, kind, true);
-  view.setUint32(byteOffset + 36, PROJECTILE_FLAG_ALIVE, true);
+  view.setUint32(byteOffset + 36, PROJECTILE_FLAG_ALIVE | projectileOwnerFlags(owner), true);
   view.setFloat32(byteOffset + 40, seed, true);
   view.setFloat32(byteOffset + 44, extra, true);
 }
@@ -123,7 +127,7 @@ export function beamReachScale(previous, current, thresholdDegrees) {
 // one means the current direction, a line), so the collide and render passes cover the sector swept
 // between the two steps. sweepThresholdDegrees (0, off, by default) sets the lifetime, the reach
 // scale (beamReachScale).
-export function beamSpawn(beam, previousDirection = null, sweepThresholdDegrees = DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES) {
+export function beamSpawn(beam, previousDirection = null, sweepThresholdDegrees = DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, owner = null) {
   if (beam === null) return null;
   const length = Math.hypot(beam.directionX, beam.directionY);
   if (!(length > 0)) return null;
@@ -142,6 +146,7 @@ export function beamSpawn(beam, previousDirection = null, sweepThresholdDegrees 
     kind: PROJECTILE_KINDS.beam,
     seed: hasPrevious ? previousUnit.x : velocityX,
     extra: hasPrevious ? previousUnit.y : velocityY,
+    owner,
   };
 }
 
@@ -156,13 +161,15 @@ export class BeamTracker {
     this.clear();
   }
 
-  set(beam) {
+  // owner: the seat the beam belongs to in versus, null for none.
+  set(beam, owner = null) {
     if (beam === null) this.previousDirection = null;
     this.beam = beam === null ? null : { ...beam };
+    this.owner = owner;
   }
 
   next() {
-    const spawn = beamSpawn(this.beam, this.previousDirection, this.sweepThresholdDegrees);
+    const spawn = beamSpawn(this.beam, this.previousDirection, this.sweepThresholdDegrees, this.owner);
     this.previousDirection = spawn === null ? null : { x: spawn.velocityX, y: spawn.velocityY };
     return spawn;
   }
@@ -170,6 +177,7 @@ export class BeamTracker {
   clear() {
     this.beam = null;
     this.previousDirection = null;
+    this.owner = null;
   }
 }
 
@@ -264,18 +272,20 @@ export class Projectiles {
     this.pipelines = { step, collide, rings, beam };
   }
 
-  // Queues a projectile for the next encode and returns the slot it will occupy.
-  queueSpawn(spawn) {
+  // Queues a projectile for the next encode and returns the slot it will occupy; owner (versus) is
+  // the seat it belongs to, null for none.
+  queueSpawn(spawn, owner = null) {
     const slot = this.slots.next();
-    this.pending.push({ slot, spawn: withKillBudget(spawn, this.baseKillBudgetValue) });
+    const budgeted = withKillBudget(spawn, this.baseKillBudgetValue);
+    this.pending.push({ slot, spawn: owner === null ? budgeted : { ...budgeted, owner } });
     return slot;
   }
 
   // { x, y, directionX, directionY, halfWidth } fires the beam from the next encode on; null stops it
-  // and resets the swept direction (BeamTracker).
-  setBeam(beam, seat = 0) {
+  // and resets the swept direction (BeamTracker). owner (versus) tags the beam with its seat.
+  setBeam(beam, seat = 0, owner = null) {
     if (!(seat >= 0 && seat < this.beamSlotCountValue)) throw new RangeError(`beam seat must lie in [0, ${this.beamSlotCountValue}), got ${seat}`);
-    this.beamTrackers[seat].set(beam);
+    this.beamTrackers[seat].set(beam, owner);
   }
 
   // Kills every projectile now (queue.writeBuffer, ahead of any later submit) and drops queued

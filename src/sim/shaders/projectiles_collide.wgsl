@@ -59,6 +59,10 @@
 // hues uniform) from the step's shared particle budget, which grants them first come first served
 // until the free slots run out (a beam through a dense crowd), and adds one threat unit at the
 // agent's coarse cell.
+// Versus kill credit: a kill by a projectile whose flags name an owner (projectileOwner, versus
+// only) also adds 1 to that owner's workgroup count, flushed by thread 0 into stats word
+// STAT_OWNER_KILLS + seat beside the plain kills; an unowned projectile (solo, co-op) adds nothing
+// there. The rings entry takes each ring's owner in turn, the beam entry its slot's.
 // Barriers sit outside every branch.
 //
 // Storage buffers: projectiles, agents, cellCounts, cellOffsets, sortedIndices, particles (pool
@@ -101,6 +105,10 @@ const UNLIMITED_REACH: f32 = 1e9;
 var<private> killBudget: u32 = UNLIMITED_KILLS;
 
 var<workgroup> workgroupKills: atomic<u32>;
+// The owner (seat plus 1) of the projectile this invocation is colliding, NO_PROJECTILE_OWNER for none.
+var<private> killOwner: u32 = NO_PROJECTILE_OWNER;
+const OWNER_SEATS: u32 = 2u;
+var<workgroup> workgroupOwnerKills: array<atomic<u32>, OWNER_SEATS>;
 // Alive pulse ring slots found by this workgroup's scan (zero-initialized per workgroup). The
 // pulse weapon keeps at most about 9 rings alive; rings past MAXIMUM_LISTED_RINGS do not collide.
 const MAXIMUM_LISTED_RINGS: u32 = 256u;
@@ -143,6 +151,9 @@ fn kill(agentIndex: u32, position: vec2f) -> bool {
       killBudget = killBudget - 1u;
     }
     atomicAdd(&workgroupKills, 1u);
+    if (killOwner != NO_PROJECTILE_OWNER) {
+      atomicAdd(&workgroupOwnerKills[killOwner - 1u], 1u);
+    }
     emitKillParticles(agentIndex, position, min(agents[agentIndex].species, SPECIES_COUNT - 1u), agents[agentIndex].hueJitter, params.killBurstParticles + params.killFragmentParticles);
     atomicAdd(&threatAccumulator[coarseCellIndexFor(position)], u32(THREAT_FIXED_POINT_SCALE));
     return true;
@@ -302,6 +313,12 @@ fn flushKills(localIndex: u32) {
     if (kills > 0u) {
       atomicAdd(&stats[STAT_KILLS], kills);
     }
+    for (var seat = 0u; seat < OWNER_SEATS; seat = seat + 1u) {
+      let ownerKills = atomicLoad(&workgroupOwnerKills[seat]);
+      if (ownerKills > 0u) {
+        atomicAdd(&stats[STAT_OWNER_KILLS + seat], ownerKills);
+      }
+    }
   }
 }
 
@@ -315,6 +332,7 @@ fn main(
     let projectile = projectiles[slot];
     let isCapsule = projectile.kind != PROJECTILE_KIND_BEAM && projectile.kind != PROJECTILE_KIND_PULSE_RING;
     if ((projectile.flags & PROJECTILE_FLAG_ALIVE) != 0u && isCapsule) {
+      killOwner = projectileOwner(projectile.flags);
       let budgeted = projectile.kind == PROJECTILE_KIND_BULLET && projectile.extra >= 1.0;
       if (budgeted) {
         killBudget = u32(projectile.extra);
@@ -378,6 +396,7 @@ fn rings(
   for (var ring = 0u; ring < ringTotal; ring = ring + 1u) {
     let slot = ringSlots[ring];
     let projectile = projectiles[slot];
+    killOwner = projectileOwner(projectile.flags);
     let band = max(RING_MINIMUM_BAND, projectile.extra * params.projectileDt);
     let offset = (slot * RING_CELL_BUDGET) % threadTotal;
     collideRing(projectile.position, max(0.0, projectile.radius - band), projectile.radius, (thread + threadTotal - offset) % threadTotal, threadTotal);
@@ -544,6 +563,7 @@ fn addRayThreat(start: vec2f, end: vec2f, firstStep: u32, stepStride: u32) {
 fn beam(@builtin(workgroup_id) group: vec3u, @builtin(local_invocation_index) localIndex: u32) {
   let projectile = projectiles[BEAM_SLOT + group.x];
   if ((projectile.flags & PROJECTILE_FLAG_ALIVE) != 0u && projectile.kind == PROJECTILE_KIND_BEAM) {
+    killOwner = projectileOwner(projectile.flags);
     let sector = beamSector(projectile);
     collideSector(sector, localIndex, WORKGROUP_SIZE);
     let origin = sector.origin;

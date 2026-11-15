@@ -5,7 +5,7 @@
 // a frame whose readback is skipped loses no kill: readers take differences.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
-import { AGENT_STRIDE_BYTES, SHADER_CONSTANTS, SPECIES_COUNT, STATS_INDICES, STATS_PERSISTENT_WORD, STATS_WORD_COUNT, SWARM_HIT_MASK_WORDS, WORKGROUP_SIZE } from './layout.js';
+import { AGENT_STRIDE_BYTES, SHADER_CONSTANTS, SPECIES_COUNT, STATS_INDICES, STATS_PERSISTENT_WORD, STATS_WORD_COUNT, SWARM_HIT_MASK_WORDS, WORKGROUP_SIZE, MAXIMUM_PLAYER_SEATS } from './layout.js';
 
 export { STATS_INDICES };
 const BYTES_PER_WORD = 4;
@@ -33,6 +33,11 @@ export function decodeStats(bytes) {
     swarmHitMask: values.slice(STATS_INDICES.swarmHitMask, STATS_INDICES.swarmHitMask + SWARM_HIT_MASK_WORDS),
     secondSwarmHitMask: values.slice(STATS_INDICES.secondSwarmHitMask, STATS_INDICES.secondSwarmHitMask + SWARM_HIT_MASK_WORDS),
   };
+}
+
+// The cumulative kills by each seat's owned projectiles (versus only; 0 otherwise), one per seat.
+export function decodeOwnerKills(bytes) {
+  return new Uint32Array(bytes, 0, STATS_WORD_COUNT).slice(STATS_INDICES.ownerKills, STATS_INDICES.ownerKills + MAXIMUM_PLAYER_SEATS);
 }
 
 export class StatsPass {
