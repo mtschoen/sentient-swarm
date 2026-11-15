@@ -52,12 +52,12 @@ export function partnerFor(seats) {
 }
 
 // Where each seat's point starts: the bounds center for one seat; for two, the center less and
-// plus SEAT_START_OFFSET on x.
-export function seatStarts(count, bounds) {
+// plus offset on x (SEAT_START_OFFSET in co-op; versus passes VERSUS_START_OFFSET, versus-seats.js).
+export function seatStarts(count, bounds, offset = SEAT_START_OFFSET) {
   const centerX = (bounds.minX + bounds.maxX) / 2;
   const centerY = (bounds.minY + bounds.maxY) / 2;
   if (count === 1) return [{ x: centerX, y: centerY }];
-  return [{ x: centerX - SEAT_START_OFFSET, y: centerY }, { x: centerX + SEAT_START_OFFSET, y: centerY }];
+  return [{ x: centerX - offset, y: centerY }, { x: centerX + offset, y: centerY }];
 }
 
 // What the camera frames: the live seats' camera focuses, or seat 1's when none is live.

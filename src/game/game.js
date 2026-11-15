@@ -106,9 +106,9 @@ import { SoloZoomController } from './solo-zoom.js';
 import { Escalation, NEUTRAL_ESCALATION } from './escalation.js';
 import { applyEscalation } from './escalation-step.js';
 import { SOLO_ZOOM_BOMB_HOLD_SECONDS, easeOutLimits, soloZoomOptions } from './solo-zoom-step.js';
-import { applyShipContact, applyVersusHits, growSwarms, leaveVersus, setGameMode } from './versus-seats.js';
+import { applyShipContact, applyVersusHits, growSwarms, leaveVersus, setGameMode, startsFor } from './versus-seats.js';
 import { GameMode } from './versus.js';
-import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, seatStarts, tickInvulnerability, uploadSwarms } from './seats.js';
+import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, tickInvulnerability, uploadSwarms } from './seats.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
@@ -340,7 +340,7 @@ export class Game {
 
   // Every seat back at its start with the initial swarm, and the camera cut onto them.
   placeSeats() {
-    const starts = seatStarts(this.seats.length, this.worldBounds);
+    const starts = startsFor(this);
     this.seats.forEach((seat, index) => seat.reset(this.initialSwarmShips, starts[index]));
     this.followCamera(0, { cut: true });
   }
@@ -460,7 +460,7 @@ export class Game {
     this.lastWipedSeat = null;
     this.revival.reset();
     this.versusMatch?.reset();
-    const starts = seatStarts(this.seats.length, this.worldBounds);
+    const starts = startsFor(this);
     this.seats.forEach((seat, index) => seat.reset(this.initialSwarmShips, starts[index]));
     this.followCamera(0, { cut: true });
     this.spawnPressure.reset();

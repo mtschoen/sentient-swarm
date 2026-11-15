@@ -13,11 +13,14 @@ import { PICKUP_TYPE_NAMES } from './weaponTypes.js';
 import { SWARM_SHIP_RADIUS } from './player-swarm.js';
 import { RunPhase } from './run.js';
 import { cancelBeamTime } from './beam-time-seats.js';
-import { reviveSeats } from './seats.js';
+import { SEAT_START_OFFSET, reviveSeats, seatStarts } from './seats.js';
 import { MAXIMUM_PLAYER_SEATS } from '../sim/layout.js';
 
 // Opposing ships this close (their two contact radii) touch.
 export const SHIP_CONTACT_DISTANCE = 2 * SWARM_SHIP_RADIUS;
+// Versus seats start this far either side of the world's center on x (20 apart in the 32-unit world),
+// so neither swarm is in the other's fire when the match begins; co-op keeps SEAT_START_OFFSET.
+export const VERSUS_START_OFFSET = 10;
 // A lost swarm ship ripples the warp grid this hard (as in seats.js).
 const SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
 
@@ -41,6 +44,11 @@ function applyMode(game, mode) {
   game.versusMatch = versus ? new VersusMatch() : null;
   game.simulation.setVersusProjectiles(versus ? game.projectiles.buffer : null);
   game.pickups.setRotation(versus ? VERSUS_PICKUP_ROTATION : PICKUP_TYPE_NAMES);
+}
+
+// Each seat's start point for the game's mode and seat count.
+export function startsFor(game) {
+  return seatStarts(game.seats.length, game.worldBounds, game.versus ? VERSUS_START_OFFSET : SEAT_START_OFFSET);
 }
 
 // A scored stats frame's kills: in co-op they grow every seat that is not down and count toward
