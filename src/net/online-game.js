@@ -15,10 +15,15 @@
 // stamped with the match time after the update; replayRemoteFire (after fireSeats' loop) queues the
 // received ones aged to the remote's time this update ends at, and sets the remote seat's beam in
 // its own slot from its snapshot (cleared once when it stops firing one, or outside Playing).
+// Growth and hits (Task 3.5): each machine grows and hits its own seat alone. Growth is scaled to
+// the reference capacity (onlineGrowth), so two machines on different presets grow alike; the
+// remote seat's mask is the other machine's to apply, and a local wipe is reported (reportWipe).
 // Pings and pongs are answered and fed to the clock as they arrive; every other event is kept for
 // the update that drains it (receivedEvents). A message that does not decode is dropped.
 
 import { RunPhase } from '../game/run.js';
+import { hiveGrowth } from '../game/hive-seats.js';
+import { DENSITY_REFERENCE_CAPACITY } from '../sim/species.js';
 import { decodeEvent, encodeEvent } from './event-codec.js';
 import { INTERPOLATION_DELAY_SECONDS, PING_INTERVAL_SECONDS, SNAPSHOT_UPDATE_INTERVAL } from './protocol.js';
 import { RemoteSeatDriver } from './remote-seat.js';
@@ -28,8 +33,13 @@ import { decodeSnapshot, encodeSnapshot } from './snapshot-codec.js';
 import { TransportChannel } from './transport.js';
 
 export const OnlineRole = Object.freeze({ Host: 'host', Guest: 'guest' });
-// A remote ship lost ripples the warp grid as a local one does (seats.js).
-const REMOTE_SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
+// A ship lost ripples the warp grid as a couch one does (seats.js).
+const SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
+
+// Kills at this capacity as kills at the reference capacity (the swarm's density is normalized so).
+export function onlineGrowth(kills, capacity) {
+  return kills * DENSITY_REFERENCE_CAPACITY / capacity;
+}
 
 export class OnlineGame {
   #inbox = [];
@@ -117,6 +127,26 @@ export class OnlineGame {
     this.#remoteBeamShown = beam !== null;
   }
 
+  // A scored stats frame grows the local seat by its own owned kills (hives: with its feeding
+  // ground kills once more), scaled to the reference capacity.
+  growSwarms(game, stats) {
+    const local = this.localSeatIndex;
+    const kills = onlineGrowth(hiveGrowth(game, stats, local, stats.ownerKillsSinceLastRead?.[local] ?? 0), game.capacity);
+    if (kills > 0) game.seats[local].swarm.addKills(kills);
+  }
+
+  // The local seat's hit mask kills its ships (a small shockwave each); its wipe is reported.
+  applyHits(game, stats) {
+    const result = game.seats[this.localSeatIndex].applyHits(stats);
+    result.killed.forEach((ship) => game.queueImpulse(ship.x, ship.y, SHIP_LOSS_IMPULSE_STRENGTH, false));
+    if (result.wiped) this.reportWipe(game);
+  }
+
+  // The local seat lost its last ship: the guest tells the host, whose referee judges the match.
+  reportWipe(game) {
+    this.queueEvent({ type: 'wiped', seat: this.localSeatIndex, matchSeconds: this.clock.matchSeconds });
+  }
+
   applyRemoteSeats(game, deltaSeconds) {
     this.#drain();
     const seat = game.seats[this.remoteSeatIndex];
@@ -127,7 +157,7 @@ export class OnlineGame {
     this.#remoteNow = remoteNow;
     const renderMatchSeconds = remoteNow - (this.clock.roundTripSeconds ?? 0) / 2 - INTERPOLATION_DELAY_SECONDS;
     const { lost } = this.driver.apply(seat, renderMatchSeconds, deltaSeconds);
-    if (playing && this.#mirroredInRun) lost.forEach((ship) => game.queueImpulse(ship.x, ship.y, REMOTE_SHIP_LOSS_IMPULSE_STRENGTH, false));
+    if (playing && this.#mirroredInRun) lost.forEach((ship) => game.queueImpulse(ship.x, ship.y, SHIP_LOSS_IMPULSE_STRENGTH, false));
     this.#mirroredInRun = playing && (this.#mirroredInRun || this.driver.newest !== null);
   }
 

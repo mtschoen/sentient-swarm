@@ -76,8 +76,10 @@ export function startsFor(game) {
 
 // A scored stats frame's kills: in co-op they grow every seat that is not down and count toward
 // each down seat's revive; in versus they grow only the seat whose projectiles made them (in hives,
-// with its feeding ground kills counted double, hiveGrowth).
+// with its feeding ground kills counted double, hiveGrowth). Online each machine grows its own seat
+// (game.online).
 export function growSwarms(game, stats) {
+  if (game.online) return game.online.growSwarms(game, stats);
   if (!game.versus) {
     for (const seat of game.seats) if (!seat.down) seat.swarm.addKills(stats.killsSinceLastRead);
     reviveSeats(game, stats.killsSinceLastRead);
@@ -91,8 +93,9 @@ export function growSwarms(game, stats) {
 }
 
 // The GPU's hits (agents and opposing projectiles alike) kill the hit ships; a seat at 0 ships is
-// out and the match is judged.
+// out and the match is judged. Online each machine applies its own seat's mask (game.online).
 export function applyVersusHits(game, stats) {
+  if (game.online) return game.online.applyHits(game, stats);
   const losses = game.seats.map((seat) => {
     const result = seat.applyHits(stats);
     result.killed.forEach((ship) => game.queueImpulse(ship.x, ship.y, SHIP_LOSS_IMPULSE_STRENGTH, false));
