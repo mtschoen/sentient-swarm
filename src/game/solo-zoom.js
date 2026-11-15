@@ -2,9 +2,11 @@
 // It turns two preset-invariant pressures (near crowding, far action; see zoom-pressure.js) and the
 // swarm radius into a target zoom: the pressures are smoothed with an attack and a release time, the
 // wish is a log-space blend (punchIn * near - pullOut * far * (1 - near)), the log target chases the
-// wish at a limited rate with a Schmitt-style hysteresis (a start, or a reversal against the last
-// direction of travel, needs the wish ZOOM_HYSTERESIS away; carrying on the same way follows the wish
-// all the way, so a settled pressure is reached exactly instead of stopping short), and the output is capped so the whole swarm stays in view. The camera
+// wish at a limited rate, kept inside [ln minimum, ln maximum] so it cannot wind up past the zoom
+// limits, with a Schmitt-style hysteresis (a start, or a reversal against the last direction of
+// travel, needs the wish ZOOM_HYSTERESIS away; carrying on the same way follows the wish all the
+// way, so a settled pressure is reached exactly instead of stopping short), and the output is
+// capped so the whole swarm stays in view (that cap is output-only). The camera
 // spring applies smoothSeconds; the shipped default is off (enabled false), only the lab turns it on.
 import { ZOOM_DEFAULT_CROWD_REFERENCE } from './zoom-pressure.js';
 
@@ -35,7 +37,8 @@ export const ZOOM_HYSTERESIS = 0.04;
 export const ZOOM_FIT_FRACTION = 0.7;
 export const ZOOM_FIT_MARGIN = 1.0;
 
-// The zoom at which a swarm of the given radius fills ZOOM_FIT_FRACTION of the view's shorter half.
+// Expects the unzoomed base view extents (viewSize, not the zoomed view): the fit is a zoom, so it
+// divides the base view. The zoom at which a swarm of the given radius fills ZOOM_FIT_FRACTION of the view's shorter half.
 export function zoomFit(swarmRadius, viewWidth, viewHeight) {
   return 0.5 * Math.min(viewWidth, viewHeight) * ZOOM_FIT_FRACTION / (swarmRadius + ZOOM_FIT_MARGIN);
 }
@@ -92,6 +95,7 @@ export class SoloZoomController {
     return this.#lastZoom;
   }
 
+  // viewWidth and viewHeight are the unzoomed base view extents (they feed zoomFit).
   update(deltaSeconds, { near, far, swarmRadius, viewWidth, viewHeight }) {
     const { minimum, maximum, punchIn, pullOut, rateLimit } = this.#settings;
     this.#near = smoothToward(this.#near, near, deltaSeconds);
@@ -104,6 +108,7 @@ export class SoloZoomController {
       const step = rateLimit * deltaSeconds;
       this.#logTarget = Math.abs(difference) <= step ? wish : this.#logTarget + sign * step;
     }
+    this.#logTarget = clamp(this.#logTarget, Math.log(minimum), Math.log(maximum));
     const ceiling = Math.max(minimum, Math.min(maximum, zoomFit(swarmRadius, viewWidth, viewHeight)));
     this.#lastZoom = clamp(Math.exp(this.#logTarget), minimum, ceiling);
     return this.#lastZoom;

@@ -126,16 +126,24 @@ export class Camera {
     this.lastView = null;
   }
 
-  update(deltaSeconds, { focusX, focusY, viewWidth, viewHeight, bounds, targetZoom = 1, zoomMinimum = MINIMUM_CAMERA_ZOOM, zoomMaximum = 1, zoomSmoothSeconds = CAMERA_ZOOM_SMOOTH_SECONDS }) {
+  update(deltaSeconds, {
+    focusX, focusY, viewWidth, viewHeight, bounds, targetZoom = 1,
+    zoomMinimum = MINIMUM_CAMERA_ZOOM, zoomMaximum = 1, zoomSmoothSeconds = CAMERA_ZOOM_SMOOTH_SECONDS,
+  }) {
     const omega = 2 / this.smoothSeconds;
     this.zoomMinimum = zoomMinimum;
     this.zoomMaximum = zoomMaximum;
-    [this.zoom, this.zoomVelocity] = criticallyDampedStep(this.zoom, this.zoomVelocity, clamp(targetZoom, zoomMinimum, zoomMaximum), 2 / zoomSmoothSeconds, deltaSeconds);
+    const clampedTarget = clamp(targetZoom, zoomMinimum, zoomMaximum);
+    [this.zoom, this.zoomVelocity] = criticallyDampedStep(
+      this.zoom, this.zoomVelocity, clampedTarget, 2 / zoomSmoothSeconds, deltaSeconds,
+    );
     this.zoom = clamp(this.zoom, zoomMinimum, zoomMaximum);
     const extentX = viewWidth / this.zoom;
     const extentY = viewHeight / this.zoom;
-    const targetX = clampAxis(deadZoneTarget(this.centerX, focusX, this.deadZoneFraction * extentX), extentX, bounds.minX, bounds.maxX);
-    const targetY = clampAxis(deadZoneTarget(this.centerY, focusY, this.deadZoneFraction * extentY), extentY, bounds.minY, bounds.maxY);
+    const wantedX = deadZoneTarget(this.centerX, focusX, this.deadZoneFraction * extentX);
+    const wantedY = deadZoneTarget(this.centerY, focusY, this.deadZoneFraction * extentY);
+    const targetX = clampAxis(wantedX, extentX, bounds.minX, bounds.maxX);
+    const targetY = clampAxis(wantedY, extentY, bounds.minY, bounds.maxY);
     [this.centerX, this.velocityX] = criticallyDampedStep(this.centerX, this.velocityX, targetX, omega, deltaSeconds);
     [this.centerY, this.velocityY] = criticallyDampedStep(this.centerY, this.velocityY, targetY, omega, deltaSeconds);
     this.centerX = clampAxis(this.centerX, extentX, bounds.minX, bounds.maxX);

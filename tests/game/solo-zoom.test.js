@@ -141,3 +141,42 @@ test('reset returns to 1', () => {
   assert.equal(controller.lastZoom, 1);
   assert.equal(controller.update(STEP, { near: 0, far: 0, swarmRadius: 1, ...VIEW }), 1);
 });
+
+test('the log target is clamped to the zoom limits so it cannot wind up', () => {
+  const controller = new SoloZoomController();
+  controller.set('punchIn', 1);
+  controller.set('rateLimit', 0.05);
+  const peak = drive(controller, 30, { near: 1, far: 0 });
+  assert.ok(Math.abs(peak - SOLO_ZOOM_DEFAULTS.maximum) < 1e-9);
+  // The pressure releases slowly (about 1.5 s until the wish is back under the maximum); a wound-up log
+  // target at the slow rate limit would keep the zoom at the maximum for several seconds more.
+  let updates = 0;
+  let zoom = peak;
+  while (zoom >= peak - 1e-9 && updates < 600) {
+    zoom = drive(controller, STEP, { near: 0, far: 0 });
+    updates += 1;
+  }
+  assert.ok(updates < 150, `fell after ${updates} updates`);
+});
+
+// Settle a controller at the top of its punch-in (log target at punchIn), then hold the near pressure
+// at the value that puts the wish `dip` below that target.
+function settledThenWish(dip, seconds = 30) {
+  const controller = new SoloZoomController();
+  drive(controller, 20, { near: 1, far: 0 });
+  const settled = controller.lastZoom;
+  const near = 1 - dip / SOLO_ZOOM_DEFAULTS.punchIn;
+  drive(controller, seconds, { near, far: 0 });
+  return { settled, final: controller.lastZoom };
+}
+
+test('a wish dip below the hysteresis against the direction of travel does not move the target', () => {
+  const { settled, final } = settledThenWish(0.03);
+  assert.equal(final, settled);
+});
+
+test('a real reversal of at least the hysteresis moves the target', () => {
+  const { settled, final } = settledThenWish(0.05);
+  assert.ok(final < settled);
+  assert.ok(Math.abs(Math.log(final) - (SOLO_ZOOM_DEFAULTS.punchIn - 0.05)) < 1e-3, `zoom ${final}`);
+});

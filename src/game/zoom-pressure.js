@@ -44,6 +44,8 @@ function ringMean(densityAt, centerX, centerY, radius, bounds, extraSamples = []
   return count === 0 ? 0 : sum / count;
 }
 
+// viewWidth and viewHeight are the current zoomed view extents (the far ring sits just outside what
+// is on screen now).
 export function sampleZoomPressure({ densityAt, focusX, focusY, viewWidth, viewHeight, bounds, capacityScale, crowdReference }) {
   const normalizer = capacityScale * crowdReference;
   if (!(normalizer > 0)) throw new RangeError(`capacityScale times crowdReference must be above 0, got ${normalizer}`);
