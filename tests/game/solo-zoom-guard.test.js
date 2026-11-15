@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { SOLO_ZOOM_DEFAULTS, SoloZoomController } from '../../src/game/solo-zoom.js';
+import { createGame } from './game-harness.js';
 
 const SOURCE_DIRECTORY = new URL('../../src/', import.meta.url);
 
@@ -19,7 +20,7 @@ function filesContaining(text) {
 // The lab owns the solo zoom knobs: src/ui/lab*.js, labPresets.js (the mix ranges), labPanel.js and panelModel.js.
 const LAB_FILE = /^src\/ui\/(lab[A-Za-z]*|panelModel)\.js$/;
 
-// The solo zoom is lab only: the game must never turn it on, so shipped play stays at zoom 1.
+// Only the lab changes the solo zoom settings (and reduced motion, through setReducedMotion), so shipped play keeps the defaults pinned below.
 test('setSoloZoomSetting is called only from the lab files (the Game defines it)', () => {
   const callers = filesContaining('setSoloZoomSetting').filter((path) => path !== 'src/game/game.js' && !LAB_FILE.test(path));
   assert.deepEqual(callers, []);
@@ -31,14 +32,30 @@ test('soloZoom.set is called only by the Game (its one delegate)', () => {
 });
 
 test('nothing outside the lab files sets enabled on the solo zoom', () => {
-  const spellings = ["'enabled', true", '"enabled", true'];
+  const spellings = ["'enabled', true", '"enabled", true', "'enabled', false", '"enabled", false'];
   const offenders = sourceFiles()
     .filter(({ path, url }) => !LAB_FILE.test(path) && spellings.some((spelling) => readFileSync(url, 'utf8').includes(spelling)))
     .map(({ path }) => path);
   assert.deepEqual(offenders, []);
 });
 
-test('the shipped solo zoom starts off', () => {
-  assert.equal(SOLO_ZOOM_DEFAULTS.enabled, false);
-  assert.equal(new SoloZoomController().settings.enabled, false);
+test('the shipped solo zoom defaults are on at the strongest settings', () => {
+  assert.deepEqual({ ...SOLO_ZOOM_DEFAULTS }, {
+    enabled: true,
+    minimum: 0.5,
+    maximum: 2.5,
+    punchIn: 1,
+    pullOut: 1,
+    smoothSeconds: 0.2,
+    rateLimit: 2,
+    crowdReference: 0.25,
+    fitFraction: 1.25,
+  });
+});
+
+test('a fresh controller and a fresh Game boot with the shipped defaults', async () => {
+  assert.deepEqual(new SoloZoomController().settings, { ...SOLO_ZOOM_DEFAULTS });
+  const { game } = await createGame();
+  assert.deepEqual(game.soloZoom.settings, { ...SOLO_ZOOM_DEFAULTS });
+  assert.equal(game.reducedMotion, false);
 });

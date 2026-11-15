@@ -80,6 +80,8 @@ async function recordScript(log) {
     random: seededRandom(12345),
     now: () => 0,
   });
+  // The recorded calls predate the solo zoom; the zoom has its own tests, so it is off here.
+  game.setSoloZoomSetting('enabled', false);
   const state = input.state;
   runScript(game, simulation, state);
 }

@@ -109,7 +109,7 @@ export const LAB_KNOB_GROUPS = [
     { key: 'beamTimeSeconds', label: 'beam time seconds', minimum: 1, maximum: 30, step: 0.5 },
     { key: 'beamTimeSurge', label: 'beam time spawn surge', minimum: 1, maximum: 6, step: 0.25 },
   ] },
-  // The solo camera zoom (default off); ranges come from solo-zoom.js so the controller and the lab agree.
+  // The solo camera zoom (default on at the strongest settings); ranges come from solo-zoom.js so the controller and the lab agree.
   { title: 'Camera', knobs: [
     { key: 'soloZoomEnabled', label: 'solo zoom (0 off, 1 on; Play only)', minimum: 0, maximum: 1, step: 1, integer: true },
     { key: 'soloZoomMinimum', label: 'zoom minimum (phones want 0.67)', minimum: SOLO_ZOOM_RANGES.minimum[0], maximum: SOLO_ZOOM_RANGES.minimum[1], step: 0.01 },
@@ -119,6 +119,7 @@ export const LAB_KNOB_GROUPS = [
     { key: 'soloZoomSmoothSeconds', label: 'zoom smoothing seconds', minimum: SOLO_ZOOM_RANGES.smoothSeconds[0], maximum: SOLO_ZOOM_RANGES.smoothSeconds[1], step: 0.05 },
     { key: 'soloZoomRateLimit', label: 'zoom rate limit (ln per second)', minimum: SOLO_ZOOM_RANGES.rateLimit[0], maximum: SOLO_ZOOM_RANGES.rateLimit[1], step: 0.05 },
     { key: 'soloZoomCrowdReference', label: 'crowd reference (density that reads as full)', minimum: SOLO_ZOOM_RANGES.crowdReference[0], maximum: SOLO_ZOOM_RANGES.crowdReference[1], step: 0.05 },
+    { key: 'soloZoomFitFraction', label: 'swarm fit fraction (how much of the view the swarm may fill; caps the zoom)', minimum: SOLO_ZOOM_RANGES.fitFraction[0], maximum: SOLO_ZOOM_RANGES.fitFraction[1], step: 0.05 },
   ] },
 ];
 

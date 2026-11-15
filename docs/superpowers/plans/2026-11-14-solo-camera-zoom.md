@@ -1,4 +1,4 @@
-Status: implemented; waiting on the owner to pick shipped defaults (enabled, minimum including the 0.67 phone floor, maximum, crowd reference)
+Status: Shipped on by default 2026-11-14 at the owner's request
 
 # Solo Camera Zoom (lab knobs) Implementation Plan
 

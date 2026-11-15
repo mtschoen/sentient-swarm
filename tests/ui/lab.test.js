@@ -472,18 +472,20 @@ test('decodeMix rejects a beam knob outside its range', () => {
 const SOLO_ZOOM_KEYS = {
   soloZoomEnabled: 'enabled', soloZoomMinimum: 'minimum', soloZoomMaximum: 'maximum', soloZoomPunchIn: 'punchIn',
   soloZoomPullOut: 'pullOut', soloZoomSmoothSeconds: 'smoothSeconds', soloZoomRateLimit: 'rateLimit', soloZoomCrowdReference: 'crowdReference',
+  soloZoomFitFraction: 'fitFraction',
 };
 
 test('the solo zoom knobs have the specified ranges, steps and shipped defaults', () => {
   const expected = {
     soloZoomEnabled: [0, 1, 1, true],
-    soloZoomMinimum: [0.3, 1, 0.01, undefined],
-    soloZoomMaximum: [1, 2.5, 0.01, undefined],
-    soloZoomPunchIn: [-0.7, 1, 0.01, undefined],
-    soloZoomPullOut: [0, 1, 0.01, undefined],
-    soloZoomSmoothSeconds: [0.2, 4, 0.05, undefined],
-    soloZoomRateLimit: [0.05, 2, 0.05, undefined],
-    soloZoomCrowdReference: [0.25, 25, 0.05, undefined],
+    soloZoomMinimum: [0.5, 1, 0.01, undefined],
+    soloZoomMaximum: [1, 4, 0.01, undefined],
+    soloZoomPunchIn: [-1.5, 2, 0.01, undefined],
+    soloZoomPullOut: [0, 2, 0.01, undefined],
+    soloZoomSmoothSeconds: [0.1, 4, 0.05, undefined],
+    soloZoomRateLimit: [0.05, 4, 0.05, undefined],
+    soloZoomCrowdReference: [0.1, 25, 0.05, undefined],
+    soloZoomFitFraction: [0.5, 4, 0.05, undefined],
   };
   for (const [key, [minimum, maximum, step, integer]] of Object.entries(expected)) {
     const spec = specFor(key);
@@ -491,21 +493,21 @@ test('the solo zoom knobs have the specified ranges, steps and shipped defaults'
     assert.deepEqual([spec.minimum, spec.maximum, spec.step, spec.integer], [minimum, maximum, step, integer], key);
     assert.deepEqual(KNOB_RANGES[key], [minimum, maximum], key);
     const setting = SOLO_ZOOM_KEYS[key];
-    assert.equal(LAB_KNOB_DEFAULTS[key], setting === 'enabled' ? 0 : SOLO_ZOOM_DEFAULTS[setting], key);
+    assert.equal(LAB_KNOB_DEFAULTS[key], setting === 'enabled' ? 1 : SOLO_ZOOM_DEFAULTS[setting], key);
     if (setting !== 'enabled') assert.deepEqual(SOLO_ZOOM_RANGES[setting], [minimum, maximum], key);
   }
-  assert.equal(LAB_KNOB_DEFAULTS.soloZoomEnabled, 0);
+  assert.equal(LAB_KNOB_DEFAULTS.soloZoomEnabled, 1);
 });
 
 test('the solo zoom knobs read and write the game and round-trip through a shared mix', () => {
   const source = createContext();
   const values = {
-    soloZoomEnabled: 1, soloZoomMinimum: 0.4, soloZoomMaximum: 2, soloZoomPunchIn: -0.3,
-    soloZoomPullOut: 0.25, soloZoomSmoothSeconds: 2.5, soloZoomRateLimit: 0.8, soloZoomCrowdReference: 3,
+    soloZoomEnabled: 0, soloZoomMinimum: 0.6, soloZoomMaximum: 3, soloZoomPunchIn: -0.3,
+    soloZoomPullOut: 0.25, soloZoomSmoothSeconds: 2.5, soloZoomRateLimit: 0.8, soloZoomCrowdReference: 3, soloZoomFitFraction: 2,
   };
   for (const [key, value] of Object.entries(values)) writeKnob(source, specFor(key), value);
   const settings = source.game.soloZoom.settings;
-  assert.equal(settings.enabled, true);
+  assert.equal(settings.enabled, false);
   for (const [key, setting] of Object.entries(SOLO_ZOOM_KEYS)) {
     if (setting !== 'enabled') assert.equal(settings[setting], values[key], key);
     assert.equal(readKnob(source, specFor(key)), values[key], key);
@@ -520,10 +522,11 @@ test('the solo zoom knobs read and write the game and round-trip through a share
 test('leaving the lab restores the solo zoom knobs', () => {
   const context = createContext();
   const state = captureLabState(context);
-  writeKnob(context, specFor('soloZoomEnabled'), 1);
-  writeKnob(context, specFor('soloZoomMaximum'), 2.2);
+  writeKnob(context, specFor('soloZoomEnabled'), 0);
+  writeKnob(context, specFor('soloZoomMaximum'), 3.2);
   writeKnob(context, specFor('soloZoomPunchIn'), -0.5);
-  assert.equal(context.game.soloZoom.settings.enabled, true);
+  writeKnob(context, specFor('soloZoomFitFraction'), 2);
+  assert.equal(context.game.soloZoom.settings.enabled, false);
   restoreLabState(context, state);
   assert.deepEqual(context.game.soloZoom.settings, { ...SOLO_ZOOM_DEFAULTS });
 });
@@ -541,7 +544,7 @@ test('the minimum and maximum slider ranges meet at 1, so writing either never t
 
 test('a mix without the solo zoom keys leaves the defaults, and a maximum of 9 is rejected', () => {
   const context = createContext();
-  writeKnob(context, specFor('soloZoomEnabled'), 1);
+  writeKnob(context, specFor('soloZoomEnabled'), 0);
   writeKnob(context, specFor('soloZoomMaximum'), 2);
   applyMix(context, { ...decodeMix(encodeMix(captureMix(createContext()))), knobs: undefined });
   assert.deepEqual(context.game.soloZoom.settings, { ...SOLO_ZOOM_DEFAULTS });

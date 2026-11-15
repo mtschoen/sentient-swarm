@@ -12,10 +12,8 @@ async function startedGame({ enabled = true, density = () => 1 } = {}) {
   const harness = await createGame();
   const { game, simulation } = harness;
   simulation.densityFunction = density;
-  if (enabled) {
-    game.setSoloZoomSetting('enabled', true);
-    game.setSoloZoomSetting('crowdReference', MINIMUM_REFERENCE);
-  }
+  game.setSoloZoomSetting('enabled', enabled);
+  if (enabled) game.setSoloZoomSetting('crowdReference', MINIMUM_REFERENCE);
   game.start();
   game.update(STEP);
   return harness;
@@ -37,7 +35,16 @@ function farOnly(game) {
   };
 }
 
-test('the default game never leaves zoom 1 in solo, whatever the density', async () => {
+test('a fresh game has the solo zoom on, and a crowded default solo game zooms in', async () => {
+  const harness = await createGame();
+  assert.equal(harness.game.soloZoom.settings.enabled, true);
+  harness.simulation.densityFunction = () => 1e9;
+  harness.game.start();
+  runFor(harness.game, 10);
+  assert.ok(harness.game.camera.zoom > 1.5, `zoom ${harness.game.camera.zoom}`);
+});
+
+test('with the solo zoom turned off the game never leaves zoom 1 in solo, whatever the density', async () => {
   const { game } = await startedGame({ enabled: false, density: () => 1e9 });
   const calls = spyCamera(game);
   runFor(game, 10);
@@ -49,7 +56,7 @@ test('the default game never leaves zoom 1 in solo, whatever the density', async
 test('enabled and crowded zooms in past 1', async () => {
   const { game } = await startedGame();
   runFor(game, 10);
-  assert.ok(game.camera.zoom > 1.05 && game.camera.zoom <= 1.6, `zoom ${game.camera.zoom}`);
+  assert.ok(game.camera.zoom > 1.05 && game.camera.zoom <= 2.5, `zoom ${game.camera.zoom}`);
 });
 
 test('enabled with far action only zooms out', async () => {

@@ -15,14 +15,19 @@ function drive(controller, seconds, input, onStep = () => {}) {
   return zoom;
 }
 
-test('defaults are off and match the spec candidates', () => {
-  assert.equal(SOLO_ZOOM_DEFAULTS.enabled, false);
-  assert.equal(SOLO_ZOOM_DEFAULTS.maximum, 1.6);
-  assert.equal(SOLO_ZOOM_DEFAULTS.minimum, 0.5);
-  assert.ok(Math.abs(SOLO_ZOOM_DEFAULTS.punchIn - Math.log(1.4)) < 1e-12);
-  assert.ok(Math.abs(SOLO_ZOOM_DEFAULTS.pullOut - Math.log(1 / 0.6)) < 1e-12);
-  assert.deepEqual(SOLO_ZOOM_RANGES.crowdReference, [0.25, 25]);
-  assert.equal(new SoloZoomController().settings.enabled, false);
+test('a fresh controller carries the shipped defaults', () => {
+  assert.deepEqual(new SoloZoomController().settings, { ...SOLO_ZOOM_DEFAULTS });
+});
+
+test('every shipped default lies inside its range', () => {
+  for (const [name, [lower, upper]] of Object.entries(SOLO_ZOOM_RANGES)) {
+    assert.ok(SOLO_ZOOM_DEFAULTS[name] >= lower && SOLO_ZOOM_DEFAULTS[name] <= upper, name);
+  }
+});
+
+test('a 12-ship swarm (peak radius 1.234 measured) can reach the default maximum at the 16:9 view', () => {
+  const fit = zoomFit(1.234, 16, 9, SOLO_ZOOM_DEFAULTS.fitFraction);
+  assert.ok(fit >= SOLO_ZOOM_DEFAULTS.maximum && fit < SOLO_ZOOM_DEFAULTS.maximum * 1.02, `fit ${fit}`);
 });
 
 test('set validates', () => {
@@ -49,8 +54,14 @@ test('no pressure gives zoom 1', () => {
 
 test('crowded punches in', () => {
   const controller = new SoloZoomController();
+  controller.set('punchIn', Math.log(1.4));
   const zoom = drive(controller, 10, { near: 1, far: 0 });
-  assert.ok(Math.abs(zoom - Math.exp(SOLO_ZOOM_DEFAULTS.punchIn)) < 1e-3, `zoom ${zoom}`);
+  assert.ok(Math.abs(zoom - 1.4) < 1e-3, `zoom ${zoom}`);
+});
+
+test('crowded at the shipped defaults reaches the maximum', () => {
+  const zoom = drive(new SoloZoomController(), 10, { near: 1, far: 0 });
+  assert.equal(zoom, SOLO_ZOOM_DEFAULTS.maximum);
 });
 
 test('a negative punchIn pulls out when crowded', () => {
@@ -62,17 +73,20 @@ test('a negative punchIn pulls out when crowded', () => {
 
 test('far action pulls out only when quiet nearby', () => {
   const quiet = new SoloZoomController();
-  assert.ok(Math.abs(drive(quiet, 15, { near: 0, far: 1 }) - Math.exp(-SOLO_ZOOM_DEFAULTS.pullOut)) < 1e-3);
+  quiet.set('pullOut', Math.log(1 / 0.6));
+  assert.ok(Math.abs(drive(quiet, 15, { near: 0, far: 1 }) - 0.6) < 1e-3);
   const crowded = new SoloZoomController();
-  assert.ok(Math.abs(drive(crowded, 15, { near: 1, far: 1 }) - Math.exp(SOLO_ZOOM_DEFAULTS.punchIn)) < 1e-3);
+  crowded.set('punchIn', Math.log(1.4));
+  assert.ok(Math.abs(drive(crowded, 15, { near: 1, far: 1 }) - 1.4) < 1e-3);
 });
 
 test('rate limit', () => {
   const controller = new SoloZoomController();
+  controller.set('rateLimit', 0.35);
   let previous = 0;
   drive(controller, 5, { near: 1, far: 0 }, (zoom) => {
     const logged = Math.log(zoom);
-    assert.ok(Math.abs(logged - previous) <= SOLO_ZOOM_DEFAULTS.rateLimit * STEP + 1e-9);
+    assert.ok(Math.abs(logged - previous) <= 0.35 * STEP + 1e-9);
     previous = logged;
   });
   assert.ok(previous > 0);
@@ -97,13 +111,21 @@ test('hysteresis', () => {
 test('fit cap', () => {
   const controller = new SoloZoomController();
   controller.set('punchIn', 1);
-  const zoom = drive(controller, 10, { near: 1, far: 0, swarmRadius: 8 });
-  assert.ok(zoomFit(8, 16, 9) < 0.5);
+  const zoom = drive(controller, 10, { near: 1, far: 0, swarmRadius: 12 });
+  assert.ok(zoomFit(12, 16, 9, SOLO_ZOOM_DEFAULTS.fitFraction) < 0.5);
   assert.equal(zoom, 0.5);
   const roomy = new SoloZoomController();
   roomy.set('punchIn', 1);
   const capped = drive(roomy, 10, { near: 1, far: 0, swarmRadius: 2 });
-  assert.ok(Math.abs(capped - zoomFit(2, 16, 9)) < 1e-9, `zoom ${capped} fit ${zoomFit(2, 16, 9)}`);
+  assert.ok(Math.abs(capped - zoomFit(2, 16, 9, 1.25)) < 1e-9, `zoom ${capped}`);
+});
+
+test('a smaller fitFraction caps the zoom lower', () => {
+  const controller = new SoloZoomController();
+  controller.set('fitFraction', 0.5);
+  const zoom = drive(controller, 10, { near: 1, far: 0, swarmRadius: 1.234 });
+  assert.ok(Math.abs(zoom - zoomFit(1.234, 16, 9, 0.5)) < 1e-9, `zoom ${zoom}`);
+  assert.throws(() => controller.set('fitFraction', 0.4), RangeError);
 });
 
 test('output stays inside [minimum, maximum]', () => {
@@ -162,6 +184,7 @@ test('the log target is clamped to the zoom limits so it cannot wind up', () => 
 // at the value that puts the wish `dip` below that target.
 function settledThenWish(dip, seconds = 30) {
   const controller = new SoloZoomController();
+  controller.set('maximum', 4);
   drive(controller, 20, { near: 1, far: 0 });
   const settled = controller.lastZoom;
   const near = 1 - dip / SOLO_ZOOM_DEFAULTS.punchIn;

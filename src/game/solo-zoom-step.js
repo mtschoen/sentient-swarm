@@ -1,7 +1,7 @@
 // The solo zoom's per-update step, taking the Game as context (like seats.js): decides whether the
 // solo controller drives the camera this update and, if so, returns the camera's zoom options.
 // Returns null (and resets the controller) for everything else, so the caller takes today's path:
-// the feature off (the default), reduced motion, no or two live seats, Ready, Game over and watch mode.
+// the feature off (a lab setting), reduced motion, no or two live seats, Ready, Game over and watch mode.
 import { DENSITY_REFERENCE_CAPACITY } from '../sim/species.js';
 import { MINIMUM_CAMERA_ZOOM } from './camera.js';
 import { RunPhase } from './run.js';

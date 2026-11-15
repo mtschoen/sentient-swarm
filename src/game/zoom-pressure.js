@@ -8,9 +8,8 @@ export const ZOOM_FAR_VIEW_FACTOR = 1.1;
 export const ZOOM_SAMPLE_POINTS = 8;
 // Measured in the browser at capacity 524288 (capacityScale 1): across 87 ramped solo play samples a
 // calm focus read a near-ring mean of 0 to 0.1, and heavy crowds closing on the swarm read 1.7 to 6.6
-// (median 2.5 among the top tenth), so 2.5 maps a heavy crowd to near 1 and a calm spot to 0. The lab
-// knob soloZoomCrowdReference tunes it.
-export const ZOOM_DEFAULT_CROWD_REFERENCE = 2.5;
+// (median 2.5 among the top tenth), so a reference of 2.5 maps a heavy crowd to near 1 and a calm spot
+// to 0; the shipped default is lower (see solo-zoom.js). The lab knob soloZoomCrowdReference tunes it.
 
 const NEAR_EDGES = [0.25, 1.0];
 const FAR_EDGES = [0.15, 0.6];

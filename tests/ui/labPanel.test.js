@@ -496,8 +496,8 @@ test('the arm weapon select still lists every weapon, the beam included', () => 
   assert.deepEqual(names, ['base', 'beam', 'scatter', 'rail', 'pulse', 'sidewinders']);
 });
 
-test('the Camera group renders eight solo zoom sliders', () => {
+test('the Camera group renders nine solo zoom sliders', () => {
   const { knob } = setup();
-  const keys = ['soloZoomEnabled', 'soloZoomMinimum', 'soloZoomMaximum', 'soloZoomPunchIn', 'soloZoomPullOut', 'soloZoomSmoothSeconds', 'soloZoomRateLimit', 'soloZoomCrowdReference'];
+  const keys = ['soloZoomEnabled', 'soloZoomMinimum', 'soloZoomMaximum', 'soloZoomPunchIn', 'soloZoomPullOut', 'soloZoomSmoothSeconds', 'soloZoomRateLimit', 'soloZoomCrowdReference', 'soloZoomFitFraction'];
   for (const key of keys) assert.equal(knob(key).length, 1, key);
 });

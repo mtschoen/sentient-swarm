@@ -50,7 +50,7 @@ export const KNOB_RANGES = {
   soloZoomEnabled: [0, 1], soloZoomMinimum: SOLO_ZOOM_RANGES.minimum, soloZoomMaximum: SOLO_ZOOM_RANGES.maximum,
   soloZoomPunchIn: SOLO_ZOOM_RANGES.punchIn, soloZoomPullOut: SOLO_ZOOM_RANGES.pullOut,
   soloZoomSmoothSeconds: SOLO_ZOOM_RANGES.smoothSeconds, soloZoomRateLimit: SOLO_ZOOM_RANGES.rateLimit,
-  soloZoomCrowdReference: SOLO_ZOOM_RANGES.crowdReference,
+  soloZoomCrowdReference: SOLO_ZOOM_RANGES.crowdReference, soloZoomFitFraction: SOLO_ZOOM_RANGES.fitFraction,
   trailDecay: [0, 0.99], bloomStrength: [0, 3], warpDensityWeight: [0, 1], warpThreatWeight: [0, 2],
   shipArenaFraction: [0.012, 0.04],
   wallMargin: [0, 2], wallStiffness: [0, 160], comfortRadius: [0, 4], seekRange: [0, 40],

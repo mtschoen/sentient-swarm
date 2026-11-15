@@ -159,6 +159,7 @@ export const LAB_KNOB_BINDINGS = {
   soloZoomSmoothSeconds: soloZoomValue('soloZoomSmoothSeconds', 'smoothSeconds'),
   soloZoomRateLimit: soloZoomValue('soloZoomRateLimit', 'rateLimit'),
   soloZoomCrowdReference: soloZoomValue('soloZoomCrowdReference', 'crowdReference'),
+  soloZoomFitFraction: soloZoomValue('soloZoomFitFraction', 'fitFraction'),
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, renderSetting(spec.key)])),
 };
 
@@ -199,6 +200,7 @@ export const LAB_KNOB_DEFAULTS = Object.freeze({
   soloZoomSmoothSeconds: SOLO_ZOOM_DEFAULTS.smoothSeconds,
   soloZoomRateLimit: SOLO_ZOOM_DEFAULTS.rateLimit,
   soloZoomCrowdReference: SOLO_ZOOM_DEFAULTS.crowdReference,
+  soloZoomFitFraction: SOLO_ZOOM_DEFAULTS.fitFraction,
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, DEFAULT_RENDER_SETTINGS[spec.key]])),
   sameSpeciesCohesion: 1,
 });

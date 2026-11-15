@@ -7,40 +7,43 @@
 // travel, needs the wish ZOOM_HYSTERESIS away; carrying on the same way follows the wish all the
 // way, so a settled pressure is reached exactly instead of stopping short), and the output is
 // capped so the whole swarm stays in view (that cap is output-only). The camera
-// spring applies smoothSeconds; the shipped default is off (enabled false), only the lab turns it on.
-import { ZOOM_DEFAULT_CROWD_REFERENCE } from './zoom-pressure.js';
-
+// spring applies smoothSeconds; the shipped default is on at the strongest settings (the owner's ruling
+// 2026-11-14), and the lab can change every knob.
 export const SOLO_ZOOM_DEFAULTS = Object.freeze({
-  enabled: false,
+  enabled: true,
   minimum: 0.5,
-  maximum: 1.6,
-  punchIn: Math.log(1.4),
-  pullOut: Math.log(1 / 0.6),
-  smoothSeconds: 1.2,
-  rateLimit: 0.35,
-  crowdReference: ZOOM_DEFAULT_CROWD_REFERENCE,
+  maximum: 2.5,
+  punchIn: 1,
+  pullOut: 1,
+  smoothSeconds: 0.2,
+  rateLimit: 2,
+  // A tenth of the measured heavy-crowd density (2.5 at capacity 524288), so modest crowds already read as full.
+  crowdReference: 0.25,
+  // Measured: 12 ships hover within a peak radius of 1.234 world units of the focus, so with the
+  // 16:9 view (shorter half 4.5) a fraction of 1.25 allows 4.5 * 1.25 / (1.234 + 1) = 2.52, the maximum.
+  fitFraction: 1.25,
 });
 
 export const SOLO_ZOOM_RANGES = Object.freeze({
-  minimum: [0.3, 1],
-  maximum: [1, 2.5],
-  punchIn: [-0.7, 1],
-  pullOut: [0, 1],
-  smoothSeconds: [0.2, 4],
-  rateLimit: [0.05, 2],
-  crowdReference: [0.25, 25],
+  minimum: [0.5, 1],
+  maximum: [1, 4],
+  punchIn: [-1.5, 2],
+  pullOut: [0, 2],
+  smoothSeconds: [0.1, 4],
+  rateLimit: [0.05, 4],
+  crowdReference: [0.1, 25],
+  fitFraction: [0.5, 4],
 });
 
 export const ZOOM_PRESSURE_ATTACK_SECONDS = 0.4;
 export const ZOOM_PRESSURE_RELEASE_SECONDS = 2.0;
 export const ZOOM_HYSTERESIS = 0.04;
-export const ZOOM_FIT_FRACTION = 0.7;
 export const ZOOM_FIT_MARGIN = 1.0;
 
 // Expects the unzoomed base view extents (viewSize, not the zoomed view): the fit is a zoom, so it
-// divides the base view. The zoom at which a swarm of the given radius fills ZOOM_FIT_FRACTION of the view's shorter half.
-export function zoomFit(swarmRadius, viewWidth, viewHeight) {
-  return 0.5 * Math.min(viewWidth, viewHeight) * ZOOM_FIT_FRACTION / (swarmRadius + ZOOM_FIT_MARGIN);
+// divides the base view. The zoom at which a swarm of the given radius fills fitFraction of the view's shorter half.
+export function zoomFit(swarmRadius, viewWidth, viewHeight, fitFraction) {
+  return 0.5 * Math.min(viewWidth, viewHeight) * fitFraction / (swarmRadius + ZOOM_FIT_MARGIN);
 }
 
 function clamp(value, minimum, maximum) {
@@ -97,7 +100,7 @@ export class SoloZoomController {
 
   // viewWidth and viewHeight are the unzoomed base view extents (they feed zoomFit).
   update(deltaSeconds, { near, far, swarmRadius, viewWidth, viewHeight }) {
-    const { minimum, maximum, punchIn, pullOut, rateLimit } = this.#settings;
+    const { minimum, maximum, punchIn, pullOut, rateLimit, fitFraction } = this.#settings;
     this.#near = smoothToward(this.#near, near, deltaSeconds);
     this.#far = smoothToward(this.#far, far, deltaSeconds);
     const wish = punchIn * this.#near - pullOut * this.#far * (1 - this.#near);
@@ -109,7 +112,7 @@ export class SoloZoomController {
       this.#logTarget = Math.abs(difference) <= step ? wish : this.#logTarget + sign * step;
     }
     this.#logTarget = clamp(this.#logTarget, Math.log(minimum), Math.log(maximum));
-    const ceiling = Math.max(minimum, Math.min(maximum, zoomFit(swarmRadius, viewWidth, viewHeight)));
+    const ceiling = Math.max(minimum, Math.min(maximum, zoomFit(swarmRadius, viewWidth, viewHeight, fitFraction)));
     this.#lastZoom = clamp(Math.exp(this.#logTarget), minimum, ceiling);
     return this.#lastZoom;
   }

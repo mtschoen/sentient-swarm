@@ -206,6 +206,8 @@ test('a pickup collection plays the pickup effect', async () => {
 
 test('pickup placement samples the simulation density and polls its readback every update', async () => {
   const { game, simulation } = await createGame();
+  // The solo zoom also samples the density; this test counts only the pickup placement's samples.
+  game.setSoloZoomSetting('enabled', false);
   game.start();
   simulation.densityFunction = (x) => x;
   runFor(game, 10.5);

@@ -70,7 +70,7 @@ test('the Beam knob group lists the four beam knobs with integer shard and wave 
   assert.deepEqual(group.knobs.map((knob) => Boolean(knob.integer)), [true, true, false, false]);
 });
 
-test('the Camera knob group follows Beam, appears once and lists the eight solo zoom knobs', async () => {
+test('the Camera knob group follows Beam, appears once and lists the nine solo zoom knobs', async () => {
   const { LAB_KNOB_GROUPS } = await import('../../src/ui/panelModel.js');
   const titles = LAB_KNOB_GROUPS.map((entry) => entry.title);
   assert.equal(titles.filter((title) => title === 'Camera').length, 1);
@@ -78,7 +78,7 @@ test('the Camera knob group follows Beam, appears once and lists the eight solo 
   const group = LAB_KNOB_GROUPS.find((entry) => entry.title === 'Camera');
   assert.deepEqual(group.knobs.map((knob) => knob.key), [
     'soloZoomEnabled', 'soloZoomMinimum', 'soloZoomMaximum', 'soloZoomPunchIn', 'soloZoomPullOut',
-    'soloZoomSmoothSeconds', 'soloZoomRateLimit', 'soloZoomCrowdReference',
+    'soloZoomSmoothSeconds', 'soloZoomRateLimit', 'soloZoomCrowdReference', 'soloZoomFitFraction',
   ]);
-  assert.deepEqual(group.knobs.map((knob) => Boolean(knob.integer)), [true, false, false, false, false, false, false, false]);
+  assert.deepEqual(group.knobs.map((knob) => Boolean(knob.integer)), [true, false, false, false, false, false, false, false, false]);
 });
