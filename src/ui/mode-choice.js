@@ -1,10 +1,12 @@
-// The title's mode choice: co-op (the default) or versus, chosen once player 2 has joined. The menu
+// The title's mode choice: co-op (the default), versus or hives, chosen once player 2 has joined. The menu
 // item is always laid out beside Play (menu.js modeItem); without player 2 it is ghosted and reads
 // MODE: SOLO. Pad, keyboard and mouse reach it through the menu's own focus ring and confirm, which
-// toggles the mode. Player 2 leaving (or a quit, or the lab, which unseat player 2) returns to co-op.
+// steps the mode through MODE_CYCLE (co-op, versus, hives, then co-op again). Player 2 leaving (or a quit, or the lab, which unseat player 2) returns to co-op.
 import { GameMode } from '../game/versus.js';
 
 export const MODE_ITEM_ID = 'mode';
+export const MODE_CYCLE = Object.freeze([GameMode.Coop, GameMode.Versus, GameMode.Hives]);
+const MODE_LABELS = Object.freeze({ [GameMode.Coop]: 'MODE: CO-OP', [GameMode.Versus]: 'MODE: VERSUS', [GameMode.Hives]: 'MODE: HIVES' });
 
 // The pure choice: the mode picked, honored only while player 2 is joined.
 export class ModeChoice {
@@ -19,10 +21,10 @@ export class ModeChoice {
     if (!this.joined) this.picked = GameMode.Coop;
   }
 
-  // Flips co-op and versus; returns false (nothing changes) without player 2.
+  // Steps to the next mode of MODE_CYCLE; returns false (nothing changes) without player 2.
   toggle() {
     if (!this.joined) return false;
-    this.picked = this.picked === GameMode.Coop ? GameMode.Versus : GameMode.Coop;
+    this.picked = MODE_CYCLE[(MODE_CYCLE.indexOf(this.picked) + 1) % MODE_CYCLE.length];
     return true;
   }
 
@@ -35,7 +37,7 @@ export class ModeChoice {
 // The item's label and whether it can be chosen.
 export function modeItemView(choice) {
   if (!choice.joined) return { label: 'MODE: SOLO', enabled: false };
-  return { label: choice.mode === GameMode.Versus ? 'MODE: VERSUS' : 'MODE: CO-OP', enabled: true };
+  return { label: MODE_LABELS[choice.mode], enabled: true };
 }
 
 // The choice plus its menu item: pass menuItem to createMenu, then attach the menu; update each

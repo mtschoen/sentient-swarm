@@ -291,7 +291,7 @@ async function boot() {
     audio.unlock();
     audio.restartRun();
     game.setPlayerCount(coopJoin.playerCount);
-    // Co-op unless player 2 joined and chose versus at the title.
+    // Co-op unless player 2 joined and chose versus or hives at the title.
     game.setMode(modeControl.mode);
     game.start();
     menu.hide();
@@ -316,7 +316,7 @@ async function boot() {
     audio.setPaused(true);
     pauseMenu.show();
   };
-  // The co-op or versus choice beside Play, ghosted until player 2 joins.
+  // The co-op, versus or hives choice beside Play, ghosted until player 2 joins.
   const modeControl = createModeControl();
   const menu = createMenu({ onStart: startRun, onLab: openLab, onSettings: openSettings, modeItem: modeControl.menuItem });
   modeControl.attach(menu);

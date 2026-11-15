@@ -40,6 +40,11 @@
 // FAR_CLOSE_HALF_DIAGONALS half-diagonals from the view center closes, so the gates follow the
 // camera. When no ring draw lies inside the bounds (a view as large as the world), and without a
 // view, gates place in the wall band or the interior as below.
+// Fixed sites (hives, setFixedSites): the gates are the given sites, fully open from the first update,
+// never drifting, closing or moving with the view; waves still pick among them (outside the safe
+// radius; the aim lane does not apply, a hive cannot move out of it) and filling, continuous and
+// surging work as for roaming gates. Each row of spawnGates then carries its site index. null (the
+// default) is the roaming gates above, drawing exactly the random numbers they always did.
 // The shader side (spawn.wgsl) samples each new agent's position from the emitting gates, weighted
 // by emission and by speciesBias toward the gate's favored species; see spawnGates.
 import { WORLD_BOUNDS, SPECIES_COUNT } from './layout.js';
@@ -156,6 +161,17 @@ export class SpawnDirector {
     this.wavePeriodMultiplier = 1;
     this.burstMultiplier = 1;
     this.gates = [];
+    this.fixedSites = null;
+    this.reset();
+  }
+
+  // sites: [{ x, y, radius }] (at most MAXIMUM_SPAWN_GATES) as fixed gates, or null for roaming
+  // gates (see the header). The gates are rebuilt on the next update.
+  setFixedSites(sites) {
+    if (sites !== null && !(Array.isArray(sites) && sites.length >= 1 && sites.length <= MAXIMUM_SPAWN_GATES)) {
+      throw new RangeError(`SpawnDirector fixed sites must be null or 1 to ${MAXIMUM_SPAWN_GATES} sites`);
+    }
+    this.fixedSites = sites === null ? null : sites.map(({ x, y, radius }) => ({ x, y, radius }));
     this.reset();
   }
 
@@ -184,7 +200,7 @@ export class SpawnDirector {
   // radius applies at once. Throws RangeError and changes nothing when a value is out of range.
   setSchedule(schedule) {
     this.schedule = validatedSchedule({ ...this.schedule, ...pickSchedule(schedule) });
-    this.gates.forEach((gate) => { gate.radius = this.schedule.gateRadius; });
+    this.gates.forEach((gate) => { if (gate.site === undefined) gate.radius = this.schedule.gateRadius; });
   }
 
   // A new run or life: every gate closes and gateCount new ones open fully at once (the first
@@ -217,6 +233,19 @@ export class SpawnDirector {
     const context = { playerX, playerY, safeDistance, shares, aimX, aimY, bounds, view, partner };
     this.filling = filling;
     this.continuous = continuous;
+    if (this.fixedSites !== null) this.placeFixedGates(context);
+    else this.cycleGates(deltaSeconds, context);
+    this.advanceWaves(deltaSeconds, context);
+    this.gates.forEach((gate) => {
+      gate.open = this.envelope(gate);
+      const emitsWave = this.activeWave?.gate === gate;
+      gate.emit = gate.open >= 1 && !gate.closing && (filling || continuous || surging || emitsWave) ? 1 : 0;
+      gate.telegraph = this.nextGate === gate ? clamp(1 - this.waveClock / TELEGRAPH_SECONDS, 0, 1) : 0;
+    });
+  }
+
+  // Roaming gates: the first gates of a life, then age, drift, close and replace them.
+  cycleGates(deltaSeconds, context) {
     if (this.needsInitialGates) {
       this.needsInitialGates = false;
       for (let index = 0; index < this.schedule.gateCount; index += 1) {
@@ -230,13 +259,16 @@ export class SpawnDirector {
     while (this.gates.filter((gate) => !gate.closing).length < this.schedule.gateCount && this.gates.length < MAXIMUM_SPAWN_GATES * 2) {
       this.gates.push(this.openGate(context, { age: 0, lifetime: this.schedule.gateLifetimeSeconds }));
     }
-    this.advanceWaves(deltaSeconds, context);
-    this.gates.forEach((gate) => {
-      gate.open = this.envelope(gate);
-      const emitsWave = this.activeWave?.gate === gate;
-      gate.emit = gate.open >= 1 && !gate.closing && (filling || continuous || surging || emitsWave) ? 1 : 0;
-      gate.telegraph = this.nextGate === gate ? clamp(1 - this.waveClock / TELEGRAPH_SECONDS, 0, 1) : 0;
-    });
+  }
+
+  // Fixed sites: one gate per site, open for good, each favoring a species drawn by the shares.
+  placeFixedGates(context) {
+    if (!this.needsInitialGates) return;
+    this.needsInitialGates = false;
+    this.gates = this.fixedSites.map(({ x, y, radius }, site) => ({
+      x, y, radius, site, species: this.pickSpecies(context.shares), age: GATE_FADE_SECONDS, lifetime: Infinity,
+      closing: false, laneSeconds: 0, driftX: 0, driftY: 0, open: 1, emit: 0, telegraph: 0,
+    }));
   }
 
   // Wave state for SpawnPressure.update: emitting (some gate emits this step), the seconds left in
@@ -251,12 +283,12 @@ export class SpawnDirector {
 
   // The step's gate table for Simulation.step (the SimParams gates, and the gate renderer): at
   // most MAXIMUM_SPAWN_GATES gates, emitting ones first, then the most open, as copies
-  // { x, y, radius, emit, species, open, telegraph }, plus speciesBias.
+  // { x, y, radius, emit, species, open, telegraph } (plus site for a fixed gate), plus speciesBias.
   get spawnGates() {
     const gates = [...this.gates]
       .sort((first, second) => second.emit - first.emit || second.open - first.open)
       .slice(0, MAXIMUM_SPAWN_GATES)
-      .map(({ x, y, radius, emit, species, open, telegraph }) => ({ x, y, radius, emit, species, open, telegraph }));
+      .map(({ x, y, radius, emit, species, open, telegraph, site }) => (site === undefined ? { x, y, radius, emit, species, open, telegraph } : { x, y, radius, emit, species, open, telegraph, site }));
     return { gates, speciesBias: this.schedule.speciesBias };
   }
 
@@ -285,7 +317,7 @@ export class SpawnDirector {
   // outside the aim lane.
   canEmit(gate, context) {
     return this.envelope(gate) >= 1 && !gate.closing && nearestPlayerOffset(gate, context).distance >= context.safeDistance + gate.radius
-      && !inAnyAimLane(gate, gate.radius, context);
+      && (gate.site !== undefined || !inAnyAimLane(gate, gate.radius, context));
   }
 
   // The farthest gate that can emit, with some randomness, avoiding the gate of the previous wave

@@ -51,7 +51,7 @@ test('setMode switches to versus in Ready with two seats only, and hands the sim
   assert.equal(game.pickups.rotation, PICKUP_TYPE_NAMES);
   game.setMode('coop');
   assert.equal(simulation.versusProjectileCalls.length, 2, 'an unchanged mode makes no call');
-  assert.throws(() => game.setMode('hives'), RangeError);
+  assert.throws(() => game.setMode('conquest'), RangeError);
   game.setPlayerCount(1);
   assert.throws(() => game.setMode('versus'), RangeError);
   game.setPlayerCount(2);

@@ -1,7 +1,7 @@
 // Packs the SimParams uniform. Byte layout matches the table at the top of common.wgsl.
 import { SPECIES_COUNT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH } from './layout.js';
 
-// 256 bytes of fields plus the f32 seekRange at 256, padded to the struct's 16-byte alignment.
+// 256 bytes of fields plus the f32 seekRange at 256 and the u32 gate ownership at 260, padded to the struct's 16-byte alignment.
 export const SIM_PARAMS_BYTES = 272;
 
 // Particles per kill (owner ruling R12, task C0b); the kill passes scale it down only when a step's
@@ -114,6 +114,10 @@ const PROJECTILE_DT_OFFSET = 236;
 const WORLD_BOUNDS_OFFSET = 240;
 // The seek range (the Simulation seek range setter), f32; 0 is unlimited.
 const SEEK_RANGE_OFFSET = 256;
+// Hives: per gate row g, bits 4g and 4g + 1 hold the seek point plus 1 its spawns seek and bits 4g + 2
+// and 4g + 3 the owner seat plus 1 (packGateOwnership); 0 for every row outside hives.
+const SPAWN_GATE_OWNERSHIP_OFFSET = 260;
+const GATE_OWNERSHIP_BITS = 4;
 const UNSIGNED_FIELDS = {
   gridColumns: 20, gridRows: 24, capacity: 32, frameSequence: 84,
   playerInvulnerable: 96, acknowledgedHitSequence: 100, killAllRequested: 104,
@@ -147,6 +151,19 @@ const VECTOR_FIELDS = { playerPosition: 8, debugKillPosition: 40 };
 const SPAWN_PER_SPECIES_OFFSET = 48;
 const SECOND_PLAYER_ACTIVE_OFFSET = 68;
 const SECOND_PLAYER_POSITION_OFFSET = 72;
+
+// A seat index (0 or 1) as its 2-bit field value, seat plus 1; null or undefined is 0.
+function seatField(name, seat) {
+  if (seat === null || seat === undefined) return 0;
+  if (!(seat === 0 || seat === 1)) throw new RangeError(`gate ${name} must be seat 0 or 1 or null, got ${seat}`);
+  return seat + 1;
+}
+
+// The ownership word for gate rows [{ target, owner }]: target is the seat (0 or 1) whose seek point
+// the row's spawns seek and owner the seat that holds it, each null or missing for none.
+export function packGateOwnership(gates) {
+  return gates.reduce((word, gate, index) => (word | ((seatField('target', gate.target) | (seatField('owner', gate.owner) << 2)) << (index * GATE_OWNERSHIP_BITS))) >>> 0, 0);
+}
 
 export function packSimParams(values) {
   const buffer = new ArrayBuffer(SIM_PARAMS_BYTES);
@@ -186,6 +203,7 @@ export function packSimParams(values) {
     view.setUint32(SPAWN_GATE_SPECIES_OFFSET + index * 4, species, true);
   });
   view.setUint32(SPAWN_GATE_COUNT_OFFSET, gates.length, true);
+  view.setUint32(SPAWN_GATE_OWNERSHIP_OFFSET, packGateOwnership(gates), true);
   view.setFloat32(SPAWN_GATE_SPECIES_BIAS_OFFSET, values.spawnGates?.speciesBias ?? 0, true);
   // spawnPerSpecies0 holds species 0 to 3, spawnPerSpecies1 holds species 4.
   // secondPlayerPosition: [x, y] or none; bytes 68 to 79 stay zero without one.

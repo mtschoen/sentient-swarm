@@ -7,7 +7,8 @@
 // dense-cell step matches a CPU port of the capped sampling and differs from the uncapped one, (f) the default five-species mix does not pack into a clump around the player at full capacity, at a sparse
 // population and at the initial ramp, (g) with a second player point, each of two Chaser groups seeks the
 // nearer point, (h) a seek range: groups inside it close on the nearest seek point as without a range, groups
-// beyond it do not, for one and two seek points.
+// beyond it do not, for one and two seek points, (i) hives seek targets: agents whose target flag bits name the
+// other seek point seek it, and spawns from an owned gate row carry those bits (steer-targets-case.js).
 import { createGpuContext } from '/src/gpu/device.js';
 import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
@@ -18,6 +19,7 @@ import { SpatialGrid } from '/src/sim/grid.js';
 import { CoarseField } from '/src/sim/field.js';
 import { Steering } from '/src/sim/steer.js';
 import { separationAverage } from './steer-reference.js';
+import { checkSeekTargets } from './steer-targets-case.js';
 
 const NEIGHBOR_RADIUS = 0.1;
 const STEP_SECONDS = 1 / 60;
@@ -654,6 +656,8 @@ const shippedClump = (gpu, common, count, label) => checkNoClump(gpu, common, co
 const infoNoClumpSparse = (gpu, common) => shippedClump(gpu, common, SPARSE_CLUMP_COUNT, 'sparse');
 const infoNoClumpInitialRamp = (gpu, common) => shippedClump(gpu, common, INITIAL_RAMP_CLUMP_COUNT, 'initial-ramp');
 
+const checkTargets = (gpu, common) => checkSeekTargets(gpu, common, { Harness, packAgents, randomSource, validityFailure, mean, chaser: CHASER });
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   let lostReason = null;
@@ -661,7 +665,7 @@ async function runCheck() {
   gpu.device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
   const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
   const results = [];
-  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNearestPlayer, checkSeekRange, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp, infoNoClumpSparse, infoNoClumpInitialRamp]) {
+  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNearestPlayer, checkSeekRange, checkTargets, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp, infoNoClumpSparse, infoNoClumpInitialRamp]) {
     results.push(await check(gpu, common));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${results.map((result) => result.detail).join('; ')}` };
   }

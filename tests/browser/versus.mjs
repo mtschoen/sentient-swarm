@@ -1,7 +1,7 @@
 // Versus browser check (not part of check:gpu): drives the real page in headless Chromium with
 // synthetic gamepads (as coop.mjs) through one versus match:
 //   A. two pads at 1280 by 720: the mode item is laid out and ghosted (MODE: SOLO) before pad 1
-//      joins, then reads MODE: CO-OP; the d-pad and face button pick versus, a click picks co-op,
+//      joins, then reads MODE: CO-OP; the d-pad and face button pick versus, two clicks pick hives then co-op,
 //      the arrow keys and Enter pick versus again. Enter on Play starts a versus run with ?swarm=1
 //      and seat 1 invulnerable while both seats fire at each other and every update clears the neutral
 //      swarm (a kill-all, so only seat 1's projectiles can hit seat 2's ship); seat 2 is wiped and the
@@ -136,7 +136,11 @@ async function runA(browser, server) {
   item = await modeItem(page);
   expect(item.chosen === 'versus' && item.text === 'MODE: VERSUS', `A: the pad did not pick versus ("${item.text}")`);
   expect(await phaseOf(page) === 'ready', 'A: picking the mode started the run');
-  // Mouse: a click picks co-op again.
+  // Mouse: a click picks hives, the next one co-op again (the item steps co-op, versus, hives).
+  await page.click('.menu-title-screen .menu-mode');
+  await waitFrames(page, HOLD_FRAMES);
+  item = await modeItem(page);
+  expect(item.chosen === 'hives' && item.text === 'MODE: HIVES', `A: the click did not pick hives ("${item.text}")`);
   await page.click('.menu-title-screen .menu-mode');
   await waitFrames(page, HOLD_FRAMES);
   item = await modeItem(page);
