@@ -139,30 +139,56 @@ test('with densityAt the lowest density of the first 8 acceptable candidates win
   assert.deepEqual(first, tied[0]);
 });
 
-test('fallback 1: when the reach limit alone excludes everything it is dropped', () => {
-  const anchor = { x: 1, y: 1 };
-  const view = { centerX: 1, centerY: 1, width: 16, height: 9 };
-  const reach = SHARD_MAXIMUM_REACH_HALF_DIAGONALS * Math.hypot(16, 9) / 2;
-  const bounds = { minX: 0, minY: 0, maxX: 60, maxY: 20, width: 60, height: 20 };
-  const point = placeShard({ bounds, view, anchor, gates: [], shards: [], densityAt: null }, seededRandom(3));
-  assert.equal(insideView(point, view, SHARD_VIEW_MARGIN), false);
-  assert.ok(point.x >= 1 && point.x <= 59 && point.y >= 1 && point.y <= 19);
-  // Reach is satisfiable here, so the same call stays within it.
-  assert.ok(Math.hypot(point.x - 1, point.y - 1) <= reach + 1e-9);
-  // Now make reach unsatisfiable: a view that hides every point within reach of the anchor.
-  const hiding = { centerX: 1, centerY: 1, width: 2 * (reach + 2), height: 2 * (reach + 2) };
-  const far = placeShard({ bounds, view: hiding, anchor, gates: [], shards: [], densityAt: null }, seededRandom(3));
-  assert.equal(insideView(far, hiding, SHARD_VIEW_MARGIN), false);
-  assert.ok(Math.hypot(far.x - 1, far.y - 1) > reach);
+// A random that cycles through the given draws, so a test can choose exactly which points are tried.
+function cyclingRandom(draws) {
+  let index = 0;
+  return () => draws[index++ % draws.length];
+}
+
+function drawsFor(bounds, points) {
+  const minX = bounds.minX + SHARD_WALL_INSET;
+  const minY = bounds.minY + SHARD_WALL_INSET;
+  const width = bounds.maxX - SHARD_WALL_INSET - minX;
+  const height = bounds.maxY - SHARD_WALL_INSET - minY;
+  return points.flatMap((point) => [(point.x - minX) / width, (point.y - minY) / height]);
+}
+
+function assertNear(point, expected) {
+  assert.ok(Math.abs(point.x - expected.x) < 1e-9 && Math.abs(point.y - expected.y) < 1e-9, `${JSON.stringify(point)} vs ${JSON.stringify(expected)}`);
+}
+
+test('fallback 1 drops only the reach limit: the first draw clear of gates and spacing but beyond reach wins', () => {
+  const bounds = { minX: 0, minY: 0, maxX: 100, maxY: 20, width: 100, height: 20 };
+  const anchor = { x: 16, y: 9 };
+  const blocked = { x: 70, y: 10 };
+  const clear = { x: 80, y: 10 };
+  const gates = [{ x: blocked.x, y: blocked.y, radius: 1 }];
+  const random = cyclingRandom(drawsFor(bounds, [blocked, clear]));
+  const point = placeShard({ bounds, view: VIEW, anchor, gates, shards: [], densityAt: null }, random);
+  assertNear(point, clear);
+  assert.ok(Math.hypot(point.x - anchor.x, point.y - anchor.y) > REACH, 'beyond reach: the dropped rule');
+  assert.equal(insideView(point, VIEW, SHARD_VIEW_MARGIN), false, 'still off screen');
+  assert.ok(point.x >= 1 && point.x <= 99 && point.y >= 1 && point.y <= 19, 'still inside the inset bounds');
+  assert.ok(Math.hypot(point.x - gates[0].x, point.y - gates[0].y) >= gates[0].radius + SHARD_GATE_CLEARANCE, 'gate clearance still kept');
 });
 
-test('fallback 2: gate clearance and spacing are dropped when they exclude everything', () => {
-  const gates = [{ x: 16, y: 9, radius: 100 }];
-  const shards = [{ x: 0, y: 0 }];
-  const point = placeShard(context({ gates, shards }), seededRandom(5));
-  assert.equal(insideView(point, VIEW, SHARD_VIEW_MARGIN), false);
-  assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
-  assert.ok(point.x >= 1 && point.x <= WORLD_BOUNDS.maxX - 1);
+test('fallback 2 drops gate clearance: a draw inside a gate wins when no stage before it can place', () => {
+  const point = { x: 28, y: 9 };
+  const gates = [{ x: point.x, y: point.y, radius: 1 }];
+  const result = placeShard(context({ gates }), cyclingRandom(drawsFor(WORLD_BOUNDS, [point])));
+  assertNear(result, point);
+  assert.ok(Math.hypot(result.x - gates[0].x, result.y - gates[0].y) < gates[0].radius + SHARD_GATE_CLEARANCE, 'inside the gate clearance: the dropped rule');
+  assert.equal(insideView(result, VIEW, SHARD_VIEW_MARGIN), false, 'still off screen');
+  assert.ok(result.x >= 1 && result.x <= WORLD_BOUNDS.maxX - 1 && result.y >= 1 && result.y <= WORLD_BOUNDS.maxY - 1, 'still inside the inset bounds');
+});
+
+test('fallback 2 drops spacing: a draw next to a waiting shard wins when no stage before it can place', () => {
+  const point = { x: 28, y: 9 };
+  const shards = [{ x: 29, y: 9 }];
+  const result = placeShard(context({ shards }), cyclingRandom(drawsFor(WORLD_BOUNDS, [point])));
+  assertNear(result, point);
+  assert.ok(Math.hypot(result.x - shards[0].x, result.y - shards[0].y) < SHARD_SPACING, 'within the spacing: the dropped rule');
+  assert.equal(insideView(result, VIEW, SHARD_VIEW_MARGIN), false, 'still off screen');
 });
 
 test('fallback 3: a view as large as the world gives the inset corner farthest from the anchor', () => {
