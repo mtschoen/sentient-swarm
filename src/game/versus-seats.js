@@ -7,12 +7,17 @@
 // projectile buffer (the versus hit pass, versus_hits.wgsl) and takes the time warp out of the pickup
 // rotation; leaving undoes both. Beam shards are not placed in versus (game.js spawnCounts) and the
 // escalation stays neutral (escalation-step.js).
+// Hives (stage 3) is versus with a Hives state on the match (hive-seats.js): entering it also turns
+// the spawn director's gates into the three fixed hive sites, leaving it back into roaming gates;
+// switching between versus and hives keeps the versus projectiles and rotation as they are.
 import { GameMode, VERSUS_PICKUP_ROTATION, VersusMatch, validatedMode } from './versus.js';
+import { Hives, hiveSites } from './hives.js';
+import { hiveGrowth, hivesOf, updateHives } from './hive-seats.js';
+import { endMatch, losingSeat } from './match-end.js';
 import { contactPairs } from './ship-contact.js';
 import { PICKUP_TYPE_NAMES } from './weaponTypes.js';
 import { SWARM_SHIP_RADIUS } from './player-swarm.js';
 import { RunPhase } from './run.js';
-import { cancelBeamTime } from './beam-time-seats.js';
 import { SEAT_START_OFFSET, reviveSeats, seatStarts } from './seats.js';
 import { MAXIMUM_PLAYER_SEATS } from '../sim/layout.js';
 
@@ -24,13 +29,19 @@ export const VERSUS_START_OFFSET = 10;
 // A lost swarm ship ripples the warp grid this hard (as in seats.js).
 const SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
 
-// Co-op or versus, in Ready only; versus needs two seats. Throws RangeError for an unknown mode or
-// versus with one seat, Error outside Ready.
+// Co-op, versus or hives, in Ready only; versus and hives need two seats. Throws RangeError for an
+// unknown mode or versus or hives with one seat, Error outside Ready.
 export function setGameMode(game, mode) {
   validatedMode(mode);
   if (game.run.phase !== RunPhase.Ready) throw new Error('the game mode changes only in Ready');
-  if (mode === GameMode.Versus && game.seats.length !== MAXIMUM_PLAYER_SEATS) throw new RangeError('versus needs two seats');
+  if (mode !== GameMode.Coop && game.seats.length !== MAXIMUM_PLAYER_SEATS) throw new RangeError(`${mode} needs two seats`);
   applyMode(game, mode);
+}
+
+// The game's mode: co-op without a match, hives when the match has hives, else versus.
+export function gameModeOf(game) {
+  if (game.versusMatch === null) return GameMode.Coop;
+  return game.versusMatch.hives === null ? GameMode.Versus : GameMode.Hives;
 }
 
 // Back to co-op from any phase (quit to title, the lab, one seat); nothing happens outside versus.
@@ -40,10 +51,22 @@ export function leaveVersus(game) {
 
 function applyMode(game, mode) {
   if (mode === game.mode) return;
-  const versus = mode === GameMode.Versus;
-  game.versusMatch = versus ? new VersusMatch() : null;
-  game.simulation.setVersusProjectiles(versus ? game.projectiles.buffer : null);
-  game.pickups.setRotation(versus ? VERSUS_PICKUP_ROTATION : PICKUP_TYPE_NAMES);
+  const versus = mode !== GameMode.Coop;
+  const versusChanges = versus !== game.versus;
+  const hadHives = hivesOf(game) !== null;
+  const hives = mode === GameMode.Hives ? new Hives(hiveSites(game.worldBounds, VERSUS_START_OFFSET)) : null;
+  game.versusMatch = versus ? new VersusMatch({ hives }) : null;
+  if (versusChanges) {
+    game.simulation.setVersusProjectiles(versus ? game.projectiles.buffer : null);
+    game.pickups.setRotation(versus ? VERSUS_PICKUP_ROTATION : PICKUP_TYPE_NAMES);
+  }
+  if (hadHives || hives !== null) game.spawnDirector.setFixedSites(hives === null ? null : hives.hives.map(({ x, y, radius }) => ({ x, y, radius })));
+}
+
+// The versus work of a Playing update after the flock step: ship contact, then (hives) capture.
+export function stepVersus(game, deltaSeconds) {
+  applyShipContact(game);
+  updateHives(game, deltaSeconds);
 }
 
 // Each seat's start point for the game's mode and seat count.
@@ -52,7 +75,8 @@ export function startsFor(game) {
 }
 
 // A scored stats frame's kills: in co-op they grow every seat that is not down and count toward
-// each down seat's revive; in versus they grow only the seat whose projectiles made them.
+// each down seat's revive; in versus they grow only the seat whose projectiles made them (in hives,
+// with its feeding ground kills counted double, hiveGrowth).
 export function growSwarms(game, stats) {
   if (!game.versus) {
     for (const seat of game.seats) if (!seat.down) seat.swarm.addKills(stats.killsSinceLastRead);
@@ -61,7 +85,7 @@ export function growSwarms(game, stats) {
   }
   const credit = stats.ownerKillsSinceLastRead ?? [];
   game.seats.forEach((seat, index) => {
-    const kills = credit[index] ?? 0;
+    const kills = hiveGrowth(game, stats, index, credit[index] ?? 0);
     if (kills > 0) seat.swarm.addKills(kills);
   });
 }
@@ -96,22 +120,11 @@ export function applyShipContact(game) {
 }
 
 // lastLosses: each seat's last ship lost just now, or null. A seat left with no ships ends the
-// match: the run's one death (the death clear at the last wiped seat, seat 2's when both fell, then
-// game over), with the weapons dropped and the multiplier reset as in co-op. A death the run refuses
-// (a stale frame) leaves the match running.
+// match (endMatch: the run's one death, the death clear at the last wiped seat, seat 2's when both
+// fell, then game over). A death the run refuses (a stale frame) leaves the match running.
 function judgeMatch(game, frameSequence, lastLosses) {
   const result = game.versusMatch.judge(game.seats.map((seat) => seat.aliveCount));
   if (result === null) return;
-  const seatIndex = result.draw ? MAXIMUM_PLAYER_SEATS - 1 : 1 - result.winner;
-  const last = lastLosses[seatIndex] ?? game.seats[seatIndex].point;
-  if (!game.run.playerHit(frameSequence, last)) {
-    game.versusMatch.reset();
-    return;
-  }
-  game.lastWipedSeat = seatIndex;
-  game.seats.forEach((seat) => seat.weapons.dropAll());
-  game.timeWarp.end();
-  cancelBeamTime(game);
-  game.score.recordHit();
-  game.effects?.death();
+  const seatIndex = losingSeat(result);
+  endMatch(game, result, frameSequence, lastLosses[seatIndex] ?? game.seats[seatIndex].point);
 }

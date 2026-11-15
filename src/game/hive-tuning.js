@@ -9,6 +9,8 @@ export const HIVE_FEEDING_REACH_SCALE = 2;
 
 export const HIVE_TUNING = Object.freeze({
   radius: HIVE_RADIUS,
+  // World units on y between a seat's start and its side hive (hives.js hiveSites).
+  sideOffset: 4.5,
   // Capture progress (0 to 1) per second per ship of advantage (own ships in the disc minus the
   // opponent's): the 12-ship starting swarm parked on a hive takes 5 s.
   captureRatePerShip: 1 / 60,

@@ -9,7 +9,7 @@ import { PickupDirector } from '../../src/game/pickups.js';
 test('validatedMode accepts coop and versus and rejects anything else', () => {
   assert.equal(validatedMode(GameMode.Coop), 'coop');
   assert.equal(validatedMode(GameMode.Versus), 'versus');
-  assert.throws(() => validatedMode('hives'), RangeError);
+  assert.throws(() => validatedMode('conquest'), RangeError);
 });
 
 test('the versus rotation is the co-op one without the time warp', () => {

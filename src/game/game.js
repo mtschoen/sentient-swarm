@@ -74,11 +74,10 @@
 // and seek points reach the simulation (src/game/seats.js); with one seat the calls are exactly the
 // solo ones. A seat wiped while another still has ships goes down; the run's one death is the last
 // seat falling. Kills score once and grow every seat still in the run.
-// Versus (setMode, Ready only, two seats; versus-seats.js): projectiles carry their seat and hit the
-// other swarm, touching opposing ships both die after the flock step, kills grow only the seat whose
-// projectiles made them, and a seat at 0 ships ends the match (no down and revive): the run's one
-// death, then game over with the result in state.matchResult. One seat, quit, the lab and watch mode
-// return to co-op.
+// Versus and hives (setMode, Ready only, two seats; versus-seats.js, hive-seats.js): projectiles carry
+// their seat and hit the other swarm, touching ships both die, kills grow only their seat, and a seat
+// at 0 ships (in hives also a hold of every hive) ends the match: the run's one death, then game over
+// (state.matchResult). One seat, quit, the lab and watch mode return to co-op.
 // Watch mode (the lab, task C6b): setWatch(fraction) puts the run in Ready and keeps it there (no
 // gesture starts it, so weapons and contact stay off); the player point follows the pointer (or
 // the move stick without one) so the swarm chases it, and a watch SpawnPressure with full seek
@@ -106,8 +105,8 @@ import { SoloZoomController } from './solo-zoom.js';
 import { Escalation, NEUTRAL_ESCALATION } from './escalation.js';
 import { applyEscalation } from './escalation-step.js';
 import { SOLO_ZOOM_BOMB_HOLD_SECONDS, easeOutLimits, soloZoomOptions } from './solo-zoom-step.js';
-import { applyShipContact, applyVersusHits, growSwarms, leaveVersus, setGameMode, startsFor } from './versus-seats.js';
-import { GameMode } from './versus.js';
+import { applyVersusHits, gameModeOf, growSwarms, leaveVersus, setGameMode, startsFor, stepVersus } from './versus-seats.js';
+import { hiveGateTable, hiveView } from './hive-seats.js';
 import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, tickInvulnerability, uploadSwarms } from './seats.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
@@ -202,7 +201,7 @@ export class Game {
     this.debugInvulnerableSeats = new Set();
     // The revive counts of a down seat; seat.down mirrors it (set together in seats.js).
     this.revival = new SeatRevival({ seatCount: MAXIMUM_PLAYER_SEATS });
-    // The versus match (VersusMatch) while the mode is versus, else null (co-op and solo).
+    // The versus match (VersusMatch, with its Hives in hives mode) while versus or hives, else null.
     this.versusMatch = null;
     this.pickups = new PickupDirector({ random, bounds: this.worldBounds });
     this.score = new ScoreKeeper({ capacity });
@@ -283,6 +282,7 @@ export class Game {
       beamTime: this.beamTime.fraction,
       mode: this.mode,
       matchResult: this.versusMatch?.result ?? null,
+      hives: hiveView(this),
       offeredType: this.pickups.offeredType,
       phase: this.paused ? 'paused' : this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
@@ -325,9 +325,9 @@ export class Game {
     this.placeSeats();
   }
 
-  get mode() { return this.versusMatch === null ? GameMode.Coop : GameMode.Versus; }
+  get mode() { return gameModeOf(this); }
   get versus() { return this.versusMatch !== null; }
-  // 'coop' (the default) or 'versus' (two seats), changed only in Ready (versus-seats.js).
+  // 'coop' (the default), 'versus' or 'hives' (two seats), changed only in Ready (versus-seats.js).
   setMode(mode) { setGameMode(this, mode); }
 
   removeSecondSeat() {
@@ -527,7 +527,7 @@ export class Game {
       else if (this.watching) moveWatchPoint(seat.player, deltaSeconds, inputs[index], controls[index]);
       seat.flock(deltaSeconds, playing && controls[index].firing);
     });
-    if (this.versus) applyShipContact(this);
+    if (this.versus) stepVersus(this, deltaSeconds);
     this.followCamera(deltaSeconds);
 
     const anchor = pickupAnchor(seats);
@@ -649,7 +649,7 @@ export class Game {
       partner: partnerFor(this.seats),
       surging,
     });
-    this.stepGates = this.spawnDirector.spawnGates;
+    this.stepGates = hiveGateTable(this, this.spawnDirector.spawnGates);
     if (phase === RunPhase.Playing && !this.versus) spawnShardsForWaves(this);
     // Beam time surges the spawning: a null wave trickles refills every step, past the wave bank.
     return pressure.update(deltaSeconds, this.latestStats, shares, this.simulation.frameSequence + 1, surging ? null : this.spawnDirector.wave);
