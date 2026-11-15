@@ -139,6 +139,8 @@ The owner's "narrow lasers per ship" with a cap: only the K ships nearest the ai
 
 ### 4.2 Keeping the beam rare (applies to P, and to W or T if chosen)
 
+Decided: R1 (the kill meter) was not chosen. The beam left the pickup rotation and is earned by beam shards: a shard appears every tenth wave away from the player and waits, and the sixth shard starts 8 seconds of beam time (every live seat has the beam, spawning surges), after which the previous weapon returns and the count resets (`src/game/beam-shards.js`, `beam-time.js`, `beam-time-seats.js`). R2 to R4 below stay as the options that were weighed.
+
 - R1 Earned meter (recommended): remove the beam from the 20 s pickup rotation. A "convergence meter" fills from scored kills (for example 1.0 per 600 normalized kill credit; the `ScoreKeeper` already normalizes by capacity). When full, a ring around the swarm pulses and the beam is available on press (hold fire plus a button, or the next fire). Duration 5 s, then the meter empties. About one beam per 60 to 90 seconds of strong play. No pickup, so it cannot be farmed from pickup luck, and it rewards kill rate.
 - R2 Rare pickup: keep the pickup but only as a milestone spawn (the director already has milestone spawns, `PickupDirector.update`), and remove it from the rotation and from pity spawns. Simplest to implement (edit `PICKUP_TYPE_NAMES`, add a milestone-only slot), but luck-driven.
 - R3 Sacrifice: the beam costs ships (each second of beam sacrifices 1 of the contributing ships, burned as fuel). Dramatic and self-balancing against the large swarm, but punishes growth the player just earned and fights the "one ship per 100 kills" reward loop.
@@ -164,7 +166,7 @@ Steps, each leaves the game playable and is covered by pure-JS tests where possi
 1. Rate law and one-projectile base gun. New `src/game/swarm-fire-rate.js` (pure): aggregate and per-ship interval from kind, tier, N, exponent. `SwarmFire.fireShips` spawns one projectile per ship (base gun only, others fall back to the old template path temporarily). Remove tokens. Add a `FireBudget` (live-estimate cap 4096). Lab knob for the exponent.
 2. Per-kind recipes for scatter, pulse, sidewinders: `shotRecipe` in `weapons.js`/`weaponTypes.js`, tier meaning per 3.2, aggregate caps for pulse and sidewinders. Delete `captureTemplate`, `appendVolley`, the volley constants. Update `tests/game` for swarm-fire and weapons.
 3. Beam as P. `SwarmFire` computes contributors and `halfWidth`; ramp and minimum contributors; ships stop firing projectiles while channeling. Renderer draws capped tethers (`src/render/swarm.js`). No GPU change. Lab knobs: per-ship width, pool radius.
-4. Convergence meter (R1). `ScoreKeeper` exposes kill credit; new `src/game/convergence-meter.js`; beam leaves `PICKUP_TYPE_NAMES` (rotation becomes 4 weapons plus time warp, so the time warp is 1 in 5 pickups; check the R31 ruling about 1 in 6); HUD meter element in `hud.js`.
+4. Convergence meter (R1; replaced by beam shards and beam time, see 4.2). `ScoreKeeper` exposes kill credit; new `src/game/convergence-meter.js`; beam leaves `PICKUP_TYPE_NAMES` (rotation becomes 4 weapons plus time warp, so the time warp is one slot in five pickups; owner ruling R31 said one in six, which changed because the beam left the rotation, and the owner was told); HUD meter element in `hud.js`.
 5. Rail gunners (T2): `PlayerSwarm` gunner flag, station-keeping in `swarm-flocking.js`, heading exemption in `swarm-facing.js`, renderer tick. Retire turret rotation emission in `distribute`.
 6. Optional: Scythes (S2) as a new weapon taking the beam's rotation slot: new shader entry, kind, render path, reserved slot range, and a measured worst-frame check at 500k agents before shipping.
 
@@ -194,10 +196,10 @@ Steps, each leaves the game playable and is covered by pure-JS tests where possi
 3. Does tier mean per-kind (recommended) or a uniform rule (count, size or rate)? Default: per-kind.
 4. Are rail turrets abstract emitters (keep) or gunner ships that turn outward (T2)? Default: gunners, but later (step 5).
 5. Beam model: pooled (P), scythes (S), web (W) or thread lasers (T). Default: P first; consider S as a separate weapon.
-6. Beam rarity: earned meter (R1), milestone pickup (R2), sacrifice (R3) or formation delay (R4). Default: R1 with a 5 s duration, roughly one every 60 to 90 s of strong play.
+6. Beam rarity: earned meter (R1), milestone pickup (R2), sacrifice (R3) or formation delay (R4). Answered (GitHub issue 10, question 1): none of these; the beam left the rotation for a rarer trigger, six shards and then 8 s of beam time.
 7. If scythes: length 4 units (quarter of the width) or quarter of the height (2.25 units)? Maximum active blades 64 desktop, 16 phone? Default: 4 units, caps as stated, and only after a measured GPU check.
 8. Should pulse and sidewinders keep an aggregate cap independent of swarm size (recommended for ring cost), accepting that a bigger swarm does not fire more of them, only wider?
-9. While channeling the beam, do ships stop firing projectiles? Default: yes (clear identity, bounded pool).
+9. While channeling the beam, do ships stop firing projectiles? Answered (GitHub issue 10, question 2): ships do not fire base shots under the beam; the single centroid beam per seat stays as it is, and beam time keeps the rail turrets firing.
 
 ## 10. Sources
 
