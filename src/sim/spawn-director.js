@@ -22,6 +22,10 @@
 // Partner (co-op): with context.partner, a second player { x, y, aimX, aimY }, every distance to
 // the player is to the nearer of the two and a gate in either player's aim lane is in the lane;
 // without one every expression is the solo one and the same random numbers are drawn.
+// Wave counter: waveSequence counts the waves that started since reset (never in continuous mode),
+// so the game can tell a new wave from the last one.
+// Surge (the beam time event): with the update option surging, every open gate that is not closing
+// emits between waves as in the first fill, so the surge pours from all gates.
 // Time is the summed deltaSeconds of update (injected), randomness the injected random.
 // Bounds: gates place, drift and bounce inside context.bounds (the playable world bounds,
 // Game.worldBounds; WORLD_BOUNDS by default).
@@ -168,6 +172,7 @@ export class SpawnDirector {
     this.activeWave = null;
     this.filling = false;
     this.continuous = false;
+    this.waveSequence = 0;
   }
 
   // options: playerX, playerY (world units, the bounds center when omitted), safeDistance (the
@@ -177,11 +182,11 @@ export class SpawnDirector {
   // unit vector or zero for none), bounds (the playable rectangle { minX, minY, maxX, maxY, width,
   // height }, WORLD_BOUNDS when omitted), view (the camera's { centerX, centerY, width, height }, or
   // null for none; see the header's view ring), partner (a second player { x, y, aimX, aimY }, or
-  // null for none; see the header).
+  // null for none; see the header), surging (every open gate emits; see the header).
   update(deltaSeconds, {
     bounds = WORLD_BOUNDS, playerX = (bounds.minX + bounds.maxX) / 2, playerY = (bounds.minY + bounds.maxY) / 2,
     safeDistance = 0, filling = false, shares = [], continuous = false, aimX = 0, aimY = 0, view = null,
-    partner = null,
+    partner = null, surging = false,
   } = {}) {
     const context = { playerX, playerY, safeDistance, shares, aimX, aimY, bounds, view, partner };
     this.filling = filling;
@@ -203,7 +208,7 @@ export class SpawnDirector {
     this.gates.forEach((gate) => {
       gate.open = this.envelope(gate);
       const emitsWave = this.activeWave?.gate === gate;
-      gate.emit = gate.open >= 1 && !gate.closing && (filling || continuous || emitsWave) ? 1 : 0;
+      gate.emit = gate.open >= 1 && !gate.closing && (filling || continuous || surging || emitsWave) ? 1 : 0;
       gate.telegraph = this.nextGate === gate ? clamp(1 - this.waveClock / TELEGRAPH_SECONDS, 0, 1) : 0;
     });
   }
@@ -244,6 +249,7 @@ export class SpawnDirector {
       this.nextGate = null;
       if (gate !== null) {
         this.activeWave = { gate, remaining: this.schedule.waveSeconds };
+        if (!this.continuous) this.waveSequence += 1;
         this.lastWaveGate = gate;
       }
     }

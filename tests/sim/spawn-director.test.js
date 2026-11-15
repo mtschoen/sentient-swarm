@@ -399,3 +399,43 @@ test('a gate the partner walks into starts closing', () => {
   assert.equal(alone.gates[0].closing, false);
   assert.equal(target.closing, true);
 });
+
+function stepCoarsely(director, seconds, options = {}) {
+  const steps = Math.round(seconds / 0.1);
+  for (let step = 0; step < steps; step += 1) director.update(0.1, { ...playerAt(step * 0.1), safeDistance: SAFE_DISTANCE, shares: EQUAL_SHARES, ...options });
+}
+
+test('waveSequence is 0 after construction and reset and counts each wave that starts', () => {
+  const director = new SpawnDirector({ random: seededRandom() });
+  assert.equal(director.waveSequence, 0);
+  stepCoarsely(director, 1.7);
+  assert.equal(director.waveSequence, 1);
+  director.reset();
+  assert.equal(director.waveSequence, 0);
+  stepCoarsely(director, 9.7);
+  assert.equal(director.waveSequence, 6);
+});
+
+test('continuous mode never increments waveSequence', () => {
+  const director = new SpawnDirector({ random: seededRandom() });
+  stepCoarsely(director, 9.7, { continuous: true });
+  assert.equal(director.waveSequence, 0);
+});
+
+test('a wave skipped because no gate can emit does not increment waveSequence', () => {
+  const director = new SpawnDirector({ random: seededRandom() });
+  stepCoarsely(director, 5, { safeDistance: 1000 });
+  assert.equal(director.waveSequence, 0);
+});
+
+test('surging makes every open gate emit between waves, and not surging leaves them quiet', () => {
+  const quiet = new SpawnDirector({ random: seededRandom() });
+  stepCoarsely(quiet, 0.5, { surging: false });
+  assert.ok(quiet.gates.length > 0);
+  quiet.gates.forEach((gate) => assert.equal(gate.emit, 0));
+  const surging = new SpawnDirector({ random: seededRandom() });
+  stepCoarsely(surging, 0.5, { surging: true });
+  surging.gates.filter((gate) => gate.open >= 1 && !gate.closing).forEach((gate) => assert.equal(gate.emit, 1));
+  assert.ok(surging.gates.some((gate) => gate.emit === 1));
+  assert.equal(surging.gates.filter((gate) => gate.open >= 1 && !gate.closing).every((gate) => gate.emit === 1), true);
+});

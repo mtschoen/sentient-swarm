@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_RAMP, SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../../src/sim/spawner.js';
+import { BEAM_TIME_SURGE_CEILING_FRACTION, DEFAULT_BEAM_TIME_SURGE, DEFAULT_RAMP, MAXIMUM_BEAM_TIME_SURGE, SPEC_SPAWN_DISTANCE_FRACTION, SpawnPressure } from '../../src/sim/spawner.js';
 
 const CAPACITY = 60000;
 const EQUAL_SHARES = [0.2, 0.2, 0.2, 0.2, 0.2];
@@ -336,4 +336,68 @@ test('DEFAULT_RAMP pins every tuned value', () => {
   });
   assert.equal(Object.isFrozen(DEFAULT_RAMP), true);
   assert.equal(SPEC_SPAWN_DISTANCE_FRACTION, 0.25);
+});
+
+const SURGE_CAPACITY = 262144;
+
+function surgePressure(surge, elapsedFraction) {
+  const pressure = new SpawnPressure({ capacity: SURGE_CAPACITY });
+  pressure.setSurge(surge);
+  pressure.elapsed = pressure.ramp.rampSeconds * elapsedFraction;
+  return pressure;
+}
+
+test('surge constants and the default surge of 1', () => {
+  assert.equal(DEFAULT_BEAM_TIME_SURGE, 3);
+  assert.equal(MAXIMUM_BEAM_TIME_SURGE, 6);
+  assert.equal(BEAM_TIME_SURGE_CEILING_FRACTION, 0.4);
+  assert.equal(new SpawnPressure({ capacity: SURGE_CAPACITY }).surge, 1);
+});
+
+test('surge multiplies the target, up to the ceiling', () => {
+  near(surgePressure(3, 1).targetAlive, SURGE_CAPACITY * 0.3, 'surge 3 at progress 1');
+  near(surgePressure(3, 0).targetAlive, 3 * 0.01 * SURGE_CAPACITY, 'surge 3 at progress 0');
+  near(surgePressure(6, 1).targetAlive, SURGE_CAPACITY * 0.4, 'surge 6 at progress 1 is clamped');
+  near(surgePressure(1, 1).targetAlive, SURGE_CAPACITY * 0.1, 'surge 1 is the base');
+});
+
+test('setSurge rejects values outside [1, 6]', () => {
+  const pressure = new SpawnPressure({ capacity: SURGE_CAPACITY });
+  for (const value of [0.5, 7, 10, NaN, Infinity]) assert.throws(() => pressure.setSurge(value), RangeError);
+  assert.equal(pressure.surge, 1);
+  pressure.setSurge(6);
+  assert.equal(pressure.surge, 6);
+});
+
+test('setCapacity and reset keep the surge', () => {
+  const pressure = new SpawnPressure({ capacity: SURGE_CAPACITY });
+  pressure.setSurge(3);
+  pressure.setCapacity(131072);
+  pressure.reset();
+  assert.equal(pressure.surge, 3);
+});
+
+test('the refill allowance rate is multiplied by the surge', () => {
+  // Equal targets: surge 3 at the floor (3 * 0.01) against surge 1 with a floor of 0.03.
+  function allowedAfterOneSecond(pressure) {
+    pressure.filling = false;
+    pressure.refillAllowance = 0;
+    return { target: pressure.targetAlive, allowed: pressure.stepCap(1, 1e9, null) };
+  }
+  const base = allowedAfterOneSecond(new SpawnPressure({ capacity: SURGE_CAPACITY, floorFraction: 0.03 }));
+  const surgedPressure = new SpawnPressure({ capacity: SURGE_CAPACITY });
+  surgedPressure.setSurge(3);
+  const surged = allowedAfterOneSecond(surgedPressure);
+  near(surged.target, base.target, 'targets match');
+  assert.ok(base.allowed > 0);
+  assert.ok(Math.abs(surged.allowed - 3 * base.allowed) <= 3, `surged ${surged.allowed} against base ${base.allowed}`);
+});
+
+test('the per-frame cap still bounds a step under a surge', () => {
+  const pressure = surgePressure(6, 1);
+  const counts = pressure.update(1, statsWith(0, 1), EQUAL_SHARES, 1);
+  assert.ok(total(counts) <= Math.floor(SURGE_CAPACITY / 60));
+  pressure.filling = false;
+  const refill = pressure.update(100, statsWith(0, 2), EQUAL_SHARES, 2);
+  assert.ok(total(refill) <= Math.floor(SURGE_CAPACITY / 60));
 });

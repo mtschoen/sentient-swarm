@@ -37,6 +37,11 @@
 // the same deficit again and the alive count overshoots the target (about 1.33 times at a lag of
 // two steps on a cold start). A request the GPU could not fully place only makes the estimate
 // high until newer stats arrive, which errs toward spawning less.
+// Surge (the beam time event): setSurge(strength) multiplies the alive target and the refill
+// allowance rate by strength for as long as the game sets it (every step; 1 is no surge). The
+// surged target is capped at BEAM_TIME_SURGE_CEILING_FRACTION (40 percent) of capacity, or at the
+// plain target when that is higher, against the 10 percent R37 ramp ceiling: intentionally above
+// it for the 8 seconds of the event. The frame cap still bounds every step.
 import { SPECIES_COUNT } from './layout.js';
 
 // A frame spawns at most capacity / SPAWN_CAP_DIVISOR agents (the first fill runs at this cap alone).
@@ -52,6 +57,12 @@ export const DEFAULT_RAMP = Object.freeze({
   spawnDistanceStartFraction: 0.4,
   refillFractionPerSecond: 0.15,
 });
+
+// The beam time spawn surge: the strength the game uses by default, the highest strength setSurge
+// accepts, and the share of capacity the surged target never exceeds (unless the plain target does).
+export const DEFAULT_BEAM_TIME_SURGE = 3;
+export const MAXIMUM_BEAM_TIME_SURGE = 6;
+export const BEAM_TIME_SURGE_CEILING_FRACTION = 0.4;
 
 // The spec's minimum spawn distance from the player, as a fraction of the arena width: the end of
 // the spawn distance ramp. The start may lie up to MAXIMUM_SPAWN_DISTANCE_FRACTION, where the
@@ -129,6 +140,20 @@ export class SpawnPressure {
     // Requested totals keyed by the frameSequence of the step they were requested for.
     this.requests = new Map();
     this.newestStats = null;
+    // Beam time multiplier on the target and the refill rate; 1 is no surge. Set every step by the game.
+    this.surgeStrength = 1;
+  }
+
+  // Strength in [1, MAXIMUM_BEAM_TIME_SURGE]; throws RangeError otherwise.
+  setSurge(strength) {
+    if (!(Number.isFinite(strength) && strength >= 1 && strength <= MAXIMUM_BEAM_TIME_SURGE)) {
+      throw new RangeError(`SpawnPressure surge must lie in [1, ${MAXIMUM_BEAM_TIME_SURGE}], got ${strength}`);
+    }
+    this.surgeStrength = strength;
+  }
+
+  get surge() {
+    return this.surgeStrength;
   }
 
   // For the lab sliders: replaces the given ramp parameters (any subset of DEFAULT_RAMP's names)
@@ -144,7 +169,9 @@ export class SpawnPressure {
   }
 
   get targetAlive() {
-    return this.capacity * lerp(this.ramp.floorFraction, this.ramp.ceilingFraction, this.rampProgress);
+    const base = this.capacity * lerp(this.ramp.floorFraction, this.ramp.ceilingFraction, this.rampProgress);
+    if (this.surgeStrength === 1) return base;
+    return Math.min(base * this.surgeStrength, Math.max(base, this.capacity * BEAM_TIME_SURGE_CEILING_FRACTION));
   }
 
   // Multiplier on every species' seek weight for this step.
@@ -176,7 +203,8 @@ export class SpawnPressure {
   stepCap(deltaSeconds, deficit, wave) {
     if (this.filling) return this.maximumPerFrame;
     const bankLimit = wave && deficit > 0 ? Math.max(1, wave.burstFraction * this.targetAlive) : 1;
-    this.refillAllowance = Math.min(this.refillAllowance, bankLimit) + this.ramp.refillFractionPerSecond * this.targetAlive * deltaSeconds;
+    this.refillAllowance = Math.min(this.refillAllowance, bankLimit)
+      + this.ramp.refillFractionPerSecond * this.surgeStrength * this.targetAlive * deltaSeconds;
     if (!wave) return Math.min(this.maximumPerFrame, Math.floor(this.refillAllowance));
     if (!wave.emitting) return 0;
     const releasedShare = Math.min(1, deltaSeconds / Math.max(deltaSeconds, wave.remainingSeconds));
