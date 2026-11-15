@@ -74,6 +74,10 @@ test('a shard is placed off screen of the unzoomed view while the solo zoom has 
   simulation.densityFunction = () => 1;
   game.setSoloZoomSetting('enabled', true);
   game.setSoloZoomSetting('crowdReference', SOLO_ZOOM_RANGES.crowdReference[0]);
+  game.setSoloZoomSetting('maximum', 2.5);
+  game.setSoloZoomSetting('punchIn', 1);
+  game.setSoloZoomSetting('rateLimit', 2);
+  game.setSoloZoomSetting('smoothSeconds', 0.2);
   runFor(game, 10);
   assert.ok(game.camera.zoom > 1.3, `zoom ${game.camera.zoom}`);
   game.beamShards.onWaves = () => 1;

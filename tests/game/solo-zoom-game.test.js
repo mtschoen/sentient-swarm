@@ -7,13 +7,23 @@ import { STEP, SWARM_WIPE_MASK, createGame, hitNow, runFor, stats } from './game
 
 const MINIMUM_REFERENCE = SOLO_ZOOM_RANGES.crowdReference[0];
 
+// The shipped defaults are calm (owner ruling 2026-11-15); scenarios that need a quick, deep punch-in set it.
+function strongZoom(game) {
+  game.setSoloZoomSetting('enabled', true);
+  game.setSoloZoomSetting('crowdReference', MINIMUM_REFERENCE);
+  game.setSoloZoomSetting('maximum', 2.5);
+  game.setSoloZoomSetting('punchIn', 1);
+  game.setSoloZoomSetting('rateLimit', 2);
+  game.setSoloZoomSetting('smoothSeconds', 0.2);
+}
+
 // A started solo game; the density function and the knobs are set by the scenario.
 async function startedGame({ enabled = true, density = () => 1 } = {}) {
   const harness = await createGame();
   const { game, simulation } = harness;
   simulation.densityFunction = density;
   game.setSoloZoomSetting('enabled', enabled);
-  if (enabled) game.setSoloZoomSetting('crowdReference', MINIMUM_REFERENCE);
+  if (enabled) strongZoom(game);
   game.start();
   game.update(STEP);
   return harness;
@@ -40,8 +50,8 @@ test('a fresh game has the solo zoom on, and a crowded default solo game zooms i
   assert.equal(harness.game.soloZoom.settings.enabled, true);
   harness.simulation.densityFunction = () => 1e9;
   harness.game.start();
-  runFor(harness.game, 10);
-  assert.ok(harness.game.camera.zoom > 1.5, `zoom ${harness.game.camera.zoom}`);
+  runFor(harness.game, 30);
+  assert.ok(harness.game.camera.zoom > 1.2 && harness.game.camera.zoom <= 1.3, `zoom ${harness.game.camera.zoom}`);
 });
 
 test('with the solo zoom turned off the game never leaves zoom 1 in solo, whatever the density', async () => {
@@ -82,8 +92,7 @@ test('two live seats ignore the knob', async () => {
     const harness = await createGame();
     harness.simulation.densityFunction = () => 1;
     if (enabled) {
-      harness.game.setSoloZoomSetting('enabled', true);
-      harness.game.setSoloZoomSetting('crowdReference', MINIMUM_REFERENCE);
+      strongZoom(harness.game);
     }
     harness.game.setPlayerCount(2);
     harness.game.start();
@@ -105,8 +114,7 @@ test('a down seat hands over to the solo controller without a jump', async () =>
   const harness = await createGame();
   const { game, simulation } = harness;
   simulation.densityFunction = () => 1;
-  game.setSoloZoomSetting('enabled', true);
-  game.setSoloZoomSetting('crowdReference', MINIMUM_REFERENCE);
+  strongZoom(game);
   game.setPlayerCount(2);
   game.start();
   runFor(game, 1);

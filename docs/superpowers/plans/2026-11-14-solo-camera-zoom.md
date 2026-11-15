@@ -1,4 +1,4 @@
-Status: Shipped on by default 2026-11-14 at the owner's request
+Status: Shipped on by default 2026-11-14 at the owner's request; calmed 2026-11-15: maximum 1.3, punch-in 0.5, crowd reference 1, smoothing 1.2 s, rate 0.35
 
 # Solo Camera Zoom (lab knobs) Implementation Plan
 

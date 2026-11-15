@@ -39,16 +39,16 @@ test('nothing outside the lab files sets enabled on the solo zoom', () => {
   assert.deepEqual(offenders, []);
 });
 
-test('the shipped solo zoom defaults are on at the strongest settings', () => {
+test('the shipped solo zoom defaults are on and calm (owner ruling 2026-11-15)', () => {
   assert.deepEqual({ ...SOLO_ZOOM_DEFAULTS }, {
     enabled: true,
     minimum: 0.5,
-    maximum: 2.5,
-    punchIn: 1,
+    maximum: 1.3,
+    punchIn: 0.5,
     pullOut: 1,
-    smoothSeconds: 0.2,
-    rateLimit: 2,
-    crowdReference: 0.25,
+    smoothSeconds: 1.2,
+    rateLimit: 0.35,
+    crowdReference: 1,
     fitFraction: 1.25,
   });
 });

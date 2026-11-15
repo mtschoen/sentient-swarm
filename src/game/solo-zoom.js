@@ -7,18 +7,18 @@
 // travel, needs the wish ZOOM_HYSTERESIS away; carrying on the same way follows the wish all the
 // way, so a settled pressure is reached exactly instead of stopping short), and the output is
 // capped so the whole swarm stays in view (that cap is output-only). The camera
-// spring applies smoothSeconds; the shipped default is on at the strongest settings (the owner's ruling
-// 2026-11-14), and the lab can change every knob.
+// spring applies smoothSeconds; the shipped default is on and calm (the owner's rulings
+// 2026-11-14 and 2026-11-15), and the lab can change every knob.
 export const SOLO_ZOOM_DEFAULTS = Object.freeze({
   enabled: true,
   minimum: 0.5,
-  maximum: 2.5,
-  punchIn: 1,
+  maximum: 1.3,
+  punchIn: 0.5,
   pullOut: 1,
-  smoothSeconds: 0.2,
-  rateLimit: 2,
-  // A tenth of the measured heavy-crowd density (2.5 at capacity 524288), so modest crowds already read as full.
-  crowdReference: 0.25,
+  smoothSeconds: 1.2,
+  rateLimit: 0.35,
+  // 40 percent of the measured heavy-crowd density (2.5 at capacity 524288): only a real crowd reads as full.
+  crowdReference: 1,
   // Measured: 12 ships hover within a peak radius of 1.234 world units of the focus, so with the
   // 16:9 view (shorter half 4.5) a fraction of 1.25 allows 4.5 * 1.25 / (1.234 + 1) = 2.52, the maximum.
   fitFraction: 1.25,
