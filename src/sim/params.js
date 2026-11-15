@@ -1,7 +1,8 @@
 // Packs the SimParams uniform. Byte layout matches the table at the top of common.wgsl.
 import { SPECIES_COUNT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH } from './layout.js';
 
-export const SIM_PARAMS_BYTES = 256;
+// 256 bytes of fields plus the f32 seekRange at 256, padded to the struct's 16-byte alignment.
+export const SIM_PARAMS_BYTES = 272;
 
 // Particles per kill (owner ruling R12, task C0b); the kill passes scale it down only when a step's
 // kills would outrun the free particle slots.
@@ -33,6 +34,10 @@ export const MAXIMUM_WALL_STIFFNESS = 160;
 // Straight seek fades to zero inside this distance from the player (0 turns the fade off).
 export const DEFAULT_COMFORT_RADIUS = 1;
 export const MAXIMUM_COMFORT_RADIUS = 4;
+// Enemy seek fades to zero at this distance (world units) from the nearest seek point, full inside 0.6 of it
+// (lab only; the game never sets it). 0 is unlimited, the default: seek is as it always was.
+export const DEFAULT_SEEK_RANGE = 0;
+export const MAXIMUM_SEEK_RANGE = 40;
 // Gate table rows in SimParams (MAXIMUM_SPAWN_GATES in spawn-director.js).
 export const SIM_PARAMS_GATES = 4;
 
@@ -97,12 +102,18 @@ export function validatedComfortRadius(radius) {
   return validatedRange('comfortRadius', radius, MAXIMUM_COMFORT_RADIUS);
 }
 
+export function validatedSeekRange(range) {
+  return validatedRange('seekRange', range, MAXIMUM_SEEK_RANGE);
+}
+
 const FLOAT_FIELDS = { dt: 0, time: 4, neighborRadius: 16, cellSize: 28, debugKillRadius: 80, playerRadius: 92 };
 // The projectile step's dt (owner ruling R31: full speed while a time warp slows the swarm); dt when omitted.
 const PROJECTILE_DT_OFFSET = 236;
 // The playable rectangle (Simulation.setWorldBounds) as vec4f (minX, minY, maxX, maxY); the whole
 // world (WORLD_BOUNDS) when omitted.
 const WORLD_BOUNDS_OFFSET = 240;
+// The seek range (Simulation.setSeekRange), f32; 0 is unlimited.
+const SEEK_RANGE_OFFSET = 256;
 const UNSIGNED_FIELDS = {
   gridColumns: 20, gridRows: 24, capacity: 32, frameSequence: 84,
   playerInvulnerable: 96, acknowledgedHitSequence: 100, killAllRequested: 104,
@@ -164,6 +175,7 @@ export function packSimParams(values) {
   view.setFloat32(COMFORT_RADIUS_OFFSET, values.comfortRadius ?? DEFAULT_COMFORT_RADIUS, true);
   view.setUint32(COARSE_FIELD_PRESSURE_OFFSET, values.coarseFieldPressure ?? 1, true);
   view.setFloat32(PROJECTILE_DT_OFFSET, values.projectileDt ?? values.dt ?? 0, true);
+  view.setFloat32(SEEK_RANGE_OFFSET, values.seekRange ?? DEFAULT_SEEK_RANGE, true);
   const { minX, minY, maxX, maxY } = values.worldBounds ?? WORLD_BOUNDS;
   [minX, minY, maxX, maxY].forEach((value, component) => view.setFloat32(WORLD_BOUNDS_OFFSET + component * 4, value, true));
   // spawnGates: { gates: [{ x, y, radius, emit, species }], speciesBias } or none (wall band spawns).

@@ -46,7 +46,7 @@ import { DEFAULT_PARTICLE_CAPACITY, ParticlePool } from './particles.js';
 import { SHADER_CONSTANTS, SPECIES_COUNT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, agentBufferBytes, gridDimensions } from './layout.js';
 import {
   DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES,
-  DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, SIM_PARAMS_BYTES,
+  DEFAULT_SPAWN_BAND_WIDTH, DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, SIM_PARAMS_BYTES, DEFAULT_SEEK_RANGE, validatedSeekRange,
   packSimParams, validatedWorldBounds, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles,
   validatedKillFragmentParticles, validatedSpawnBandWidth, validatedSpawnDensityBias, validatedWallMargin,
   validatedWallStiffness,
@@ -168,6 +168,7 @@ export class Simulation {
     this.wallMargin = DEFAULT_WALL_MARGIN;
     this.wallStiffness = DEFAULT_WALL_STIFFNESS;
     this.comfortRadius = DEFAULT_COMFORT_RADIUS;
+    this.seekRange = DEFAULT_SEEK_RANGE;
     this.coarseFieldPressure = true;
     // The last step's gate table ({ gates, speciesBias } from SpawnDirector.spawnGates, or null for
     // wall band spawns); the gate renderer draws it.
@@ -372,6 +373,12 @@ export class Simulation {
     this.comfortRadius = validatedComfortRadius(radius);
   }
 
+  // Seek fades to zero at this distance from the nearest seek point, in [0, MAXIMUM_SEEK_RANGE]; 0 is
+  // unlimited (params.js). Lab only: the game never calls it. Throws RangeError and changes nothing.
+  setSeekRange(range) {
+    this.seekRange = validatedSeekRange(range);
+  }
+
   // false leaves the coarse-field pressure term (push toward lower density) out of steering.
   setCoarseFieldPressure(enabled) {
     this.coarseFieldPressure = Boolean(enabled);
@@ -466,6 +473,7 @@ export class Simulation {
       wallMargin: this.wallMargin,
       wallStiffness: this.wallStiffness,
       comfortRadius: this.comfortRadius,
+      seekRange: this.seekRange,
       coarseFieldPressure: this.coarseFieldPressure ? 1 : 0,
       playerRadius: this.playerContact?.radius ?? 0,
       playerInvulnerable: this.playerContact?.invulnerable ? 1 : 0,
@@ -604,6 +612,7 @@ export class Simulation {
     next.setWallMargin(this.wallMargin);
     next.setWallStiffness(this.wallStiffness);
     next.setComfortRadius(this.comfortRadius);
+    next.setSeekRange(this.seekRange);
     next.setCoarseFieldPressure(this.coarseFieldPressure);
     next.spawnGatesValue = this.spawnGatesValue;
     next.densityReadback.adopt(this.densityReadback);

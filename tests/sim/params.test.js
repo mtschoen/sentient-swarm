@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  DEFAULT_COMFORT_RADIUS, DEFAULT_DEATH_FLOOD_PARTICLES, SIM_PARAMS_GATES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH,
+  DEFAULT_COMFORT_RADIUS, DEFAULT_SEEK_RANGE, MAXIMUM_SEEK_RANGE, validatedSeekRange, DEFAULT_DEATH_FLOOD_PARTICLES, SIM_PARAMS_GATES, DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES, DEFAULT_SPAWN_BAND_WIDTH,
   DEFAULT_SPAWN_DENSITY_BIAS, DEFAULT_SPAWN_DISTANCE, DEFAULT_WALL_MARGIN, DEFAULT_WALL_STIFFNESS, MAXIMUM_COMFORT_RADIUS, MAXIMUM_DEATH_FLOOD_PARTICLES,
   MAXIMUM_KILL_BURST_PARTICLES, MAXIMUM_KILL_FRAGMENT_PARTICLES, MAXIMUM_WALL_MARGIN, MAXIMUM_WALL_STIFFNESS, SIM_PARAMS_BYTES,
   packSimParams, validatedComfortRadius, validatedDeathFloodParticles, validatedKillBurstParticles, validatedKillFragmentParticles,
@@ -10,7 +10,7 @@ import {
 import { WORLD_HEIGHT, WORLD_WIDTH, WORLD_BOUNDS } from '../../src/sim/layout.js';
 import { centeredViewBounds } from './centered-view-bounds.js';
 
-test('packSimParams produces the 256-byte uniform layout', () => {
+test('packSimParams produces the 272-byte uniform layout', () => {
   const buffer = packSimParams({
     dt: 0.5,
     gridColumns: 160,
@@ -20,7 +20,7 @@ test('packSimParams produces the 256-byte uniform layout', () => {
     playerPosition: [3, 4],
     spawnPerSpecies: [1, 2, 3, 4, 5],
   });
-  assert.equal(SIM_PARAMS_BYTES, 256);
+  assert.equal(SIM_PARAMS_BYTES, 272);
   assert.equal(SIM_PARAMS_BYTES % 16, 0);
   assert.equal(buffer.byteLength, SIM_PARAMS_BYTES);
   const view = new DataView(buffer);
@@ -178,21 +178,21 @@ test('every packSimParams field lands at its pinned byte offset with its type', 
     playerPosition: [12.5, 13.5], debugKillPosition: [14.5, 15.5],
     sameSpeciesCohesion: 0, seekScale: 0.25, spawnDistance: 0.375, killBurstParticles: 16,
     spawnBandWidth: 1.25, spawnDensityBias: 0.75, killFragmentParticles: 17, deathFloodParticles: 18,
-    wallMargin: 1.5, wallStiffness: 20.5, comfortRadius: 2.25, coarseFieldPressure: 0, projectileDt: 0.125,
+    wallMargin: 1.5, wallStiffness: 20.5, comfortRadius: 2.25, coarseFieldPressure: 0, projectileDt: 0.125, seekRange: 5.5,
     spawnPerSpecies: [21, 22, 23, 24, 25],
   }));
-  const floats = { 0: 1.5, 4: 2.5, 16: 3.5, 28: 4.5, 80: 5.5, 92: 6.5, 8: 12.5, 12: 13.5, 40: 14.5, 44: 15.5, 108: 0.25, 36: 0.375, 116: 1.25, 120: 0.75, 220: 1.5, 224: 20.5, 228: 2.25, 236: 0.125 };
+  const floats = { 0: 1.5, 4: 2.5, 16: 3.5, 28: 4.5, 80: 5.5, 92: 6.5, 8: 12.5, 12: 13.5, 40: 14.5, 44: 15.5, 108: 0.25, 36: 0.375, 116: 1.25, 120: 0.75, 220: 1.5, 224: 20.5, 228: 2.25, 236: 0.125, 256: 5.5 };
   const unsigned = { 20: 7, 24: 8, 32: 9, 84: 10, 96: 1, 100: 11, 104: 1, 88: 0, 112: 16, 124: 17, 216: 18, 232: 0, 48: 21, 52: 22, 56: 23, 60: 24, 64: 25 };
   for (const [offset, value] of Object.entries(floats)) assert.equal(view.getFloat32(Number(offset), true), value, `float at ${offset}`);
   for (const [offset, value] of Object.entries(unsigned)) assert.equal(view.getUint32(Number(offset), true), value, `u32 at ${offset}`);
 });
 
-test('the unwritten bytes stay zero: 68 to 79 padding, 160 and 164 to 191 gate rows when no gates are given, and the tail past 256 does not exist', () => {
+test('the unwritten bytes stay zero: 68 to 79 padding, 160 and 164 to 191 gate rows when no gates are given, and the tail past 272 does not exist', () => {
   const view = new DataView(packSimParams({ spawnPerSpecies: [1, 1, 1, 1, 1] }));
   for (let offset = 68; offset < 80; offset += 4) assert.equal(view.getUint32(offset, true), 0, `offset ${offset}`);
   for (let offset = 128; offset < 208; offset += 4) assert.equal(view.getUint32(offset, true), 0, `offset ${offset}`);
-  assert.equal(view.byteLength, 256);
-  assert.throws(() => view.getUint32(256, true), RangeError);
+  assert.equal(view.byteLength, 272);
+  assert.throws(() => view.getUint32(272, true), RangeError);
 });
 
 test('the packed defaults when nothing is given pin the omitted-field values by offset', () => {
@@ -210,6 +210,7 @@ test('the packed defaults when nothing is given pin the omitted-field values by 
   assert.equal(view.getFloat32(228, true), 1, 'comfortRadius');
   assert.equal(view.getUint32(232, true), 1, 'coarseFieldPressure');
   assert.equal(view.getFloat32(236, true), 0, 'projectileDt follows dt');
+  assert.equal(view.getFloat32(256, true), 0, 'seekRange is unlimited');
   assert.equal(DEFAULT_DEATH_FLOOD_PARTICLES, 480);
   assert.equal(SIM_PARAMS_GATES, 4);
 });
@@ -273,4 +274,12 @@ test('packSimParams writes the second player at 68 and 72 and leaves 68 to 79 ze
   assert.deepEqual([view.getFloat32(72, true), view.getFloat32(76, true)], [20, 7]);
   const solo = new DataView(packSimParams({ secondPlayerPosition: null }));
   assert.deepEqual([68, 72, 76].map((offset) => solo.getUint32(offset, true)), [0, 0, 0]);
+});
+
+test('the seek range validator accepts 0 to its maximum and rejects the rest; the default is unlimited', () => {
+  assert.equal(DEFAULT_SEEK_RANGE, 0);
+  assert.equal(MAXIMUM_SEEK_RANGE, 40);
+  assert.equal(validatedSeekRange(0), 0);
+  assert.equal(validatedSeekRange(MAXIMUM_SEEK_RANGE), 40);
+  for (const bad of [-0.01, 40.01, Number.NaN]) assert.throws(() => validatedSeekRange(bad), RangeError);
 });
