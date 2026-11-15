@@ -17,10 +17,14 @@ function swarmRadiusAround(seat, focus) {
   return largest;
 }
 
-// The target zoom is held (no pressure sampling, no controller state change) during a bomb, while
-// the time warp eases, and outside Playing (Dying and Respawning keep the last zoom).
+// A bomb holds the target for this many seconds of game time: the density map only shows the clear
+// several updates later (it refreshes every 15 steps), so a one-update hold would pull out after it.
+export const SOLO_ZOOM_BOMB_HOLD_SECONDS = 1;
+
+// The target zoom is held (no pressure sampling, no controller state change) for
+// SOLO_ZOOM_BOMB_HOLD_SECONDS after a bomb, while the time warp eases, and outside Playing (Dying and Respawning keep the last zoom).
 function holds(game) {
-  return game.bombedThisUpdate || (game.timeWarp.active && game.timeWarp.strength < 1) || game.run.phase !== RunPhase.Playing;
+  return game.bombHoldRemaining > 0 || (game.timeWarp.active && game.timeWarp.strength < 1) || game.run.phase !== RunPhase.Playing;
 }
 
 export function soloZoomOptions(game, deltaSeconds) {

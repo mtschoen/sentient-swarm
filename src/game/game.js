@@ -96,7 +96,7 @@ import { MAXIMUM_PLAYER_SEATS, SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOU
 import { Camera, bombRadiusForView, fitZoom, framingCenter } from './camera.js';
 import { SeatRevival } from './seat-revival.js';
 import { SoloZoomController } from './solo-zoom.js';
-import { easeOutLimits, soloZoomOptions } from './solo-zoom-step.js';
+import { SOLO_ZOOM_BOMB_HOLD_SECONDS, easeOutLimits, soloZoomOptions } from './solo-zoom-step.js';
 import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, reviveSeats, seatStarts, tickInvulnerability, uploadSwarms } from './seats.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
@@ -174,10 +174,10 @@ export class Game {
     // The renderer draws around this camera (Viewport.setCamera with camera.sample); followCamera
     // moves it every update.
     this.camera = new Camera({ centerX: WORLD_WIDTH / 2, centerY: WORLD_HEIGHT / 2 });
-    // Solo zoom (lab knobs, default off), forced off by reduced motion; bombedThisUpdate holds its target.
+    // Solo zoom (lab knobs, default off), forced off by reduced motion; bombHoldRemaining (seconds of game time left) holds its target after a bomb.
     this.soloZoom = new SoloZoomController();
     this.reducedMotion = false;
-    this.bombedThisUpdate = false;
+    this.bombHoldRemaining = 0;
     // One seat per player; the first is the solo player.
     this.random = random;
     this.seats = [new PlayerSeat({ index: 0, random, bounds: this.worldBounds })];
@@ -374,6 +374,7 @@ export class Game {
     const view = { viewWidth: this.viewSize.width, viewHeight: this.viewSize.height, bounds: this.worldBounds };
     if (cut) {
       this.soloZoom.reset();
+      this.bombHoldRemaining = 0;
       this.camera.cut(focus.x, focus.y, { ...view, zoom: fitZoom(focuses, view.viewWidth, view.viewHeight) });
       return;
     }
@@ -479,11 +480,11 @@ export class Game {
       this.updateGameOver(deltaSeconds, seats.some((seat, index) => firingPressed[index] || (inputs[index].bomb && !seat.bombHeld)));
     }
 
-    this.bombedThisUpdate = false;
+    this.bombHoldRemaining = Math.max(0, this.bombHoldRemaining - deltaSeconds);
     seats.forEach((seat, index) => {
       const pressed = seat.bombEdge(inputs[index]);
       if (pressed && !seat.down && this.run.useBomb(seat.point)) {
-        this.bombedThisUpdate = true;
+        this.bombHoldRemaining = SOLO_ZOOM_BOMB_HOLD_SECONDS;
         // The bomb clears around the swarm out past the view's corners (bombRadiusForView), not the whole world.
         const center = seat.aliveCount > 0 ? seat.centroid : seat.point;
         this.simulation.requestRadialKill(center.x, center.y, bombRadiusForView(this.viewSize.width, this.viewSize.height));

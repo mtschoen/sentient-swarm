@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bombRadiusForView } from '../../src/game/camera.js';
 import { SOLO_ZOOM_RANGES } from '../../src/game/solo-zoom.js';
+import { SOLO_ZOOM_BOMB_HOLD_SECONDS } from '../../src/game/solo-zoom-step.js';
 import { STEP, SWARM_WIPE_MASK, createGame, hitNow, runFor, stats } from './game-harness.js';
 
 const MINIMUM_REFERENCE = SOLO_ZOOM_RANGES.crowdReference[0];
@@ -111,22 +112,47 @@ test('a down seat hands over to the solo controller without a jump', async () =>
   assert.ok(Math.abs(game.soloZoom.lastZoom - 1) < 0.01, `lastZoom ${game.soloZoom.lastZoom}`);
 });
 
-test('a bomb and an easing time warp hold the target instead of updating it', async () => {
-  const { game, input } = await startedGame();
-  runFor(game, 5);
+function countCalls(game) {
   const calls = { update: 0, hold: 0 };
   const { update, hold } = game.soloZoom;
   game.soloZoom.update = (...args) => { calls.update += 1; return update.apply(game.soloZoom, args); };
   game.soloZoom.hold = (...args) => { calls.hold += 1; return hold.apply(game.soloZoom, args); };
+  return calls;
+}
+
+test('a bomb holds the target for a window of game time, then the zoom is free', async () => {
+  const { game, simulation, input } = await startedGame();
+  runFor(game, 10);
+  // The camera spring still closes in on the held target, so the target is what must not move.
+  const zoomed = game.soloZoom.lastZoom;
+  assert.ok(zoomed > 1.3);
+  const calls = countCalls(game);
   input.state.bomb = true;
   game.update(STEP);
-  assert.deepEqual(calls, { update: 0, hold: 1 });
   input.state.bomb = false;
-  game.update(STEP);
-  assert.deepEqual(calls, { update: 1, hold: 1 });
+  assert.deepEqual(calls, { update: 0, hold: 1 });
+  // The clear shows in the density map a few updates later.
+  simulation.densityFunction = () => 0;
+  const windowSteps = Math.round(SOLO_ZOOM_BOMB_HOLD_SECONDS / STEP);
+  for (let step = 0; step < windowSteps - 2; step += 1) {
+    game.update(STEP);
+    assert.ok(Math.abs(game.soloZoom.lastZoom - zoomed) < 1e-6, `step ${step}: target ${game.soloZoom.lastZoom}`);
+    assert.ok(Math.abs(game.camera.zoom - zoomed) < 0.01, `step ${step}: zoom ${game.camera.zoom}`);
+  }
+  assert.equal(calls.update, 0);
+  runFor(game, 0.2);
+  assert.ok(calls.update > 0);
+  runFor(game, 10);
+  assert.ok(game.camera.zoom < zoomed - 0.1, `zoom ${game.camera.zoom}`);
+});
+
+test('an easing time warp holds the target instead of updating it', async () => {
+  const { game } = await startedGame();
+  runFor(game, 5);
+  const calls = countCalls(game);
   game.timeWarp.start();
   game.update(STEP);
-  assert.deepEqual(calls, { update: 1, hold: 2 });
+  assert.deepEqual(calls, { update: 0, hold: 1 });
   runFor(game, 0.5);
   const holdsAfterRamp = calls.hold;
   game.update(STEP);
