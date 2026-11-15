@@ -1,3 +1,4 @@
+// Over 500 lines on purpose: one co-op scenario suite sharing a single harness and scripted-stats helpers; splitting it would duplicate them.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

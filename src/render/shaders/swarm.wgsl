@@ -40,8 +40,11 @@ const MARKER_RADIUS: f32 = 0.12;
 // Local hull scale at shipSize 1: the dart's nose is SHIP_SCALE * 0.3 ahead of its centre.
 const SHIP_SCALE: f32 = 0.4;
 const SPAWN_FLASH_SECONDS: f32 = 0.4;
-// Rail gunners wear a thin ring in the rail hue; the dart's nose is 0.12 times shipSize from its centre.
-const GUNNER_RING_RADIUS: f32 = 0.14;
+// Rail gunners wear a thin ring in the rail hue, outside the wingtips (about 0.14 times shipSize from the
+// centre) and inside a larger quad (GUNNER_HALF_EXTENT), so the ring is not clipped. Other ships keep
+// the SHIP_HALF_EXTENT quad, so their pixels are unchanged.
+const GUNNER_RING_RADIUS: f32 = 0.17;
+const GUNNER_HALF_EXTENT: f32 = 0.22;
 
 struct SwarmVaryings {
   @builtin(position) position: vec4f,
@@ -65,11 +68,12 @@ fn swarmVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
   if (!isMarker) {
     let shipIndex = min(instanceIndex, MAXIMUM_SWARM_SHIPS - 1u);
     let ship = view.ships[shipIndex];
+    let gunnerMark = view.gunnerMarks[shipIndex / 4u][shipIndex % 4u];
     center = ship.xy;
-    halfExtent = SHIP_HALF_EXTENT * view.shipSize;
+    halfExtent = select(SHIP_HALF_EXTENT, GUNNER_HALF_EXTENT, gunnerMark > 0.5) * view.shipSize;
     output.age = ship.z;
     output.heading = ship.w;
-    output.gunnerMark = view.gunnerMarks[shipIndex / 4u][shipIndex % 4u];
+    output.gunnerMark = gunnerMark;
   }
   output.offset = corner * halfExtent;
   output.marker = select(0.0, 1.0, isMarker);

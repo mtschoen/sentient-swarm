@@ -1048,11 +1048,12 @@ test('gunner needles are queued with the weapon shots, leave along the station a
   const degrees = new Set(railShots.map((spawn) => Math.round((Math.atan2(spawn.velocityY, spawn.velocityX) * 180) / Math.PI + 360) % 360));
   const expected = new Set(railTurretOffsets(12).map((offset) => Math.round((offset * 180) / Math.PI + 360) % 360));
   assert.deepEqual([...degrees].sort((a, b) => a - b), [...expected].sort((a, b) => a - b));
-  assert.ok(baseShots.length > 0);
+  // All 12 ships are gunners, so the base gun is quiet.
+  assert.equal(baseShots.length, 0);
   assert.ok(played.length > 0 && framesThatFired > 0);
   assert.equal(mostCuesInOneFrame, 1, 'at most one cue per frame');
   assert.ok(played.includes('fire rail 2'), 'a gunner-only frame plays the rail cue');
-  assert.ok(played.every((entry) => entry === 'fire rail 2' || entry === 'fire base 1'));
+  assert.ok(played.every((entry) => entry === 'fire rail 2'));
   // A frame where both fire keeps the armed weapon's cue: the beam fires every frame.
   played.length = 0;
   game.weapons.collect('beam');
@@ -1087,6 +1088,17 @@ test('a gunner that is hit passes its turret on', async () => {
   assert.equal(gunnerShips(game.seats[0]).length, 3);
   assert.ok(gunnerShips(game.seats[0]).every((ship) => ship.slot !== slot));
   assert.equal(game.state.railTurrets, 3);
+});
+
+test('with four gunners the other ships still fire the base gun', async () => {
+  const { game, input, projectiles } = await createGame();
+  game.start();
+  game.debugArm('rail', 4);
+  input.state.aim = { x: 1, y: 0 };
+  input.state.firing = true;
+  runFor(game, 1);
+  const kinds = new Set(projectiles.spawns.map((spawn) => spawn.kind));
+  assert.ok(kinds.has(game.weapons.types.base.kind) && kinds.has(game.weapons.types.rail.kind));
 });
 
 test('quit to title and death leave no gunners', async () => {

@@ -2,14 +2,11 @@
 // after the particles so nothing hides it. The rendered heading eases toward the aim angle at a
 // finite turn rate so turns read as turns; fire direction stays the exact aim (the game's job).
 import { createUniformBuffer } from '../gpu/buffers.js';
-import { substituteConstants } from '../gpu/shaders.js';
 import { WEAPON_HUES } from '../game/weaponTypes.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
 import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
 export const SHIP_VIEW_BYTES = 80;
-// Substituted into ship.wgsl (none today; the rail turrets are gunner ships drawn by swarm.wgsl).
-export const SHIP_SHADER_CONSTANTS = Object.freeze({});
 // Radians per second: a half turn takes about a quarter second.
 export const SHIP_TURN_RATE = 12;
 export const BLINK_HERTZ = 8;
@@ -65,7 +62,7 @@ export class ShipRenderer {
   }
 
   async initialize() {
-    const code = substituteConstants(await loadQuadShader('ship', this.common), SHIP_SHADER_CONSTANTS);
+    const code = await loadQuadShader('ship', this.common);
     const module = this.device.createShaderModule({ label: 'ship', code });
     this.pipeline = await this.device.createRenderPipelineAsync({
       label: 'ship',

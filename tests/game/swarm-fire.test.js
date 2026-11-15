@@ -29,7 +29,7 @@ const AIM_RIGHT = { firing: true, aimX: 1, aimY: 0, deltaSeconds: STEP, kind: 'b
 function fireFor(fire, ships, seconds, control = AIM_RIGHT) {
   const perUpdate = [];
   const steps = Math.round(seconds / STEP);
-  for (let step = 0; step < steps; step += 1) perUpdate.push(fire.distribute(NO_FIRE, ships, ORIGIN, ORIGIN, control).spawns);
+  for (let step = 0; step < steps; step += 1) perUpdate.push(fire.distribute(NO_FIRE, ships, ORIGIN, control).spawns);
   return perUpdate;
 }
 
@@ -169,7 +169,7 @@ test('gunners fire the turret needles from their own positions; the beam still l
   const turretSpawns = [];
   let last = null;
   for (let step = 0; step < 36; step += 1) {
-    last = fire.distribute(volley, ships, ORIGIN, { x: 9, y: 5 }, control);
+    last = fire.distribute(volley, ships, ORIGIN, control);
     turretSpawns.push(...last.turretSpawns);
   }
   assert.ok(turretSpawns.length > 0);
@@ -179,7 +179,8 @@ test('gunners fire the turret needles from their own positions; the beam still l
     assert.ok(Math.abs(spawn.velocityX - Math.cos(gunner.heading) * 40) < 1e-9);
     assert.ok(Math.abs(spawn.velocityY - Math.sin(gunner.heading) * 40) < 1e-9);
   }
-  assert.deepEqual([last.beam.x, last.beam.y, last.beam.halfWidth], [9, 5, 0.12]);
+  // The beam leaves the centroid of the non-gunners (the third ship alone here).
+  assert.deepEqual([last.beam.x, last.beam.y, last.beam.halfWidth], [ships[2].x, ships[2].y, 0.12]);
 });
 
 test('a gunner fires under a pooled beam and a pulse', () => {
@@ -189,7 +190,7 @@ test('a gunner fires under a pooled beam and a pulse', () => {
     ships[0] = { ...ships[0], gunnerIndex: 0 };
     let needles = 0;
     for (let step = 0; step < 36; step += 1) {
-      needles += fire.distribute(NO_FIRE, ships, ORIGIN, ORIGIN, { ...AIM_RIGHT, kind, tier: 1 }).turretSpawns.length;
+      needles += fire.distribute(NO_FIRE, ships, ORIGIN, { ...AIM_RIGHT, kind, tier: 1 }).turretSpawns.length;
     }
     assert.ok(needles > 0, `${kind}: no turret needles`);
   }
@@ -198,7 +199,7 @@ test('a gunner fires under a pooled beam and a pulse', () => {
 test('no ships fire nothing, and reset restarts the rotation and the cooldowns', () => {
   const fire = new SwarmFire({ random: seededRandom() });
   const beam = { x: 0, y: 0, directionX: 1, directionY: 0, halfWidth: 0.1 };
-  const empty = fire.distribute({ ...NO_FIRE, beam }, [], ORIGIN, ORIGIN, AIM_RIGHT);
+  const empty = fire.distribute({ ...NO_FIRE, beam }, [], ORIGIN, AIM_RIGHT);
   assert.deepEqual(empty, { spawns: [], turretSpawns: [], beam: null });
   fireFor(fire, shipsHeading(12).map((ship) => ({ ...ship, gunnerIndex: ship.slot })), 1);
   assert.ok(fire.gunnerFire.scheduled.some((flag) => flag === 1));
@@ -228,7 +229,7 @@ test('the report counts the ships, those in the cone, those off cooldown, the sh
   const ships = shipsHeading(12, (index) => (index < 4 ? 0 : Math.PI));
   let fired = 0;
   for (let step = 0; step < 60; step += 1) {
-    fire.distribute(NO_FIRE, ships, ORIGIN, ORIGIN, AIM_RIGHT);
+    fire.distribute(NO_FIRE, ships, ORIGIN, AIM_RIGHT);
     fired += fire.report.fired;
     assert.equal(fire.report.ships, 12);
     assert.equal(fire.report.inCone, 4);
@@ -236,9 +237,9 @@ test('the report counts the ships, those in the cone, those off cooldown, the sh
   assert.ok(fired > 0);
   assert.ok(fire.report.ready >= 8, 'the ships outside the cone stay off cooldown');
   assert.ok(Math.abs(fire.report.shotsPerSecond - BASE_SHOTS_PER_SECOND) < 1e-9, `${fire.report.shotsPerSecond}`);
-  fire.distribute(NO_FIRE, ships, ORIGIN, ORIGIN, { ...AIM_RIGHT, kind: 'beam' });
+  fire.distribute(NO_FIRE, ships, ORIGIN, { ...AIM_RIGHT, kind: 'beam' });
   assert.deepEqual(fire.report, { ships: 12, inCone: 0, ready: 0, fired: 0, shotsPerSecond: 0 });
-  fire.distribute(NO_FIRE, [], ORIGIN, ORIGIN, AIM_RIGHT);
+  fire.distribute(NO_FIRE, [], ORIGIN, AIM_RIGHT);
   assert.equal(fire.report.ships, 0);
 });
 
@@ -250,10 +251,56 @@ test('railTier 1, 2 and 3 give 1, 2 and 3 needles per gunner volley through dist
     const control = { ...AIM_RIGHT, kind: 'beam', railTier };
     const volleys = [];
     for (let step = 0; step < 60; step += 1) {
-      const { turretSpawns } = fire.distribute(NO_FIRE, ships, ORIGIN, ORIGIN, control);
+      const { turretSpawns } = fire.distribute(NO_FIRE, ships, ORIGIN, control);
       if (turretSpawns.length > 0) volleys.push(turretSpawns.length);
     }
     assert.ok(volleys.length >= 2, `tier ${railTier} fired ${volleys.length} volleys`);
     assert.ok(volleys.every((count) => count === railTier), `tier ${railTier}: ${volleys}`);
   }
+});
+
+function withGunners(count, gunnerCount) {
+  return shipsHeading(count).map((ship, index) => (index < gunnerCount ? { ...ship, gunnerIndex: index } : ship));
+}
+
+test("promoting gunners keeps the armed weapon's aggregate: 12 ships with 10 gunners fire what 12 with none do", () => {
+  const plain = total(fireFor(new SwarmFire({ random: seededRandom(5) }), withGunners(12, 0), 10));
+  const promoted = total(fireFor(new SwarmFire({ random: seededRandom(5) }), withGunners(12, 10), 10));
+  const expected = aggregateShotsPerSecond(BASE_SHOTS_PER_SECOND, 0.4, 12) * 10;
+  assert.ok(Math.abs(plain / expected - 1) < 0.05, `${plain} against ${expected}`);
+  assert.ok(Math.abs(promoted / plain - 1) < 0.05, `${promoted} against ${plain}`);
+});
+
+test('gunners never fire the armed weapon, and all gunners leave it quiet', () => {
+  const ships = withGunners(12, 5);
+  const spawns = fireFor(new SwarmFire({ random: seededRandom() }), ships, 3).flat();
+  assert.ok(spawns.length > 0);
+  const shooterXs = new Set(ships.filter((ship) => ship.gunnerIndex < 0).map((ship) => ship.x));
+  assert.ok(spawns.every((spawn) => shooterXs.has(spawn.x)), 'every ship shot leaves a non-gunner');
+  const fire = new SwarmFire({ random: seededRandom() });
+  assert.equal(total(fireFor(fire, withGunners(12, 12), 3)), 0);
+  assert.equal(fire.report.fired, 0);
+});
+
+test("the report counts only non-gunners in the cone and keeps the law's aggregate of all ships", () => {
+  const fire = new SwarmFire({ random: seededRandom() });
+  fire.distribute(NO_FIRE, withGunners(12, 10), ORIGIN, AIM_RIGHT);
+  assert.equal(fire.report.ships, 12);
+  assert.equal(fire.report.inCone, 2);
+  assert.ok(Math.abs(fire.report.shotsPerSecond - BASE_SHOTS_PER_SECOND) < 1e-9, `${fire.report.shotsPerSecond}`);
+});
+
+test('the beam leaves the centroid of the non-gunners, or the controlled point when every ship is a gunner', () => {
+  const beam = { x: 0, y: 0, directionX: 1, directionY: 0, halfWidth: 0.12 };
+  const ships = [
+    { slot: 0, x: 1, y: 1, heading: 0, gunnerIndex: 0 },
+    { slot: 1, x: 3, y: 5, heading: 0, gunnerIndex: -1 },
+    { slot: 2, x: 5, y: 7, heading: 0, gunnerIndex: -1 },
+  ];
+  const control = { ...AIM_RIGHT, kind: 'beam' };
+  const fire = new SwarmFire({ random: seededRandom() });
+  const mixed = fire.distribute({ ...NO_FIRE, beam }, ships, { x: 9, y: 9 }, control).beam;
+  assert.deepEqual([mixed.x, mixed.y], [4, 6]);
+  const all = fire.distribute({ ...NO_FIRE, beam }, ships.map((ship) => ({ ...ship, gunnerIndex: 0 })), { x: 9, y: 9 }, control).beam;
+  assert.deepEqual([all.x, all.y], [9, 9]);
 });

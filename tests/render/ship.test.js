@@ -1,9 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { BLINK_HERTZ, SHIP_SHADER_CONSTANTS, SHIP_TURN_RATE, SHIP_VIEW_BYTES, ShipRenderer, easeAngle, packShipView } from '../../src/render/ship.js';
+import { BLINK_HERTZ, SHIP_TURN_RATE, SHIP_VIEW_BYTES, ShipRenderer, easeAngle, packShipView } from '../../src/render/ship.js';
 import { WEAPON_HUES } from '../../src/game/weaponTypes.js';
-import { substituteConstants } from '../../src/gpu/shaders.js';
 import { Viewport } from '../../src/render/viewport.js';
 
 // Only the buffer-usage constants and createBuffer are touched by the constructor.
@@ -67,11 +66,9 @@ test('the drawn thrust depends on velocity, not on how often it is sampled', () 
   assert.equal(idle.easedThrust(0, 0, 1 / 144), 0);
 });
 
-test('ship.wgsl has no turret constants left', () => {
+test('ship.wgsl has no substituted constants, so it is loaded as is', () => {
   const source = readFileSync(new URL('../../src/render/shaders/ship.wgsl', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /__RAIL_/);
-  assert.equal(Object.keys(SHIP_SHADER_CONSTANTS).some((name) => name.startsWith('RAIL_')), false);
-  assert.doesNotThrow(() => substituteConstants(source, SHIP_SHADER_CONSTANTS));
+  assert.doesNotMatch(source, /__[A-Z_]+__/);
 });
 
 test('mid-turn the drawn facing lags the aim at the finite rate, follows a changing aim and then lands', () => {

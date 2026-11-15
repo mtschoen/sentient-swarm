@@ -20,11 +20,14 @@
 //   MAXIMUM_SWARM_SPAWNS_PER_UPDATE is a backstop for a huge delta.
 // - Rail turrets are gunner ships (gunnerIndex >= 0, marked by PlayerSwarm): GunnerFire
 //   (src/game/gunner-fire.js) fires their needles from their own positions along their own
-//   headings, whatever else is armed, including the beam.
-// - Beam: one beam from the swarm centroid along the aim (the projectile system has one beam slot).
+//   headings, whatever else is armed, including the beam. Gunners never fire the armed weapon: the
+//   rate law's aggregate is still that of ALL the ships, so promoting gunners does not cut the main
+//   weapon's firepower, but it is spread over the other ships only (all gunners: it is quiet).
+// - Beam: one beam from the centroid of the non-gunner ships (the controlled point when there are
+//   none) along the aim (the projectile system has one beam slot).
 // - report describes the newest distribute for the fire log (src/game/fire-log.js): the ships, how
-//   many point inside the cone, how many are off cooldown, the ship shots fired and the aggregate
-//   rate the law gives (0 while nothing is due to fire).
+//   many of the non-gunners point inside the cone, how many of them are off cooldown, the ship shots
+//   fired and the aggregate rate the law gives (0 while nothing is due to fire).
 import { MAXIMUM_SWARM_SHIPS } from '../sim/layout.js';
 import { perShipInterval } from './swarm-fire-rate.js';
 import { swarmShotRecipe } from './swarm-shots.js';
@@ -37,6 +40,20 @@ const COOLDOWN_JITTER = 0.4;
 
 // The per-slot cooldown multiplier in [1 - jitter / 2, 1 + jitter / 2].
 const COOLDOWN_FACTORS = Float64Array.from({ length: MAXIMUM_SWARM_SHIPS }, (_, slot) => 1 + COOLDOWN_JITTER * (slotHash(slot, 20) - 0.5));
+
+// The mean position of the ships that are not gunners, or point when there are none.
+function shooterCentroid(ships, point) {
+  let sumX = 0;
+  let sumY = 0;
+  let shooters = 0;
+  for (const ship of ships) {
+    if (ship.gunnerIndex >= 0) continue;
+    sumX += ship.x;
+    sumY += ship.y;
+    shooters += 1;
+  }
+  return shooters === 0 ? point : { x: sumX / shooters, y: sumY / shooters };
+}
 
 export class SwarmFire {
   constructor({ random = Math.random } = {}) {
@@ -55,13 +72,13 @@ export class SwarmFire {
     this.scheduled.fill(0);
   }
 
-  // fire: WeaponState.update's result for origin (its beam passes through; its turret spawns are
-  // not read, the gunner ships fire them);
-  // ships: PlayerSwarm.ships; centroid: its centroid.
+  // fire: WeaponState.update's result (its beam passes through; its turret spawns are not read, the
+  // gunner ships fire them); ships: PlayerSwarm.ships; point: the controlled point (the beam's
+  // origin when every ship is a gunner).
   // control: { firing, aimX, aimY, deltaSeconds, kind, tier, railTier } (kind and tier are the weapon
   // fired, railTier the gunners' needle tier).
   // Returns { spawns, turretSpawns, beam }. No ships: nothing fires.
-  distribute(fire, ships, origin, centroid, { firing, aimX, aimY, deltaSeconds, kind, tier, railTier = 1 }) {
+  distribute(fire, ships, point, { firing, aimX, aimY, deltaSeconds, kind, tier, railTier = 1 }) {
     const result = { spawns: [], turretSpawns: [], beam: null };
     const count = ships.length;
     const report = this.report;
@@ -75,17 +92,25 @@ export class SwarmFire {
     const recipe = firing ? swarmShotRecipe(kind, tier) : null;
     if (recipe !== null) this.fireShips(result.spawns, ships, Math.atan2(aimY, aimX), recipe, deltaSeconds);
     result.turretSpawns = this.gunnerFire.fire(ships, { firing, aimX, aimY, deltaSeconds, railTier });
-    if (fire.beam !== null) result.beam = { ...fire.beam, x: centroid.x, y: centroid.y };
+    if (fire.beam !== null) {
+      const origin = shooterCentroid(ships, point);
+      result.beam = { ...fire.beam, x: origin.x, y: origin.y };
+    }
     return result;
   }
 
   fireShips(spawns, ships, aimAngle, recipe, deltaSeconds) {
     const count = ships.length;
-    // The jitter is rate-neutral: the intervals are scaled so the ships' rates still sum to the law.
+    // The jitter is rate-neutral: the intervals are scaled so the shooters' rates still sum to the
+    // law's aggregate for ALL the ships (count), which the gunners' share does not reduce.
     let inverseSum = 0;
-    for (const ship of ships) inverseSum += 1 / COOLDOWN_FACTORS[ship.slot];
+    for (const ship of ships) if (ship.gunnerIndex < 0) inverseSum += 1 / COOLDOWN_FACTORS[ship.slot];
     const interval = (perShipInterval(recipe.baseShotsPerSecond, recipe.exponent, count) * inverseSum) / count;
     for (const ship of ships) {
+      if (ship.gunnerIndex >= 0) {
+        this.scheduled[ship.slot] = 0;
+        continue;
+      }
       if (this.scheduled[ship.slot] === 1) {
         // This step's share of the ship's interval. A remainder is at most one step: a waiting
         // ship does not bank shots.
@@ -104,6 +129,7 @@ export class SwarmFire {
     for (let visited = 0; visited < count; visited += 1) {
       const index = (start + visited) % count;
       const ship = ships[index];
+      if (ship.gunnerIndex >= 0) continue;
       const ready = this.cooldowns[ship.slot] <= 0;
       let offset = ship.heading - aimAngle;
       offset -= 2 * Math.PI * Math.round(offset / (2 * Math.PI));

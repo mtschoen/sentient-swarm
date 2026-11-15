@@ -115,7 +115,9 @@ export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
     const beam = fire.expired ? null : shots.beam;
     if (game.seats.length > 1) projectiles.setBeam(beam, seat.index);
     else projectiles.setBeam(beam);
-    if (!cued && (fire.spawns.length > 0 || (fire.beam !== null && !fire.expired))) {
+    // With every ship a gunner the armed weapon is silent, so its volley cue does not sound either.
+    const armedAudible = seat.swarm.ships.some((ship) => ship.gunnerIndex < 0);
+    if (!cued && ((fire.spawns.length > 0 && armedAudible) || (fire.beam !== null && !fire.expired))) {
       effects?.weaponFire?.(kind, tier);
       cued = true;
     } else if (!cued && shots.turretSpawns.length > 0) {

@@ -192,7 +192,7 @@ export class PlayerSeat {
     const tier = this.weapons.tier;
     const fire = this.weapons.update(deltaSeconds, { firing: playing && firing, aimX: aim.x, aimY: aim.y, x, y });
     const railTier = this.weapons.railTier;
-    const shots = this.swarmFire.distribute(fire, this.swarm.ships, { x, y }, this.swarm.centroid, {
+    const shots = this.swarmFire.distribute(fire, this.swarm.ships, { x, y }, {
       firing: playing && firing,
       aimX: swarmControls.aimX,
       aimY: swarmControls.aimY,
