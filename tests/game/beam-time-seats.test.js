@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../../src/game/game.js';
 import { BEAM_TIME_SECONDS } from '../../src/game/beam-time.js';
-import { MAXIMUM_BEAM_TIME_SURGE, DEFAULT_BEAM_TIME_SURGE } from '../../src/sim/spawner.js';
+import { MAXIMUM_BEAM_TIME_SURGE, SpawnPressure } from '../../src/sim/spawner.js';
+import { startBeamTime } from '../../src/game/beam-time-seats.js';
 import { PROJECTILE_KINDS } from '../../src/game/weaponTypes.js';
 import { RunPhase } from '../../src/game/run.js';
 import {
-  CAPACITY, STEP, createFakeGpu, createFakeInput, createFakeProjectiles, createFakeRenderer, createFakeSimulation, createGame, hitNow, runFor,
+  CAPACITY, STEP, createFakeGpu, createFakeInput, createFakeProjectiles, createFakeRenderer, createFakeSimulation, createGame, hitNow, runFor, stats,
 } from './game-harness.js';
 
 // A running game with the shard cadence at one wave per shard and the played cues recorded.
@@ -145,26 +146,98 @@ test('a pause keeps the remaining beam time and resuming counts it again', async
   assert.ok(game.beamTime.remainingSeconds < remaining);
 });
 
-test('beam time surges the spawning: target, gates and the probe, and the surge ends with it', async () => {
-  const { game, simulation } = await startedGame({ interval: 60 });
-  const baseTarget = game.spawnPressure.targetAlive;
-  assert.equal(game.acceptsProbeFrames, true);
-  collectAllShards(game);
-  runFor(game, 1);
-  assert.equal(game.spawnPressure.surge, DEFAULT_BEAM_TIME_SURGE);
-  assert.equal(game.spawnPressure.surge, 3);
-  assert.ok(game.spawnPressure.targetAlive > baseTarget * 2.9);
-  assert.ok(game.spawnPressure.targetAlive <= Math.max(baseTarget, CAPACITY * 0.4) + 1e-9);
-  assert.ok(game.spawnDirector.spawnGates.gates.every((gate) => gate.emit === 1 || gate.open < 1 || gate.closing), 'every open gate emits');
-  const surgedSeekScale = simulation.seekScales.at(-1);
-  game.spawnPressure.setSurge(1);
-  assert.equal(game.spawnPressure.seekScale, surgedSeekScale, 'the seek scale is not surged');
-  game.spawnPressure.setSurge(3);
-  assert.equal(game.acceptsProbeFrames, false);
-  runFor(game, BEAM_TIME_SECONDS);
-  runFor(game, 0.1);
-  assert.equal(game.spawnPressure.surge, 1);
-  assert.equal(game.acceptsProbeFrames, true);
+// Updates one step with a stats frame that keeps the alive count low, so a deficit never closes.
+function updateWithLowAlive(game, simulation) {
+  simulation.scriptedStats.push(stats({ frameSequence: simulation.frameSequence + 1, aliveTotal: 1000 }));
+  game.update(STEP);
+}
+
+// True between waves once the first fill is over: some gate is fully open and none emits.
+function betweenWaves(game) {
+  const { gates } = game.spawnDirector;
+  return !game.spawnPressure.filling
+    && gates.some((gate) => gate.open >= 1 && !gate.closing)
+    && gates.every((gate) => gate.emit === 0);
+}
+
+// The scripted run both surge tests share: the same injected inputs every time.
+async function surgeRun(steps) {
+  const harness = await startedGame({ interval: 60 });
+  const quiet = [];
+  for (let step = 0; step < steps; step += 1) {
+    updateWithLowAlive(harness.game, harness.simulation);
+    quiet.push(betweenWaves(harness.game));
+  }
+  return { ...harness, quiet };
+}
+
+// A step k after which the director is between waves, and the next step is too (without beam time).
+async function quietStep() {
+  const { quiet } = await surgeRun(1200);
+  const step = quiet.findIndex((value, index) => value && quiet[index + 1]);
+  assert.ok(step >= 0, 'the script has a moment between waves');
+  return step + 1;
+}
+
+test('beam time surges the spawning: every open gate emits between waves, which it does not without beam time', async () => {
+  const stepsBefore = await quietStep();
+  const plain = await startedGame({ interval: 60 });
+  const surged = await startedGame({ interval: 60 });
+  for (let step = 0; step < stepsBefore; step += 1) {
+    updateWithLowAlive(plain.game, plain.simulation);
+    updateWithLowAlive(surged.game, surged.simulation);
+  }
+  const baseTarget = surged.game.spawnPressure.targetAlive;
+  assert.equal(surged.game.acceptsProbeFrames, true);
+  startBeamTime(surged.game);
+  assert.equal(surged.game.acceptsProbeFrames, false);
+  updateWithLowAlive(plain.game, plain.simulation);
+  updateWithLowAlive(surged.game, surged.simulation);
+  const openGates = (game) => game.spawnDirector.gates.filter((gate) => gate.open >= 1 && !gate.closing);
+  assert.ok(openGates(plain.game).length > 0 && openGates(plain.game).every((gate) => gate.emit === 0), 'between waves nothing emits without beam time');
+  assert.ok(openGates(surged.game).length > 0 && openGates(surged.game).every((gate) => gate.emit === 1), 'beam time makes every open gate emit');
+  assert.equal(surged.game.spawnPressure.surge, 3);
+  assert.equal(plain.game.spawnPressure.surge, 1);
+  assert.ok(surged.game.spawnPressure.targetAlive > baseTarget * 2.9);
+  assert.ok(surged.game.spawnPressure.targetAlive <= Math.max(baseTarget, CAPACITY * 0.4) + 1e-9);
+  // The seek ramp is not part of the surge: both runs hold the same seek scale at the same step.
+  assert.equal(surged.simulation.seekScales.at(-1), plain.simulation.seekScales.at(-1));
+  runFor(surged.game, BEAM_TIME_SECONDS + 0.1);
+  assert.equal(surged.game.spawnPressure.surge, 1);
+  assert.equal(surged.game.acceptsProbeFrames, true);
+});
+
+test('beam time bypasses the wave bank: refills are requested on every step, while between waves they are throttled otherwise', async () => {
+  const waves = [];
+  const totals = [];
+  class SpyPressure extends SpawnPressure {
+    update(deltaSeconds, latestStats, shares, frameSequence, wave) {
+      const counts = super.update(deltaSeconds, latestStats, shares, frameSequence, wave);
+      waves.push(wave);
+      totals.push(counts.reduce((sum, count) => sum + count, 0));
+      return counts;
+    }
+  }
+  const spy = new SpyPressure({ capacity: CAPACITY });
+  const simulation = createFakeSimulation();
+  const game = await Game.create({
+    gpu: createFakeGpu(), simulation, projectiles: createFakeProjectiles(), renderer: createFakeRenderer(), input: createFakeInput(),
+    capacity: CAPACITY, clock: () => 0, random: () => 0.5, spawnPressure: spy,
+  });
+  game.beamShards.setWaveInterval(60);
+  game.start();
+  for (let step = 0; step < 600; step += 1) updateWithLowAlive(game, simulation);
+  assert.equal(spy.filling, false);
+  const plainSteps = waves.length;
+  const throttled = waves.slice(0).map((wave, index) => ({ wave, total: totals[index] })).filter(({ wave }) => wave !== null && !wave.emitting);
+  assert.ok(throttled.length > 0, 'the director has steps between waves');
+  assert.ok(throttled.every(({ total }) => total === 0), 'between waves the bank holds the refills back');
+  startBeamTime(game);
+  for (let step = 0; step < 30; step += 1) updateWithLowAlive(game, simulation);
+  const surgedWaves = waves.slice(plainSteps);
+  const surgedTotals = totals.slice(plainSteps);
+  assert.ok(surgedWaves.every((wave) => wave === null), 'the surge hands the pressure no wave');
+  assert.ok(surgedTotals.every((total) => total > 0), 'a refill is requested on every step');
 });
 
 test('death during beam time ends it; the next run starts with no count, no shards and the base gun', async () => {
