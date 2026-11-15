@@ -171,6 +171,29 @@ test('the start cut resets the controller', async () => {
   assert.equal(game.soloZoom.lastZoom, 1);
 });
 
+// Bombs once, so a hold window is running, and returns the remaining hold.
+function bombOnce({ game, input }) {
+  runFor(game, 1);
+  input.state.bomb = true;
+  game.update(STEP);
+  input.state.bomb = false;
+  assert.ok(game.bombHoldRemaining > 0, 'the bomb started a hold');
+}
+
+test('quitting to the title clears the bomb hold', async () => {
+  const harness = await startedGame();
+  bombOnce(harness);
+  harness.game.quitToTitle();
+  assert.equal(harness.game.bombHoldRemaining, 0);
+});
+
+test('a new run clears the bomb hold', async () => {
+  const harness = await startedGame();
+  bombOnce(harness);
+  harness.game.start();
+  assert.equal(harness.game.bombHoldRemaining, 0);
+});
+
 test('the bomb radius ignores the zoom', async () => {
   const { game, simulation, input } = await startedGame();
   runFor(game, 10);
