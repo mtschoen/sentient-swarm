@@ -196,6 +196,7 @@ export class Game {
     // One seat per player; the first is the solo player.
     this.random = random;
     this.seats = [new PlayerSeat({ index: 0, random, bounds: this.worldBounds })];
+    this.localSeatIndex = 0;
     // The seat whose swarm was wiped last (where the death flood appears), and seats a debug hook made invulnerable.
     this.lastWipedSeat = null;
     this.debugInvulnerableSeats = new Set();
@@ -259,22 +260,23 @@ export class Game {
     this.removeProjectilePass = simulation.registerPass((encoder, context) => this.projectiles.encode(encoder, context));
   }
 
-  // The first seat's modules: the solo player (browser checks and the lab read these names).
-  get player() { return this.seats[0].player; }
-  get swarm() { return this.seats[0].swarm; }
-  get swarmFire() { return this.seats[0].swarmFire; }
-  get weapons() { return this.seats[0].weapons; }
-  get swarmControls() { return this.seats[0].swarmControls; }
-  get firingHeld() { return this.seats[0].firingHeld; }
-  set firingHeld(held) { this.seats[0].firingHeld = held; }
-  get bombHeld() { return this.seats[0].bombHeld; }
-  set bombHeld(held) { this.seats[0].bombHeld = held; }
+  get localSeat() { return this.seats[this.localSeatIndex]; }
+  // The local seat's modules (seat 1 unless setLocalSeat moved it; browser checks and the lab read these names).
+  get player() { return this.localSeat.player; }
+  get swarm() { return this.localSeat.swarm; }
+  get swarmFire() { return this.localSeat.swarmFire; }
+  get weapons() { return this.localSeat.weapons; }
+  get swarmControls() { return this.localSeat.swarmControls; }
+  get firingHeld() { return this.localSeat.firingHeld; }
+  set firingHeld(held) { this.localSeat.firingHeld = held; }
+  get bombHeld() { return this.localSeat.bombHeld; }
+  set bombHeld(held) { this.localSeat.bombHeld = held; }
 
   get state() {
     return {
       score: this.score.score,
       multiplier: this.score.multiplier,
-      ...this.seats[0].hudFields(),
+      ...this.localSeat.hudFields(),
       seats: this.seats.map((seat, index) => seat.stateEntry(this.revival.progress(index))),
       bombs: this.run.bombs,
       timeWarp: this.timeWarp.fraction,
@@ -290,9 +292,7 @@ export class Game {
     };
   }
 
-  start() {
-    this.beginRun();
-  }
+  start() { this.beginRun(); }
 
   // Resets every module and clears the arena (one kill-all). Sequence guards stay monotonic: the
   // respawn sequence moves to the next step, so a hit latched in the previous run takes no life.
@@ -309,9 +309,7 @@ export class Game {
     this.seats.forEach((seat) => { seat.bombHeld = true; });
   }
 
-  get playerCount() {
-    return this.seats.length;
-  }
+  get playerCount() { return this.seats.length; }
 
   // One or two seats, changed only in Ready. Two seats start either side of the arena center; the
   // simulation's second seek point and contact table follow the seat count.
@@ -331,7 +329,15 @@ export class Game {
   // 'coop' (the default), 'versus' or 'hives' (two seats), changed only in Ready (versus-seats.js).
   setMode(mode) { setGameMode(this, mode); }
 
+  // The seat this machine plays (input.state); the other reads seatTwoState. Ready only, and one seat resets it.
+  setLocalSeat(index) {
+    if (this.run.phase !== RunPhase.Ready) throw new Error('the local seat changes only in Ready');
+    if (!Number.isInteger(index) || index < 0 || index >= this.seats.length) throw new RangeError(`local seat must be 0 to ${this.seats.length - 1}, got ${index}`);
+    this.localSeatIndex = index;
+  }
+
   removeSecondSeat() {
+    this.localSeatIndex = 0;
     leaveVersus(this);
     this.seats.length = 1;
     this.simulation.clearSecondPlayer();
@@ -396,7 +402,7 @@ export class Game {
   // pointer-driven point cannot drag it. cut (run start, respawn, quit) jumps there with no easing.
   followCamera(deltaSeconds, { cut = false } = {}) {
     // framedFocuses is never empty, so neither the center nor the zoom sees an empty list.
-    const focuses = framedFocuses(this.seats);
+    const focuses = framedFocuses(this.seats, this.localSeatIndex);
     const focus = framingCenter(focuses);
     const view = { viewWidth: this.viewSize.width, viewHeight: this.viewSize.height, bounds: this.worldBounds };
     if (cut) {
@@ -427,14 +433,10 @@ export class Game {
     return { ...this.view, width: this.viewSize.width / zoom, height: this.viewSize.height / zoom };
   }
 
-  get watching() {
-    return this.watchPressure !== null;
-  }
+  get watching() { return this.watchPressure !== null; }
 
   // The spawn pressure in effect: the watch one in the lab's watch mode, else the play ramp.
-  get activeSpawnPressure() {
-    return this.watchPressure ?? this.spawnPressure;
-  }
+  get activeSpawnPressure() { return this.watchPressure ?? this.spawnPressure; }
 
   // Freezes the run; returns whether it paused (Ready and GameOver have nothing to freeze).
   pause() {
@@ -485,9 +487,7 @@ export class Game {
     this.simulationStepInterval = rate === 'half' ? 2 : 1;
   }
 
-  get simulationRate() {
-    return this.simulationStepInterval === 2 ? 'half' : 'full';
-  }
+  get simulationRate() { return this.simulationStepInterval === 2 ? 'half' : 'full'; }
 
   // The quality probe measures only real play: Playing outside the lab, with no capacity change in
   // flight (so a lab mix never steps or persists a preset, and the lab-leave rate restore holds).
@@ -585,9 +585,9 @@ export class Game {
     this.run.update(deltaSeconds).forEach((action) => this.handleAction(action));
   }
 
-  // Seat 1 reads the first input state, seat 2 its own.
+  // The local seat reads the first input state, the other seat its own.
   inputFor(seat) {
-    return seat.index === 0 ? this.input.state : this.input.seatTwoState;
+    return seat.index === this.localSeatIndex ? this.input.state : this.input.seatTwoState;
   }
 
   // A pickup at this seat: its weapon (or the global time warp), the blast and the shockwave.

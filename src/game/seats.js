@@ -60,10 +60,10 @@ export function seatStarts(count, bounds, offset = SEAT_START_OFFSET) {
   return [{ x: centerX - offset, y: centerY }, { x: centerX + offset, y: centerY }];
 }
 
-// What the camera frames: the live seats' camera focuses, or seat 1's when none is live.
-export function framedFocuses(seats) {
+// What the camera frames: the live seats' camera focuses, or the fallback seat's (the local seat) when none is live.
+export function framedFocuses(seats, fallbackIndex = 0) {
   const live = liveSeats(seats);
-  return live.length === 0 ? [seats[0].cameraFocus] : live.map((seat) => seat.cameraFocus);
+  return live.length === 0 ? [seats[fallbackIndex].cameraFocus] : live.map((seat) => seat.cameraFocus);
 }
 
 // Game-side seat work: each function takes the game as context.
@@ -104,11 +104,11 @@ export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
     if (seat.down) return;
     // The kind and tier this frame fires at; the update itself drops to base on expiry.
     const { fire, shots, kind, tier, railTier } = seat.fire(deltaSeconds, { playing, firing: controls[index].firing });
-    // The fire log (?debug=fire, main.js): why seat 1's swarm is silent while fire is held.
-    if (index === 0) {
+    // The fire log (?debug=fire, main.js): why the local seat's swarm is silent while fire is held.
+    if (index === game.localSeatIndex) {
       game.fireLog?.sample(deltaSeconds, {
-        phase: game.run.phase, inputFiring: controls[0].firing, armed: kind, report: seat.swarmFire.report,
-        aimX: seat.swarmControls.aimX, aimY: seat.swarmControls.aimY, moveX: inputs[0].move.x, moveY: inputs[0].move.y,
+        phase: game.run.phase, inputFiring: controls[index].firing, armed: kind, report: seat.swarmFire.report,
+        aimX: seat.swarmControls.aimX, aimY: seat.swarmControls.aimY, moveX: inputs[index].move.x, moveY: inputs[index].move.y,
       });
     }
     // The owner argument is passed in versus only, so solo and co-op make exactly their old calls.
