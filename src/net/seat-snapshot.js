@@ -1,7 +1,8 @@
 // One seat as a SeatSnapshot (the state channel's message): the point, aim, weapons and every alive
 // ship with its generation and gunner station. The game side marks a ship with no station -1; the
 // snapshot uses null (the codec writes every non-null gunnerIndex as a station). Headings are wrapped
-// into [-PI, PI], the codec's range. host and hostState are filled by the host's own blocks.
+// into [-PI, PI], the codec's range. host (the gates and wave) and hostState are the host's blocks,
+// null from the guest.
 
 import { wrapAngle } from '../game/swarm-facing.js';
 
@@ -11,7 +12,7 @@ function beamFields(beam) {
   return { x, y, directionX, directionY, halfWidth };
 }
 
-export function buildSeatSnapshot(seat, { sequence, matchSeconds, firing, beam, invulnerable }) {
+export function buildSeatSnapshot(seat, { sequence, matchSeconds, firing, beam, invulnerable, host = null, hostState = null }) {
   const { player, swarm, weapons } = seat;
   const ships = swarm.ships.map((ship) => ({
     slot: ship.slot,
@@ -34,7 +35,7 @@ export function buildSeatSnapshot(seat, { sequence, matchSeconds, firing, beam, 
     aliveCount: ships.length,
     ships,
     beam: beamFields(beam),
-    host: null,
-    hostState: null,
+    host,
+    hostState,
   };
 }

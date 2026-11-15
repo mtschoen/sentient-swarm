@@ -39,12 +39,16 @@
 // machine arms the weapon and the other plays the same blast at the same place with no weapon
 // change (applyCollection's arm false). The guest removes a pickup on its collection or expiry,
 // which also answers its claim; a refused claim is never sent again.
+// Gates and wave (Task 4.1): the host's every snapshot carries its director's gate table and wave
+// (before hiveGateTable); the guest runs no director from attach on and refills at the newest it
+// received (guestSpawns), spawning nothing before the first.
 // Bombs and the HUD (Task 4.4): the host keeps the one bomb pool (online-bombs.js); the guest's
 // HUD shows the host's score, multiplier and bombs from the newest host state (sharedHud).
 // Pings and pongs are answered and fed to the clock as they arrive; every other event is kept for
 // the update that drains it (receivedEvents). A message that does not decode is dropped.
 
 import { RunPhase } from '../game/run.js';
+import { SPECIES_COUNT } from '../sim/layout.js';
 import { hiveGrowth, hivesOf, updateHives } from '../game/hive-seats.js';
 import { contactPairs } from '../game/ship-contact.js';
 import { SHIP_CONTACT_DISTANCE } from '../game/versus-seats.js';
@@ -56,8 +60,8 @@ import { HOST_STATE_UPDATE_INTERVAL, INTERPOLATION_DELAY_SECONDS, PING_INTERVAL_
 import { RemoteSeatDriver } from './remote-seat.js';
 import { ShotRelay } from './shot-relay.js';
 import { buildSeatSnapshot } from './seat-snapshot.js';
-import { GuestPickups, PickupLedger, findReachedPickup } from './pickup-ledger.js';
-import { applyCollection } from '../game/pickup-collect.js';
+import { GuestPickups, PickupLedger } from './pickup-ledger.js';
+import { ageGuestPickups, collectOnline, observeHostPickups } from './online-pickups.js';
 import { pressOnlineBomb, receiveBombs } from './online-bombs.js';
 
 export { ONLINE_BOMB_RADIUS } from './online-bombs.js';
@@ -97,6 +101,8 @@ export class OnlineGame {
   // The host's HostState sequence sent last (host), and the one applied last (guest).
   #hostStateSequence = 0;
   #appliedHostStateSequence = 0;
+  // The sequence of the snapshot hostGates and hostWave came from (guest).
+  #hostBlockSequence = 0;
 
   constructor({ role, transport, clock }) {
     if (role !== OnlineRole.Host && role !== OnlineRole.Guest) throw new RangeError(`online role must be host or guest, got ${role}`);
@@ -110,6 +116,9 @@ export class OnlineGame {
     this.droppedMessages = 0;
     // The newest HostState the guest applied (null before the first, and on the host).
     this.hostState = null;
+    // The host's newest gate table and wave (guest; null before the first).
+    this.hostGates = null;
+    this.hostWave = null;
     // The host names its director's pickups; the guest keeps the host's (from attach).
     this.pickupLedger = new PickupLedger();
     this.guestPickups = null;
@@ -149,51 +158,18 @@ export class OnlineGame {
 
   // Host, after its director's update: the new pickups announced and the gone ones expired.
   observePickups(game) {
-    if (!this.isHost) return;
-    const { announced, expired } = this.pickupLedger.observe(game.pickups.pickups);
-    for (const entry of announced) this.queueEvent({ type: 'pickupAnnounced', ...entry });
-    for (const id of expired) this.queueEvent({ type: 'pickupExpired', id });
+    if (this.isHost) observeHostPickups(this, game);
   }
 
   // Guest, in place of the director's update: the host's pickup events, then the fade (Playing).
   agePickups(game, deltaSeconds) {
-    const pickups = this.guestPickups;
-    for (const event of this.receivedEvents) {
-      if (event.type === 'pickupAnnounced') pickups.announce(event);
-      else if (event.type === 'pickupExpired') pickups.remove(event.id);
-      else if (event.type === 'pickupCollected') {
-        pickups.remove(event.id);
-        const seat = game.seats[event.seat];
-        if (seat !== undefined) applyCollection(game, seat, event.pickupType, event.x, event.y, { arm: event.seat === this.localSeatIndex });
-      }
-    }
-    if (game.run.phase === RunPhase.Playing) pickups.age(deltaSeconds, game.pickups.fadeSeconds);
+    ageGuestPickups(this, game, deltaSeconds);
   }
 
   // The local seat's reach (Playing): the host takes the pickup at once, then grants the guest's
   // claims; the guest claims the pickup it reaches.
   collectFor(game, seat) {
-    if (seat.index !== this.localSeatIndex) return;
-    const reached = findReachedPickup(seat, game.pickups.pickups);
-    const { x, y } = seat.point;
-    if (this.isGuest) {
-      if (reached !== null && reached.id !== undefined && this.guestPickups.claim(reached.id)) this.queueEvent({ type: 'pickupClaim', id: reached.id, x, y });
-      return;
-    }
-    if (reached !== null) this.#grant(game, seat, this.pickupLedger.idOf(reached), x, y);
-    for (const event of this.receivedEvents) {
-      if (event.type === 'pickupClaim') this.#grant(game, game.seats[this.remoteSeatIndex], event.id, event.x, event.y);
-    }
-  }
-
-  // Host: the pickup taken for seat (refused once gone), announced and collected at x, y as the
-  // guest will read it (f32).
-  #grant(game, seat, id, x, y) {
-    const pickup = id === null ? null : this.pickupLedger.take(id, game.pickups.pickups);
-    if (pickup === null) return;
-    const at = { x: Math.fround(x), y: Math.fround(y) };
-    this.queueEvent({ type: 'pickupCollected', id, seat: seat.index, pickupType: pickup.type, ...at });
-    applyCollection(game, seat, pickup.type, at.x, at.y, { arm: seat.index === this.localSeatIndex });
+    if (seat.index === this.localSeatIndex) collectOnline(this, game, seat);
   }
 
   // Guest claims sent and not yet answered.
@@ -206,6 +182,13 @@ export class OnlineGame {
   resetPickups() {
     this.pickupLedger.reset();
     this.guestPickups?.reset();
+  }
+
+  // Guest (Game.spawnCounts): this step's spawn counts at the host's gates, by the host's wave;
+  // none before the first host block.
+  guestSpawns(game, deltaSeconds, pressure, shares) {
+    if (this.hostGates === null) return new Uint32Array(SPECIES_COUNT);
+    return pressure.update(deltaSeconds, game.latestStats, shares, game.simulation.frameSequence + 1, this.hostWave);
   }
 
   // The local seat's bomb press (bomb-step.js): the host spends the pool, the guest asks the host.
@@ -275,10 +258,12 @@ export class OnlineGame {
     }
   }
 
-  // For a new match (Task 5.2's resetMatch): forgets the applied host state. The applied sequence
-  // stays, since the host's sequence keeps counting, so a state from the last match cannot apply.
+  // For a new match (Task 5.2's resetMatch): forgets the applied host state, gates and wave. The
+  // sequences stay, since the host's keep counting, so a block from the last match cannot apply.
   resetHostState() {
     this.hostState = null;
+    this.hostGates = null;
+    this.hostWave = null;
   }
 
   // Guest: a host state newer than the last applied becomes the game's hives and hostState.
@@ -433,6 +418,7 @@ export class OnlineGame {
       firing: seat.swarmControls.firing,
       beam: this.#localBeam,
       invulnerable: seat.invulnerableSeconds > 0 || game.debugInvulnerableSeats.has(seat.index),
+      host: this.isHost ? { gates: game.spawnDirector.spawnGates, wave: game.spawnDirector.wave } : null,
     });
     if (this.isHost && withHostState) {
       this.#hostStateSequence += 1;
@@ -462,6 +448,10 @@ export class OnlineGame {
         if (snapshot === null) continue;
         this.driver.receive(snapshot);
         if (this.isGuest && snapshot.hostState !== null) this.#receiveHostState(game, snapshot.hostState);
+        if (this.isGuest && snapshot.host !== null && snapshot.sequence > this.#hostBlockSequence) {
+          this.#hostBlockSequence = snapshot.sequence;
+          ({ gates: this.hostGates, wave: this.hostWave } = snapshot.host);
+        }
       }
     }
     this.#inbox.length = 0;

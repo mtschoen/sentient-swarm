@@ -602,6 +602,7 @@ export class Game {
     // The escalation's multipliers and shares for this step (neutral outside a Playing run).
     const shares = applyEscalation(this, pressure);
     if (phase === RunPhase.Dying || phase === RunPhase.Respawning) return NO_SPAWNS;
+    if (this.online?.isGuest) { this.stepGates = hiveGateTable(this, this.online.hostGates); return this.online.guestSpawns(this, deltaSeconds, pressure, shares); }
     const primary = primarySeat(this.seats);
     const surging = this.beamTime.active && !this.watching;
     pressure.setSurge(surging ? this.beamTimeSurge : 1);
