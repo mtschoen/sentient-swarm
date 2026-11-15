@@ -230,6 +230,7 @@ async function checkProbePlay(baseUrl) {
 // and crowded, falls below 1 for a negative punch-in, returns to 1 under reduced motion, and the lab
 // leaves the knobs at their defaults. Time is counted in animation frames.
 const ZOOM_HOLD_FRAMES = 120;
+const ZOOM_TOLERANCE = 1e-3;
 const ZOOM_SETTLE_FRAMES = 300;
 const ZOOM_RELEASE_FRAMES = 600;
 const ZOOM_SEARCH_FRAMES = 1200;
@@ -256,9 +257,16 @@ async function checkSoloZoom(baseUrl) {
     const phase = () => page.evaluate(() => window.__murmuration.game.run.phase);
     expect(await phase() === 'playing', 'solo zoom: Play should start the run');
     await setSlider(page, 'soloZoomEnabled', 0);
-    await waitFrames(page, ZOOM_HOLD_FRAMES);
-    const off = await readZoom(page);
-    expect(off === 1, `solo zoom: with the knob off the zoom must stay 1, got ${off}`);
+    // The camera eases back to 1 asymptotically, so wait (bounded) until it is within a thousandth, then
+    // require it to stay there while a crowd could be pulling it.
+    const nearOne = (zoom) => Math.abs(zoom - 1) < ZOOM_TOLERANCE;
+    const off = await waitForZoom(page, nearOne);
+    expect(nearOne(off), `solo zoom: with the knob off the zoom must reach 1 within ${ZOOM_SEARCH_FRAMES} frames, got ${off}`);
+    for (let sample = 0; sample < ZOOM_HOLD_FRAMES / 30; sample += 1) {
+      await waitFrames(page, 30);
+      const held = await readZoom(page);
+      expect(nearOne(held), `solo zoom: with the knob off the zoom must stay 1, got ${held}`);
+    }
 
     const reference = await page.evaluate(() => Number(document.querySelector('.lab-panel input[data-knob="soloZoomCrowdReference"]').min));
     await setSlider(page, 'soloZoomEnabled', 1);
