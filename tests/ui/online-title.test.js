@@ -9,8 +9,11 @@ test('onlineTitleView gives each side its labels', () => {
     { onlineLabel: 'ONLINE', statusLine: '', playLabel: 'Play', playEnabled: true, labEnabled: true });
   assert.deepEqual(onlineTitleView({ connected: true, role: 'host', roundTripMilliseconds, waitingFor: null }),
     { onlineLabel: 'DISCONNECT', statusLine: 'PLAYER 2 CONNECTED ONLINE (42 MS)', playLabel: 'Play', playEnabled: true, labEnabled: false });
-  assert.deepEqual(onlineTitleView({ connected: true, role: 'host', roundTripMilliseconds, waitingFor: 1 }),
+  assert.deepEqual(onlineTitleView({ connected: true, role: 'host', roundTripMilliseconds, waitingFor: 'remote' }),
     { onlineLabel: 'DISCONNECT', statusLine: 'PLAYER 2 CONNECTED ONLINE (42 MS)', playLabel: 'WAITING FOR PLAYER 2 TO LOAD', playEnabled: false, labEnabled: false });
+  assert.deepEqual(onlineTitleView({ connected: true, role: 'host', roundTripMilliseconds, waitingFor: 'local' }),
+    { onlineLabel: 'DISCONNECT', statusLine: 'PLAYER 2 CONNECTED ONLINE (42 MS)', playLabel: 'WAITING FOR YOUR GAME TO LOAD', playEnabled: false, labEnabled: false },
+    'the host loading itself is not blamed on player 2');
   assert.deepEqual(onlineTitleView({ connected: true, role: 'guest', roundTripMilliseconds, waitingFor: null }),
     { onlineLabel: 'DISCONNECT', statusLine: 'CONNECTED TO PLAYER 1 ONLINE (42 MS)', playLabel: 'WAITING FOR THE HOST TO START', playEnabled: false, labEnabled: false });
 });

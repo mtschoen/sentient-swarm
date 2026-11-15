@@ -4,6 +4,8 @@
 import { SEAT_COLORS } from '../game/seat-colors.js';
 
 export const ONLINE_ITEM_ID = 'online';
+// The host's Play while a side is still loading (the session's waitingFor), naming that side.
+const PLAY_LABELS = Object.freeze({ local: 'WAITING FOR YOUR GAME TO LOAD', remote: 'WAITING FOR PLAYER 2 TO LOAD' });
 
 function latencyText(roundTripMilliseconds) {
   return Number.isFinite(roundTripMilliseconds) ? ` (${Math.round(roundTripMilliseconds)} MS)` : '';
@@ -15,7 +17,7 @@ export function onlineTitleView({ connected, role, roundTripMilliseconds = null,
     return {
       onlineLabel: 'DISCONNECT',
       statusLine: `PLAYER 2 CONNECTED ONLINE${latencyText(roundTripMilliseconds)}`,
-      playLabel: waitingFor === null ? 'Play' : 'WAITING FOR PLAYER 2 TO LOAD',
+      playLabel: waitingFor === null ? 'Play' : (PLAY_LABELS[waitingFor] ?? PLAY_LABELS.remote),
       playEnabled: waitingFor === null,
       labEnabled: false,
     };
