@@ -45,14 +45,14 @@ test('crowdReference scales the response', () => {
   assert.ok(doubled.near < single.near);
 });
 
-test('far points outside the world are skipped, and an all-outside ring gives far 0', () => {
+test('far points outside the world are clamped to its edge, so a ring wider than the world still sees it', () => {
   let calls = 0;
   const corner = { ...BASE, focusX: 0, focusY: 0, viewWidth: 4, viewHeight: 2.25 };
   sampleZoomPressure({ ...corner, densityAt: () => { calls += 1; return 1; } });
   const nearCalls = ZOOM_SAMPLE_POINTS + 1;
-  assert.ok(calls - nearCalls < ZOOM_SAMPLE_POINTS, `far calls ${calls - nearCalls}`);
-  const huge = sampleZoomPressure({ ...corner, viewWidth: 400, viewHeight: 225, densityAt: () => 1 });
-  assert.equal(huge.far, 0);
+  assert.equal(calls - nearCalls, ZOOM_SAMPLE_POINTS);
+  const huge = sampleZoomPressure({ ...corner, viewWidth: 400, viewHeight: 225, densityAt: (x, y) => (x >= 0 && x <= 32 && y >= 0 && y <= 18 ? 1 : NaN) });
+  assert.ok(huge.far > 0.9, `far ${huge.far}`);
   assert.ok(Number.isFinite(huge.near));
 });
 

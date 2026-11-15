@@ -234,3 +234,19 @@ test('a solo death and the game over while zoomed in at 1.4 ease out with no per
   assert.ok(largestStep < 0.1, `largest per-step zoom change ${largestStep}`);
   assert.ok(game.camera.zoom <= 1.001, `zoom ${game.camera.zoom}`);
 });
+
+test('uniform far-only density settles the zoom at the minimum without hunting', async () => {
+  const { game, simulation } = await startedGame({ density: () => 0 });
+  // A pull-out of ln(1 / 0.6) alone would settle at 0.6; 0.9 asks for below the 0.5 minimum.
+  game.setSoloZoomSetting('pullOut', 0.9);
+  simulation.densityFunction = farOnly(game);
+  runFor(game, 20);
+  const zooms = [];
+  for (let step = 0; step < 60 * 10; step += 1) {
+    game.update(STEP);
+    zooms.push(game.camera.zoom);
+  }
+  assert.ok(Math.abs(game.camera.zoom - 0.5) < 0.02, `zoom ${game.camera.zoom}`);
+  const range = Math.max(...zooms) - Math.min(...zooms);
+  assert.ok(range < 0.01, `range over the last 10 s ${range}`);
+});

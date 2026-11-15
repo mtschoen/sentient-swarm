@@ -1,5 +1,5 @@
 // Zoom pressure sampler for the solo camera zoom: pure, no GPU, DOM or clock. It turns the CPU density
-// map (Game.densityAt, the newest 64 by 36 readback) into two preset-invariant pressures in 0..1:
+// map (Game.densityAt, the newest 128 by 72 readback) into two preset-invariant pressures in 0..1:
 // near (crowding around the focus) and far (action just outside the current view). Each is a ring
 // mean of density divided by capacityScale (capacity / DENSITY_REFERENCE_CAPACITY) and the crowd
 // reference, then passed through a smoothstep.
@@ -21,12 +21,9 @@ export function smoothstep(lower, upper, value) {
   return fraction * fraction * (3 - 2 * fraction);
 }
 
-function insideBounds(x, y, bounds) {
-  return x >= bounds.minX && x <= bounds.maxX && y >= bounds.minY && y <= bounds.maxY;
-}
-
-// The mean density over ZOOM_SAMPLE_POINTS points evenly spaced by angle from 0 on a circle, skipping
-// points outside bounds; extraSamples are always counted. Returns 0 when nothing was sampled.
+// The mean density over ZOOM_SAMPLE_POINTS points evenly spaced by angle from 0 on a circle; a point
+// outside bounds is clamped to the nearest point inside (so a ring wider than the world, as when zoomed
+// far out, still reads the world's edge instead of nothing); extraSamples are always counted.
 function ringMean(densityAt, centerX, centerY, radius, bounds, extraSamples = []) {
   let sum = 0;
   let count = 0;
@@ -36,9 +33,8 @@ function ringMean(densityAt, centerX, centerY, radius, bounds, extraSamples = []
   }
   for (let index = 0; index < ZOOM_SAMPLE_POINTS; index += 1) {
     const angle = (index / ZOOM_SAMPLE_POINTS) * 2 * Math.PI;
-    const x = centerX + radius * Math.cos(angle);
-    const y = centerY + radius * Math.sin(angle);
-    if (!insideBounds(x, y, bounds)) continue;
+    const x = Math.min(bounds.maxX, Math.max(bounds.minX, centerX + radius * Math.cos(angle)));
+    const y = Math.min(bounds.maxY, Math.max(bounds.minY, centerY + radius * Math.sin(angle)));
     sum += densityAt(x, y);
     count += 1;
   }
