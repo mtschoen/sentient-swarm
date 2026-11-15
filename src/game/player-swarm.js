@@ -38,6 +38,8 @@ export const SWARM_SHIP_RADIUS = 0.06 * SWARM_SHIP_SIZE;
 const SPAWN_SCATTER = 0.15;
 
 const TWO_PI = Math.PI * 2;
+// Ship generations are 4 bits (the snapshot codec packs two per byte).
+const GENERATION_MASK = 15;
 const NO_AIM = Object.freeze({ firing: false, aimX: 0, aimY: 0 });
 
 function deadSlot() {
@@ -57,6 +59,11 @@ export class PlayerSwarm {
     this.random = random;
     this.bounds = bounds;
     this.slots = Array.from({ length: MAXIMUM_SWARM_SHIPS }, deadSlot);
+    // Each slot's ship generation (0 to 15): spawnShip counts it up, mirrorShips writes the mirrored
+    // one, so a ship regrown in a reused slot is told apart from the one before (generationOf).
+    this.generations = new Uint8Array(MAXIMUM_SWARM_SHIPS);
+    // mirrorShips' reused slot to entry index table (-1 for a slot the snapshot does not list).
+    this.mirrorEntryIndex = new Int16Array(MAXIMUM_SWARM_SHIPS);
     // Reused outputs: contactShips' per-slot table, ships' alive list and its entries.
     this.contactTable = Array.from({ length: MAXIMUM_SWARM_SHIPS }, () => ({ x: 0, y: 0, alive: false, fresh: false }));
     this.shipEntries = Array.from({ length: MAXIMUM_SWARM_SHIPS }, () => ({ slot: 0, x: 0, y: 0, previousX: 0, previousY: 0, age: 0, heading: 0, gunnerIndex: -1 }));
@@ -157,6 +164,7 @@ export class PlayerSwarm {
     const offset = SPAWN_SCATTER * this.random();
     const temperament = temperamentFor(index);
     this.aliveCountValue += 1;
+    this.generations[index] = (this.generations[index] + 1) & GENERATION_MASK;
     Object.assign(this.slots[index], temperament, {
       alive: true,
       x: x + Math.cos(angle) * offset,
@@ -262,6 +270,49 @@ export class PlayerSwarm {
     slot.alive = false;
     this.aliveCountValue -= 1;
     return { slot: index, x: slot.x, y: slot.y };
+  }
+
+  // The slot's ship generation, 0 to 15: the local spawn count, or the mirrored one for a remote swarm.
+  generationOf(index) {
+    return this.generations[index];
+  }
+
+  // A remote seat's swarm (src/net/remote-seat.js): entries are a SeatSnapshot's ships ({ slot, x,
+  // y, heading, gunnerIndex, generation }, gunnerIndex null or -1 for none). Listed slots become alive
+  // there and every other slot dead. A slot that stays alive with the same generation keeps its prior
+  // position as previous (the drawn blend); a new or regrown ship starts where it is, born now. A
+  // ship that was alive and is now missing or regrown is returned in lost as { slot, x, y }, in slot order.
+  mirrorShips(entries, deltaSeconds) {
+    this.time += deltaSeconds;
+    const entryIndex = this.mirrorEntryIndex;
+    entryIndex.fill(-1);
+    entries.forEach((entry, index) => { entryIndex[entry.slot] = index; });
+    const lost = [];
+    this.slots.forEach((slot, index) => {
+      const listed = entryIndex[index];
+      const entry = listed < 0 ? null : entries[listed];
+      const generation = entry === null ? this.generations[index] : entry.generation & GENERATION_MASK;
+      const same = slot.alive && entry !== null && generation === this.generations[index];
+      if (slot.alive && !same) lost.push({ slot: index, x: slot.x, y: slot.y });
+      if (entry === null) {
+        slot.alive = false;
+        return;
+      }
+      if (!same) Object.assign(slot, temperamentFor(index), { bornSequence: null, bornTime: this.time });
+      slot.previousX = same ? slot.x : entry.x;
+      slot.previousY = same ? slot.y : entry.y;
+      slot.velocityX = deltaSeconds > 0 ? (entry.x - slot.previousX) / deltaSeconds : 0;
+      slot.velocityY = deltaSeconds > 0 ? (entry.y - slot.previousY) / deltaSeconds : 0;
+      slot.alive = true;
+      slot.x = entry.x;
+      slot.y = entry.y;
+      slot.course = entry.heading;
+      slot.heading = entry.heading;
+      slot.gunnerIndex = entry.gunnerIndex ?? -1;
+      this.generations[index] = generation;
+    });
+    this.aliveCountValue = entries.length;
+    return { lost };
   }
 
   // Scored kills: one new ship (spawned at the target) per KILLS_PER_SWARM_SHIP. At the cap the

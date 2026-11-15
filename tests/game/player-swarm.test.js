@@ -401,3 +401,60 @@ test('setGunnerCount rejects counts that are not integers from 0 to the turret c
   swarm.setGunnerCount(12);
   swarm.setGunnerCount(0);
 });
+
+// A mirrored ship entry as a SeatSnapshot lists it (game side: gunnerIndex -1 for none).
+function ship(slot, x, y, generation) {
+  return { slot, x, y, heading: 0, gunnerIndex: -1, generation };
+}
+
+test('generationOf changes when a slot dies and regrows in the same update', () => {
+  const swarm = new PlayerSwarm({ random: () => 0.5 });
+  swarm.reset(5, 5, 3);
+  const before = swarm.generationOf(1);
+  swarm.killShip(1);
+  swarm.spawnShip(5, 5);
+  assert.notEqual(swarm.generationOf(1), before);
+});
+
+test('generationOf stays within 4 bits over many regrowths and visits every value', () => {
+  const swarm = new PlayerSwarm({ random: () => 0.5 });
+  swarm.reset(5, 5, 1);
+  const seen = new Set();
+  for (let index = 0; index < 40; index += 1) {
+    swarm.killShip(0);
+    swarm.spawnShip(5, 5);
+    seen.add(swarm.generationOf(0));
+  }
+  assert.ok([...seen].every((generation) => generation >= 0 && generation <= 15));
+  assert.equal(seen.size, 16);
+});
+
+test('mirrorShips sets the alive ships, reports the lost ones and keeps the previous positions', () => {
+  const swarm = new PlayerSwarm();
+  swarm.mirrorShips([ship(0, 1, 1, 0), ship(1, 2, 2, 0)], 1 / 60);
+  const { lost } = swarm.mirrorShips([ship(0, 1.5, 1, 0), ship(1, 3, 2, 1)], 1 / 60);
+  assert.equal(swarm.aliveCount, 2);
+  assert.deepEqual(lost, [{ slot: 1, x: 2, y: 2 }]);
+  assert.equal(swarm.slots[0].previousX, 1);
+  assert.equal(swarm.slots[0].x, 1.5);
+  assert.equal(swarm.slots[1].previousX, 3, 'a new generation does not blend from the old ship');
+  assert.deepEqual(swarm.mirrorShips([], 1 / 60).lost.map((entry) => entry.slot), [0, 1]);
+  assert.equal(swarm.aliveCount, 0);
+});
+
+test('mirrorShips writes the mirrored generation, maps a null gunner to -1 and stamps bornTime with the swarm time', () => {
+  const swarm = new PlayerSwarm();
+  swarm.mirrorShips([], 0.5);
+  swarm.mirrorShips([
+    { slot: 4, x: 3, y: 4, heading: 1, gunnerIndex: null, generation: 9 },
+    { slot: 7, x: 5, y: 6, heading: -1, gunnerIndex: 2, generation: 3 },
+  ], 0.25);
+  assert.equal(swarm.generationOf(4), 9);
+  assert.equal(swarm.generationOf(7), 3);
+  assert.equal(swarm.time, 0.75);
+  assert.deepEqual(swarm.ships.map((entry) => [entry.slot, entry.gunnerIndex, entry.heading, entry.age]), [[4, -1, 1, 0], [7, 2, -1, 0]]);
+  assert.equal(swarm.slots[4].bornTime, 0.75);
+  swarm.mirrorShips([{ slot: 4, x: 3.5, y: 4, heading: 1, gunnerIndex: null, generation: 9 }], 0.25);
+  assert.equal(swarm.slots[4].bornTime, 0.75, 'a ship that stays keeps its birth');
+  assert.equal(swarm.slots[4].previousX, 3);
+});

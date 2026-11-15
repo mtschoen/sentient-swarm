@@ -31,6 +31,12 @@ export class PlayerSeat {
     this.down = false;
     // Game seconds of contact immunity left after a revive (the contact upload reads it).
     this.invulnerableSeconds = 0;
+    // Online (src/net/online-game.js): a remote seat is driven by the other machine's snapshots
+    // (src/net/remote-seat.js), which also write its firing, contact immunity and beam here.
+    this.remote = false;
+    this.remoteFiring = false;
+    this.remoteInvulnerable = false;
+    this.remoteBeam = null;
   }
 
   get point() {
