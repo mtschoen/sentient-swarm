@@ -2,7 +2,8 @@
 // (local addresses not hidden behind mDNS, so the two peers reach each other over the loopback)
 // play one online hives match over a real WebRTC connection, each step asserted on both pages:
 //   1. the host chooses ONLINE and gets an invite link; the guest opens it, the Join panel shows and
-//      the guest copies its reply; the host types the reply into the box and presses Enter. Both
+//      the guest copies its reply and its panel reads that it waits for the host; after
+//      --paste-delay seconds (0 by default) the host types the reply into the box and presses Enter. Both
 //      titles show the connected line (the host's with the round trip in MS) and the guest's Play
 //      reads WAITING FOR THE HOST TO START.
 //   2. the host's mode item reads MODE: HIVES (the online default) and the host's Play starts the
@@ -19,7 +20,7 @@
 //      silent peer disconnected, about 5 s here) and CONNECTION_LOST_SECONDS later returns it to a
 //      co-op title with the connection lost toast.
 // No console errors on either page. The pages are muted and get no audio gesture that matters.
-// Usage: SMOKE_PORT=5198 node tests/browser/online.mjs
+// Usage: SMOKE_PORT=5198 node tests/browser/online.mjs [--paste-delay 15]
 // Exit codes: 0 ok, 1 failure, 2 no WebGPU adapter.
 import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +42,10 @@ const LOST_MARGIN_SECONDS = 1;
 const SEAT_ONE_COLOR = 'rgb(255, 255, 255)';
 const CENTER_HIVE = 2;
 const WEBRTC_ARGUMENTS = ['--disable-features=WebRtcHideLocalIpsWithMdns'];
+// A slow human host: the guest must still be waiting, with no network message, when the reply is pasted.
+const PASTE_DELAY_INDEX = process.argv.indexOf('--paste-delay');
+const PASTE_DELAY_SECONDS = PASTE_DELAY_INDEX < 0 ? 0 : Number(process.argv[PASTE_DELAY_INDEX + 1]);
+const GUEST_WAITING = 'Waiting for your friend to paste your reply.';
 
 // Runs in every page: logs each change of the run phase, the countdown numeral, the pause note and
 // the title's visibility with the page's absolute time and frame, so both pages can be compared.
@@ -122,6 +127,13 @@ async function connect(host, guestContext) {
   expect(await guest.evaluate(() => location.hash) === '', '1: the guest address bar still holds the invite');
   await guest.locator('.online-panel-button', { hasText: 'Copy reply' }).click();
   const replyText = await guest.evaluate(() => window.__murmuration.online.replyText);
+  await waitUntil(guest, (text) => document.querySelector('.online-panel-status').textContent === text, GUEST_WAITING, CONNECT_MILLISECONDS);
+  if (PASTE_DELAY_SECONDS > 0) {
+    await new Promise((resolve) => setTimeout(resolve, PASTE_DELAY_SECONDS * 1000));
+    const waiting = await guest.evaluate(() => ({ status: document.querySelector('.online-panel-status').textContent, message: document.querySelector('.online-panel-message').textContent }));
+    expect(waiting.status === GUEST_WAITING && waiting.message === '', `1: after ${PASTE_DELAY_SECONDS} s the guest panel reads ${JSON.stringify(waiting)}`);
+    console.log(`online 1: the guest still waits with no message after a ${PASTE_DELAY_SECONDS} s paste delay`);
+  }
 
   const box = host.locator('.online-panel-box');
   await box.fill(replyText);
