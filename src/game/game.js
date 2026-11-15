@@ -26,14 +26,18 @@
 //      like a bomb) and a PICKUP_BLAST_IMPULSE_STRENGTH shockwave; with the blast off it queues
 //      the smaller PICKUP_IMPULSE_STRENGTH impulse instead. A time warp pickup (owner ruling R31)
 //      leaves the weapons alone: it starts or extends timeWarp, plays pickup('timewarp') and its
-//      shockwave is the larger TIME_WARP_IMPULSE_STRENGTH (the blast still fires).
+//      shockwave is the larger TIME_WARP_IMPULSE_STRENGTH (the blast still fires). A beam shard
+//      (beam-time-seats.js) counts toward beamShards and plays pickup('beamshard'); the last one
+//      starts beamTime and plays pickup('beamtime') with a BEAM_TIME_IMPULSE_STRENGTH shockwave.
 //   4. weapons.update (the armed kind, tier, charge and cue cadence; its own volley spawns are not
 //      queued); SwarmFire fires one projectile per ship shot from the ships by the armed recipe and
 //      the rate law, and its shots and then the rail turrets' spawns go to
 //      projectiles.queueSpawn and the beam to setBeam (null on the expiry frame even when the
 //      weapon still returned one). A frame that fires plays one weaponFire cue: the armed weapon's
 //      kind and tier when it fired (spawns or a beam), else 'rail' at the turret tier when only the
-//      turrets fired; then the expiry cue (expiry keeps the turrets).
+//      turrets fired; then the expiry cue (expiry keeps the turrets). During beam time every seat
+//      that is not down has the beam armed (weapons.beginBeamTime); tickBeamTime counts it in real
+//      time next to the time warp and its end plays the expiry cue.
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
 //   6. the spawn director (gates and waves; no waves in Ready) and spawn pressure (both paused
 //      while Dying and Respawning, when the step gets no gates), its seek scale and its spawn
@@ -44,7 +48,9 @@
 //      still run every update) do not change. During a
 //      time warp the director, spawn pressure and the simulation get deltaSeconds times
 //      timeWarp.scale while the projectile step gets the unscaled delta; the warp timer counts
-//      real time (every update not paused). Death, a new run and quit to title end the warp.
+//      real time (every update not paused). Death, a new run and quit to title end the warp. After
+//      the director's update spawnShardsForWaves places a beam shard when its cadence is due; during
+//      beam time the surge multiplies the target and refill rate and every open gate emits.
 //   7. every ready stats frame (readAllStats, oldest first): kills (killsSinceLastRead) score once
 //      per stats frame and only while Playing; kills grow the player swarm (one ship per
 //      KILLS_PER_SWARM_SHIP) and awards add bombs; a frame with pulse ring detonations queues one
@@ -75,12 +81,16 @@ import { Projectiles } from './projectiles.js';
 import { PlayerSeat, SWARM_PICKUP_RADIUS } from './player-seat.js';
 import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND } from './weaponTypes.js';
 import { PickupDirector } from './pickups.js';
+import { BEAM_SHARD_TYPE } from './weaponTypes.js';
+import { BeamTime } from './beam-time.js';
+import { BeamShards } from './beam-shards.js';
+import { BEAM_TIME_IMPULSE_STRENGTH, cancelBeamTime, collectShardFor, rebaseShardCadence, spawnShardsForWaves, tickBeamTime } from './beam-time-seats.js';
 import { Awards, ScoreKeeper } from './score.js';
 import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
 import { TimeWarp } from './time-warp.js';
 import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS } from './player-swarm.js';
-import { SpawnPressure } from '../sim/spawner.js';
+import { DEFAULT_BEAM_TIME_SURGE, SpawnPressure } from '../sim/spawner.js';
 import { createWatchPressure, moveWatchPoint } from './watch.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
 import { MAXIMUM_PLAYER_SEATS, SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
@@ -145,6 +155,10 @@ export class Game {
     this.pendingProjectileSeconds = 0;
     this.sceneSeconds = 0;
     this.timeWarp = new TimeWarp();
+    // Beam shards (collected count and cadence), beam time (the timed beam window) and its spawn surge.
+    this.beamShards = new BeamShards();
+    this.beamTime = new BeamTime();
+    this.beamTimeSurge = DEFAULT_BEAM_TIME_SURGE;
     this.clock = clock ?? (() => this.simulation.time);
     this.spawnPressure = spawnPressure ?? new SpawnPressure({ capacity });
     this.spawnDirector = spawnDirector ?? new SpawnDirector({ random });
@@ -241,6 +255,9 @@ export class Game {
       seats: this.seats.map((seat, index) => seat.stateEntry(this.revival.progress(index))),
       bombs: this.run.bombs,
       timeWarp: this.timeWarp.fraction,
+      beamShards: this.beamShards.count,
+      beamShardsNeeded: this.beamShards.needed,
+      beamTime: this.beamTime.fraction,
       offeredType: this.pickups.offeredType,
       phase: this.paused ? 'paused' : this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
@@ -394,6 +411,8 @@ export class Game {
     this.spawnPressure.reset();
     this.spawnDirector.reset();
     this.timeWarp.end();
+    cancelBeamTime(this);
+    this.beamShards.reset();
     this.projectiles.clear();
     this.simulation.requestKillAll();
     this.run.setRespawnSequence(this.simulation.frameSequence + 1);
@@ -417,7 +436,7 @@ export class Game {
   // The quality probe measures only real play: Playing outside the lab, with no capacity change in
   // flight (so a lab mix never steps or persists a preset, and the lab-leave rate restore holds).
   get acceptsProbeFrames() {
-    return this.run.phase === RunPhase.Playing && !this.paused && !this.labActive && !this.capacitySwap.pending;
+    return this.run.phase === RunPhase.Playing && !this.paused && !this.labActive && !this.capacitySwap.pending && !this.beamTime.active;
   }
 
   update(deltaSeconds) {
@@ -478,6 +497,7 @@ export class Game {
     }
 
     this.timeWarp.update(deltaSeconds);
+    tickBeamTime(this, deltaSeconds);
     this.pendingSimulationSeconds += deltaSeconds * this.timeWarp.scale;
     this.pendingProjectileSeconds += deltaSeconds;
     this.updatesSinceSimulationStep += 1;
@@ -518,7 +538,11 @@ export class Game {
     // Only a two-seat game tells the effect which seat collected.
     const seatArguments = this.seats.length > 1 ? [seat.index] : [];
     const timeWarp = collected === 'timewarp';
-    if (timeWarp) {
+    const shard = collected === BEAM_SHARD_TYPE;
+    let opensBeamTime = false;
+    if (shard) {
+      opensBeamTime = collectShardFor(this, seat);
+    } else if (timeWarp) {
       this.timeWarp.start();
       this.effects?.pickup?.('timewarp', ...seatArguments);
     } else {
@@ -528,7 +552,8 @@ export class Game {
     const blast = this.pickupBlastRadiusValue > 0;
     if (blast) this.simulation.requestRadialKill(x, y, this.pickupBlastRadiusValue);
     const strength = blast ? PICKUP_BLAST_IMPULSE_STRENGTH : PICKUP_IMPULSE_STRENGTH;
-    this.queueImpulse(x, y, timeWarp ? TIME_WARP_IMPULSE_STRENGTH : strength, false);
+    if (opensBeamTime) this.queueImpulse(x, y, BEAM_TIME_IMPULSE_STRENGTH, true);
+    else this.queueImpulse(x, y, timeWarp ? TIME_WARP_IMPULSE_STRENGTH : strength, false);
   }
 
   // Gamepad and keyboard restart: a fresh fire or bomb press once the guard window has passed.
@@ -544,6 +569,8 @@ export class Game {
     this.stepGates = null;
     if (phase === RunPhase.Dying || phase === RunPhase.Respawning) return NO_SPAWNS;
     const primary = primarySeat(this.seats);
+    const surging = this.beamTime.active && !this.watching;
+    pressure.setSurge(surging ? this.beamTimeSurge : 1);
     this.spawnDirector.update(deltaSeconds, {
       playerX: primary.point.x,
       playerY: primary.point.y,
@@ -559,9 +586,12 @@ export class Game {
       aimX: primary.player.aim.x,
       aimY: primary.player.aim.y,
       partner: partnerFor(this.seats),
+      surging,
     });
     this.stepGates = this.spawnDirector.spawnGates;
-    return pressure.update(deltaSeconds, this.latestStats, this.simulation.shares, this.simulation.frameSequence + 1, this.spawnDirector.wave);
+    if (phase === RunPhase.Playing) spawnShardsForWaves(this);
+    // Beam time surges the spawning: a null wave trickles refills every step, past the wave bank.
+    return pressure.update(deltaSeconds, this.latestStats, this.simulation.shares, this.simulation.frameSequence + 1, surging ? null : this.spawnDirector.wave);
   }
 
   stepSimulation(deltaSeconds, spawnPerSpecies, spawnGates = null, projectileDeltaSeconds = deltaSeconds) {
@@ -609,6 +639,7 @@ export class Game {
         this.run.setRespawnSequence(this.simulation.frameSequence + 1);
         this.spawnPressure.reset();
         this.spawnDirector.reset();
+        rebaseShardCadence(this);
         break;
       case 'gameOver':
         // The phase itself freezes play until restart; the restart guard counts from here.
@@ -670,6 +701,13 @@ export class Game {
     this.initialSwarmShips = count;
     // A down seat stays empty until a revive refills it.
     this.seats.forEach((seat) => { if (!seat.down) seat.swarm.reset(seat.point.x, seat.point.y, count); });
+  }
+
+  // The beam time spawn surge strength (the lab sets it); throws RangeError outside [1, MAXIMUM_BEAM_TIME_SURGE].
+  setBeamTimeSurge(strength) {
+    this.spawnPressure.setSurge(strength);
+    this.spawnPressure.setSurge(1);
+    this.beamTimeSurge = strength;
   }
 
   // The pickup blast radius in world units (the lab sets it); 0 turns the blast off.

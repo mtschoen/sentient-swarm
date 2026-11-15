@@ -7,6 +7,7 @@
 
 import { SWARM_SHIP_RADIUS } from './player-swarm.js';
 import { REVIVE_SHIPS, revivePoint } from './seat-revival.js';
+import { cancelBeamTime, joinBeamTime } from './beam-time-seats.js';
 
 // Two seats start this far either side of the bounds center on x.
 export const SEAT_START_OFFSET = 1.5;
@@ -144,6 +145,7 @@ export function applySwarmHits(game, stats) {
   } else if (game.run.playerHit(stats.frameSequence, latest.last)) {
     game.seats.forEach((seat) => seat.weapons.dropAll());
     game.timeWarp.end();
+    cancelBeamTime(game);
     game.score.recordHit();
     game.effects?.death();
   }
@@ -169,6 +171,7 @@ export function reviveSeats(game, kills) {
     const seat = game.seats[index];
     const point = revivePoint(survivor.point, game.worldBounds, seat.player.radius);
     seat.revive(point, REVIVE_SHIPS);
+    if (game.beamTime.active) joinBeamTime(game, seat);
     game.queueImpulse(point.x, point.y, REVIVE_IMPULSE_STRENGTH, false);
   }
 }

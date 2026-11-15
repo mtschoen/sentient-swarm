@@ -90,6 +90,13 @@ export class BeamShards {
     this.#tally = 0;
   }
 
+  // The wave counter restarted (the spawn director reset): count again from its next wave, keeping
+  // the collected shards.
+  rebase() {
+    this.#tally = 0;
+    this.#lastSequence = 0;
+  }
+
   reset() {
     this.#count = 0;
     this.#tally = 0;

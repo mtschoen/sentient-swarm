@@ -207,3 +207,12 @@ test('an anchor in a world corner still yields an off-screen point', () => {
     assert.ok(Number.isFinite(point.x) && Number.isFinite(point.y));
   }
 });
+
+test('rebase restarts the wave count from the director reset and keeps the collected shards', () => {
+  const shards = new BeamShards({ waveInterval: 3 });
+  shards.collect();
+  assert.equal(shards.onWaves(3, IDLE), 1);
+  shards.rebase();
+  assert.equal(shards.onWaves(3, IDLE), 1, 'three fresh waves after a reset are one interval');
+  assert.equal(shards.count, 1);
+});
