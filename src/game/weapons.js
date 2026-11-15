@@ -18,6 +18,8 @@ export function railTurretOffsets(count) {
 // pickups instead add turrets (railTurrets, up to MAXIMUM_RAIL_TURRETS, then railTier), which fire
 // rail shots alongside it on their own accumulator, have no charge and are lost only by dropAll.
 export class WeaponState {
+  #held = null;
+
   constructor({ types = WEAPON_TYPES, random = Math.random } = {}) {
     this.types = types;
     this.random = random;
@@ -35,16 +37,43 @@ export class WeaponState {
       else this.railTier = Math.min(MAXIMUM_TIER, this.railTier + 1);
       return { swapped: false, tier: this.tier, railTurrets: this.railTurrets, railTier: this.railTier };
     }
-    const swapped = this.armed !== typeName;
+    // Under beam time the normal swap and tier-up rules change the stashed loadout, not the beam.
+    return this.#collectInto(this.#held ?? this, typeName);
+  }
+
+  // The swap and tier-up rule over any { armed, tier, charge } object (the state or the stash).
+  #collectInto(loadout, typeName) {
+    const swapped = loadout.armed !== typeName;
     if (swapped) {
-      this.tier = Math.max(1, this.tier - 1);
-      this.armed = typeName;
-      this.accumulator = 0;
+      loadout.tier = Math.max(1, loadout.tier - 1);
+      loadout.armed = typeName;
     } else {
-      this.tier = Math.min(MAXIMUM_TIER, this.tier + 1);
+      loadout.tier = Math.min(MAXIMUM_TIER, loadout.tier + 1);
     }
+    loadout.charge = 1;
+    if (swapped && loadout === this) this.accumulator = 0;
+    return { swapped, tier: loadout.tier, railTurrets: this.railTurrets, railTier: this.railTier };
+  }
+
+  // Beam time: arm the beam at `tier` with a full charge that does not drain, stashing the loadout.
+  beginBeamTime(tier) {
+    if (this.#held !== null) return;
+    this.#held = { armed: this.armed, tier: this.tier, charge: this.charge };
+    this.armed = 'beam';
+    this.tier = tier;
     this.charge = 1;
-    return { swapped, tier: this.tier, railTurrets: this.railTurrets, railTier: this.railTier };
+    this.accumulator = 0;
+  }
+
+  endBeamTime() {
+    if (this.#held === null) return;
+    ({ armed: this.armed, tier: this.tier, charge: this.charge } = this.#held);
+    this.#held = null;
+    this.accumulator = 0;
+  }
+
+  get beamTimeActive() {
+    return this.#held !== null;
   }
 
   // Back to the base gun (charge expiry); the turrets stay.
@@ -57,6 +86,7 @@ export class WeaponState {
 
   // Death, a new run and quit to title: the base gun and no turrets.
   dropAll() {
+    this.#held = null;
     this.dropArmed();
     this.railTurrets = 0;
     this.railTier = 1;
@@ -100,7 +130,7 @@ export class WeaponState {
     }
     this.fireTurrets(deltaSeconds, result.turretSpawns, { x, y, directionX, directionY });
 
-    if (!this.isBase) {
+    if (!this.isBase && this.#held === null) {
       this.charge -= deltaSeconds / values.chargeSeconds;
       if (this.charge <= EXPIRY_EPSILON) {
         this.dropArmed();

@@ -402,3 +402,86 @@ test('zero aim while firing resets the accumulator', () => {
   assert.equal(weapons.accumulator, 0);
   assert.equal(weapons.railAccumulator, 0);
 });
+
+test('beam time arms the beam at full charge that does not drain, and ending it restores the loadout', () => {
+  const weapons = makeWeapons();
+  weapons.collect('scatter');
+  weapons.collect('scatter');
+  weapons.charge = 0.5;
+  weapons.beginBeamTime(1);
+  assert.deepEqual([weapons.armed, weapons.tier, weapons.beamTimeActive], ['beam', 1, true]);
+  const results = [];
+  for (let index = 0; index < 100; index += 1) results.push(weapons.update(0.1, aim));
+  assert.equal(weapons.charge, 1);
+  assert.equal(results.some((result) => result.expired), false);
+  weapons.endBeamTime();
+  assert.deepEqual([weapons.armed, weapons.tier, weapons.charge, weapons.beamTimeActive], ['scatter', 2, 0.5, false]);
+});
+
+test('beam time on the base gun restores the base gun', () => {
+  const weapons = makeWeapons();
+  weapons.beginBeamTime(1);
+  weapons.endBeamTime();
+  assert.equal(weapons.isBase, true);
+  assert.equal(weapons.charge, 0);
+});
+
+test('collecting during beam time changes the stashed loadout and leaves the beam armed', () => {
+  const weapons = makeWeapons();
+  weapons.collect('scatter');
+  weapons.collect('scatter');
+  weapons.beginBeamTime(1);
+  const swapped = weapons.collect('pulse');
+  assert.equal(swapped.swapped, true);
+  assert.equal(weapons.armed, 'beam');
+  weapons.endBeamTime();
+  assert.deepEqual([weapons.armed, weapons.tier, weapons.charge], ['pulse', 1, 1]);
+
+  const tiering = makeWeapons();
+  tiering.collect('scatter');
+  tiering.collect('scatter');
+  tiering.beginBeamTime(1);
+  const result = tiering.collect('scatter');
+  assert.deepEqual([result.swapped, result.tier], [false, 3]);
+  tiering.endBeamTime();
+  assert.deepEqual([tiering.armed, tiering.tier], ['scatter', 3]);
+});
+
+test('rail pickups during beam time add turrets that fire beside the beam', () => {
+  const weapons = makeWeapons();
+  weapons.beginBeamTime(1);
+  weapons.collect('rail');
+  assert.equal(weapons.railTurrets, 1);
+  assert.equal(weapons.armed, 'beam');
+  const results = run(weapons, 1, aim);
+  assert.ok(results.some((result) => result.turretSpawns.length > 0));
+  weapons.endBeamTime();
+  assert.equal(weapons.railTurrets, 1);
+});
+
+test('dropAll during beam time returns to base and a later endBeamTime changes nothing', () => {
+  const weapons = makeWeapons();
+  weapons.collect('scatter');
+  weapons.beginBeamTime(1);
+  weapons.dropAll();
+  assert.deepEqual([weapons.armed, weapons.beamTimeActive, weapons.isBase], ['base', false, true]);
+  weapons.endBeamTime();
+  assert.equal(weapons.isBase, true);
+});
+
+test('beginBeamTime twice never stashes the beam itself', () => {
+  const weapons = makeWeapons();
+  weapons.collect('scatter');
+  weapons.beginBeamTime(1);
+  weapons.beginBeamTime(2);
+  assert.equal(weapons.tier, 1);
+  weapons.endBeamTime();
+  assert.deepEqual([weapons.armed, weapons.tier], ['scatter', 1]);
+});
+
+test('the override beam fires at the tier one half width', () => {
+  const weapons = makeWeapons();
+  weapons.beginBeamTime(1);
+  const result = weapons.update(STEP, aim);
+  assert.equal(result.beam.halfWidth, WEAPON_TYPES.beam.tiers[0].radius);
+});
