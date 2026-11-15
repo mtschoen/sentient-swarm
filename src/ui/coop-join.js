@@ -1,11 +1,13 @@
 // Ties press-to-join to the page: polls SeatJoin at the title, seats the pad in the input and menus,
-// toasts, and keeps the banner current.
+// toasts, and keeps the banner and the per-seat controller status rows current.
 import { SeatJoin } from '../input/seat-join.js';
 import { createJoinBanner } from './join-banner.js';
+import { createPadStatus } from './pad-status.js';
 
 export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorObject = navigator, documentObject = document }) {
   const seatJoin = new SeatJoin();
   const banner = createJoinBanner(menuElement, { documentObject });
+  const padStatus = createPadStatus(menuElement, { documentObject });
   let titleWasOpen = false;
   const gamepads = () => Array.from(navigatorObject.getGamepads?.() ?? []);
 
@@ -26,6 +28,7 @@ export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorOb
         hud.showToast('Player 2 left');
       }
       banner.update({ joined: seatJoin.joined, visible: titleOpen });
+      padStatus.update({ pads: gamepads(), seatTwoPad: seatJoin.joined ? seatJoin.seatTwoPad : null, visible: titleOpen });
     },
     get playerCount() {
       return seatJoin.joined ? 2 : 1;

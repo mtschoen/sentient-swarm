@@ -36,9 +36,8 @@ import { createRotateOverlay } from './ui/rotateOverlay.js';
 import { createFullscreenController } from './ui/fullscreen.js';
 import { createMenuInput } from './input/menuInput.js';
 import { createCoopJoin } from './ui/coop-join.js';
+import { shortPadId } from './ui/pad-status.js';
 import { createRotateBackHandler, createSettingsOpener, routeMenuActions, routeSettingsKey } from './ui/menuRouting.js';
-
-const GAMEPAD_TOAST_MAXIMUM_ID_LENGTH = 40;
 
 window.__murmuration = { ready: false, frame: 0, stats: null, loading: { done: false } };
 
@@ -214,7 +213,7 @@ async function boot() {
     dispatch: () => {},
   }));
   window.addEventListener('gamepadconnected', (event) => {
-    hud.showToast(`Gamepad connected: ${String(event.gamepad?.id ?? 'controller').slice(0, GAMEPAD_TOAST_MAXIMUM_ID_LENGTH)}`);
+    hud.showToast(`Gamepad connected: ${shortPadId(event.gamepad)}`);
     if (coopJoin?.handleConnect(event.gamepad?.index)) hud.showToast('Player 2 controller reconnected');
   });
   // Seat 2's pad leaving mid-run pauses under the pause menu; the same pad returning (any index) reclaims the seat.

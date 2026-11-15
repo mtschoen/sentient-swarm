@@ -10,7 +10,7 @@
 //   C. ?swarm=1, seat 1 invulnerable, seat 2 parked: seat 2 goes down, then seat 1 fires and 100 kills
 //      revive it beside seat 1, then with contact back on and no input the run ends.
 //   D. the HUD with two seat rows at 844 by 390: artifacts/coop-hud-844x390.png.
-//   E. the title at 844 by 390: the join banner overlaps no button, the title or the link.
+//   E. the title at 844 by 390: the join banner and the two pad status rows overlap no button, the title, the link or each other.
 // The pages get no user gesture the audio could unlock on, and the browser is launched muted.
 // Usage: SMOKE_PORT=5198 node tests/browser/coop.mjs
 // Exit codes: 0 ok, 1 failure.
@@ -294,14 +294,17 @@ async function runE(browser, server) {
   await addPad(page, 1);
   await waitFrames(page, SEARCH_FRAMES);
   const overlaps = () => page.evaluate(() => {
-    const banner = document.querySelector('.join-banner');
-    const bannerBox = banner.getBoundingClientRect();
-    if (banner.hidden || bannerBox.height === 0) return ['the banner is not showing'];
-    const others = document.querySelectorAll('.menu-title-screen button, .menu-title-screen a, .menu-title-screen .menu-title');
-    return [...others].filter((element) => {
+    const showing = [...document.querySelectorAll('.join-banner, .pad-status')];
+    if (showing.length !== 3 || showing.some((element) => element.hidden || element.getBoundingClientRect().height === 0)) return ['the banner or a status row is not showing'];
+    const others = [...document.querySelectorAll('.menu-title-screen button, .menu-title-screen a, .menu-title-screen .menu-title')];
+    const hit = (first, second) => first.left < second.right && first.right > second.left && first.top < second.bottom && first.bottom > second.top;
+    const found = [];
+    showing.forEach((element, index) => {
       const box = element.getBoundingClientRect();
-      return box.left < bannerBox.right && box.right > bannerBox.left && box.top < bannerBox.bottom && box.bottom > bannerBox.top;
-    }).map((element) => element.textContent);
+      for (const other of others) if (hit(box, other.getBoundingClientRect())) found.push(`${element.className} over ${other.textContent}`);
+      for (const rest of showing.slice(index + 1)) if (hit(box, rest.getBoundingClientRect())) found.push(`${element.className} over ${rest.className}`);
+    });
+    return found;
   });
   expect((await overlaps()).length === 0, `E: the invite banner overlaps ${await overlaps()}`);
   await tap(page, 1, 0);

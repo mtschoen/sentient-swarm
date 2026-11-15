@@ -29,3 +29,13 @@
 .join-banner { position: absolute; left: 50%; top: calc(max(0px, env(safe-area-inset-top)) + 44px); transform: translateX(-50%); width: min(560px, 86vw); text-align: center; font-size: clamp(11px, 2.4vmin, 15px); font-weight: 700;
   letter-spacing: 0.08em; line-height: 1.4; text-shadow: 0 0 10px currentColor; pointer-events: none; }
 .join-banner[hidden] { display: none; }
+
+/* Controller status (pad-status.js): one row per seat in the bottom left corner, always laid out while the title shows (fixed height, so text changes never move anything), clear of the centered list and the source link, never taking a touch. The dot brightens while any button on the pad is pressed. */
+.pad-status { position: absolute; left: max(12px, env(safe-area-inset-left)); width: min(250px, 28vw); height: 7em; overflow: hidden; box-sizing: border-box; padding-left: 1.4em;
+  font-size: clamp(8px, 1.8vmin, 11px); font-weight: 700; letter-spacing: 0.04em; line-height: 1.4; text-align: left; opacity: 0.6; pointer-events: none; }
+.pad-status::before { content: '\25CF'; position: absolute; left: 0; top: 0; opacity: 0.25; }
+.pad-status-one { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 7.4em); }
+.pad-status-two { bottom: max(12px, env(safe-area-inset-bottom)); }
+.pad-status-pressed { opacity: 1; text-shadow: 0 0 8px currentColor; }
+.pad-status-pressed::before { opacity: 1; }
+.pad-status[hidden] { display: none; }
