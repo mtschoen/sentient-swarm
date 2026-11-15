@@ -32,6 +32,13 @@
 // changed by updateHives) goes out as a hiveCaptured event, which plays the guest's capture
 // shockwave once. Every HOST_STATE_UPDATE_INTERVAL-th update's snapshot carries the host's
 // HostState (host-state.js), which the guest applies only when newer than the last (hostState).
+// Pickups (Task 4.3): the host's director alone places and ages them; its PickupLedger announces
+// each (pickupAnnounced) and its expiry (pickupExpired) by id. The host's own seat takes a pickup it
+// reaches at once; the guest's seat only claims one (pickupClaim, once per id), which the host
+// grants when the pickup is still there. Each grant goes out as pickupCollected; the collector's
+// machine arms the weapon and the other plays the same blast at the same place with no weapon
+// change (applyCollection's arm false). The guest removes a pickup on its collection or expiry,
+// which also answers its claim; a refused claim is never sent again.
 // Pings and pongs are answered and fed to the clock as they arrive; every other event is kept for
 // the update that drains it (receivedEvents). A message that does not decode is dropped.
 
@@ -47,6 +54,8 @@ import { HOST_STATE_UPDATE_INTERVAL, INTERPOLATION_DELAY_SECONDS, PING_INTERVAL_
 import { RemoteSeatDriver } from './remote-seat.js';
 import { ShotRelay } from './shot-relay.js';
 import { buildSeatSnapshot } from './seat-snapshot.js';
+import { GuestPickups, PickupLedger, findReachedPickup } from './pickup-ledger.js';
+import { applyCollection } from '../game/pickup-collect.js';
 import { applyHostState, buildHostState } from './host-state.js';
 import { decodeSnapshot, encodeSnapshot } from './snapshot-codec.js';
 import { TransportChannel } from './transport.js';
@@ -96,6 +105,9 @@ export class OnlineGame {
     this.droppedMessages = 0;
     // The newest HostState the guest applied (null before the first, and on the host).
     this.hostState = null;
+    // The host names its director's pickups; the guest keeps the host's (from attach).
+    this.pickupLedger = new PickupLedger();
+    this.guestPickups = null;
     transport.onMessage((channel, bytes) => this.#receive(channel, bytes));
   }
 
@@ -113,6 +125,7 @@ export class OnlineGame {
     this.#mirroredInRun = false;
     this.referee.reset();
     this.#resultSent = false;
+    this.guestPickups = new GuestPickups(game.pickups);
     game.online = this;
   }
 
@@ -127,6 +140,67 @@ export class OnlineGame {
   // Sent on the events channel at the end of this update.
   queueEvent(event) {
     this.#outbox.push(event);
+  }
+
+  // Host, after its director's update: the new pickups announced and the gone ones expired.
+  observePickups(game) {
+    if (!this.isHost) return;
+    const { announced, expired } = this.pickupLedger.observe(game.pickups.pickups);
+    for (const entry of announced) this.queueEvent({ type: 'pickupAnnounced', ...entry });
+    for (const id of expired) this.queueEvent({ type: 'pickupExpired', id });
+  }
+
+  // Guest, in place of the director's update: the host's pickup events, then the fade (Playing).
+  agePickups(game, deltaSeconds) {
+    const pickups = this.guestPickups;
+    for (const event of this.receivedEvents) {
+      if (event.type === 'pickupAnnounced') pickups.announce(event);
+      else if (event.type === 'pickupExpired') pickups.remove(event.id);
+      else if (event.type === 'pickupCollected') {
+        pickups.remove(event.id);
+        const seat = game.seats[event.seat];
+        if (seat !== undefined) applyCollection(game, seat, event.pickupType, event.x, event.y, { arm: event.seat === this.localSeatIndex });
+      }
+    }
+    if (game.run.phase === RunPhase.Playing) pickups.age(deltaSeconds, game.pickups.fadeSeconds);
+  }
+
+  // The local seat's reach (Playing): the host takes the pickup at once, then grants the guest's
+  // claims; the guest claims the pickup it reaches.
+  collectFor(game, seat) {
+    if (seat.index !== this.localSeatIndex) return;
+    const reached = findReachedPickup(seat, game.pickups.pickups);
+    const { x, y } = seat.point;
+    if (this.isGuest) {
+      if (reached !== null && reached.id !== undefined && this.guestPickups.claim(reached.id)) this.queueEvent({ type: 'pickupClaim', id: reached.id, x, y });
+      return;
+    }
+    if (reached !== null) this.#grant(game, seat, this.pickupLedger.idOf(reached), x, y);
+    for (const event of this.receivedEvents) {
+      if (event.type === 'pickupClaim') this.#grant(game, game.seats[this.remoteSeatIndex], event.id, event.x, event.y);
+    }
+  }
+
+  // Host: the pickup taken for seat (refused once gone), announced and collected at x, y as the
+  // guest will read it (f32).
+  #grant(game, seat, id, x, y) {
+    const pickup = id === null ? null : this.pickupLedger.take(id, game.pickups.pickups);
+    if (pickup === null) return;
+    const at = { x: Math.fround(x), y: Math.fround(y) };
+    this.queueEvent({ type: 'pickupCollected', id, seat: seat.index, pickupType: pickup.type, ...at });
+    applyCollection(game, seat, pickup.type, at.x, at.y, { arm: seat.index === this.localSeatIndex });
+  }
+
+  // Guest claims sent and not yet answered.
+  get pickupClaimsPending() {
+    return this.guestPickups?.pending.size ?? 0;
+  }
+
+  // For a new match (Task 5.2's resetMatch): the ledger forgets its pickups (ids keep counting)
+  // and the guest its claims.
+  resetPickups() {
+    this.pickupLedger.reset();
+    this.guestPickups?.reset();
   }
 
   // The local seat's beam this update (fireSeats), for the next snapshot.

@@ -19,7 +19,7 @@
 //      the beam armed the aim turns at most beamTurnRevolutionsPerSecond (0 is instant). After the
 //      swarm moves, followCamera eases the camera toward cameraFocus (the point and the swarm
 //      centroid; held still while watching); a start, a quit and a respawn cut it there.
-//   3. pickups.update, then collect at the player into weapons.collect (before charge expiry; a
+//   3. pickups.update, then collect at the player (pickup-collect.js) into weapons.collect (before charge expiry; a
 //      rail pickup adds a turret (a gunner ship of the swarm) and leaves the armed weapon alone, owner ruling R29); a
 //      collection plays the pickup effect and, with pickupBlastRadius above 0, fires the pickup
 //      blast (owner ruling R22): simulation.requestRadialKill at the ship for this step (unscored,
@@ -86,11 +86,12 @@
 // it; start() (the lab's Play) leaves it too.
 import { Projectiles } from './projectiles.js';
 import { NEUTRAL_INPUT, PlayerSeat, SWARM_PICKUP_RADIUS } from './player-seat.js';
-import { BEAM_SHARD_TYPE, DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND } from './weaponTypes.js';
+import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND } from './weaponTypes.js';
 import { PickupDirector } from './pickups.js';
+import { collectFor } from './pickup-collect.js';
 import { BeamTime } from './beam-time.js';
 import { BeamShards } from './beam-shards.js';
-import { BEAM_TIME_IMPULSE_STRENGTH, cancelBeamTime, collectShardFor, rebaseShardCadence, spawnShardsForWaves, tickBeamTime } from './beam-time-seats.js';
+import { cancelBeamTime, rebaseShardCadence, spawnShardsForWaves, tickBeamTime } from './beam-time-seats.js';
 import { Awards, ScoreKeeper } from './score.js';
 import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
@@ -113,9 +114,6 @@ import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
 const RING_IMPULSE_STRENGTH = 0.3;
-const PICKUP_IMPULSE_STRENGTH = 0.15;
-const PICKUP_BLAST_IMPULSE_STRENGTH = 0.5;
-const TIME_WARP_IMPULSE_STRENGTH = 0.6;
 export const DEFAULT_PICKUP_BLAST_RADIUS = 1.5;
 // Player swarm spike: a swarm ship collects pickups this close; the run has one life, lost when
 // the last swarm ship (of the last seat) dies, so the death clear and game over follow.
@@ -533,7 +531,9 @@ export class Game {
     this.followCamera(deltaSeconds);
 
     const anchor = pickupAnchor(seats);
-    this.pickups.update(deltaSeconds, {
+    // Online the guest only ages the host's pickups; the host names its own (pickup-ledger.js).
+    if (this.online?.isGuest) this.online.agePickups(this, deltaSeconds);
+    else this.pickups.update(deltaSeconds, {
       playerX: anchor.x,
       playerY: anchor.y,
       onBaseGun: seats.every((seat) => seat.down || seat.weapons.isBase),
@@ -541,7 +541,8 @@ export class Game {
       phasePlaying: playing,
       densityAt: this.densityAt,
     });
-    if (playing) seats.forEach((seat) => { if (!seat.down) this.collectFor(seat); });
+    this.online?.observePickups(this);
+    if (playing) seats.forEach((seat) => { if (!seat.down && !seat.remote) (this.online ? this.online.collectFor(this, seat) : collectFor(this, seat)); });
 
     fireSeats(this, deltaSeconds, playing, inputs, controls);
 
@@ -591,32 +592,6 @@ export class Game {
   inputFor(seat) {
     if (seat.remote) return NEUTRAL_INPUT;
     return seat.index === this.localSeatIndex ? this.input.state : this.input.seatTwoState;
-  }
-
-  // A pickup at this seat: its weapon (or the global time warp), the blast and the shockwave.
-  collectFor(seat) {
-    const collected = seat.collectPickup(this.pickups);
-    if (collected === null) return;
-    const { x, y } = seat.point;
-    // Only a two-seat game tells the effect which seat collected.
-    const seatArguments = this.seats.length > 1 ? [seat.index] : [];
-    const timeWarp = collected === 'timewarp';
-    const shard = collected === BEAM_SHARD_TYPE;
-    let opensBeamTime = false;
-    if (shard) {
-      opensBeamTime = collectShardFor(this, seat);
-    } else if (timeWarp) {
-      this.timeWarp.start();
-      this.effects?.pickup?.('timewarp', ...seatArguments);
-    } else {
-      seat.weapons.collect(collected);
-      this.effects?.pickup?.(...(seatArguments.length > 0 ? [undefined, ...seatArguments] : []));
-    }
-    const blast = this.pickupBlastRadiusValue > 0;
-    if (blast) this.simulation.requestRadialKill(x, y, this.pickupBlastRadiusValue);
-    const strength = blast ? PICKUP_BLAST_IMPULSE_STRENGTH : PICKUP_IMPULSE_STRENGTH;
-    if (opensBeamTime) this.queueImpulse(x, y, BEAM_TIME_IMPULSE_STRENGTH, true);
-    else this.queueImpulse(x, y, timeWarp ? TIME_WARP_IMPULSE_STRENGTH : strength, false);
   }
 
   // Gamepad and keyboard restart: a fresh fire or bomb press once the guard window has passed.
