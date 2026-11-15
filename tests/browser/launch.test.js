@@ -35,6 +35,13 @@ test('measuring appends the uncapped frame flags on every platform', () => {
   }
 });
 
+test('extra arguments are appended after the platform and measuring flags', () => {
+  const extra = ['--disable-features=WebRtcHideLocalIpsWithMdns'];
+  assert.deepEqual(webGpuFlagsFor({ platform: 'win32', extraArguments: extra }), [...WIN32_EXPECTED, ...extra]);
+  assert.deepEqual(webGpuFlagsFor({ platform: 'linux', measuring: true, extraArguments: extra }).slice(-3),
+    ['--disable-gpu-vsync', '--disable-frame-rate-limit', ...extra]);
+});
+
 test('flag lists are fresh copies', () => {
   const first = webGpuFlagsFor({ platform: 'win32' });
   first.push('--extra');

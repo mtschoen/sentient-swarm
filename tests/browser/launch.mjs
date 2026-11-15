@@ -24,9 +24,10 @@ const LINUX_FLAGS = [
 ];
 const UNCAPPED_FRAME_FLAGS = ['--disable-gpu-vsync', '--disable-frame-rate-limit'];
 
-export function webGpuFlagsFor({ platform = process.platform, measuring = false } = {}) {
+// extraArguments (a check's own flags) come after the platform's and the measuring flags.
+export function webGpuFlagsFor({ platform = process.platform, measuring = false, extraArguments = [] } = {}) {
   const base = platform === 'win32' ? WIN32_FLAGS : LINUX_FLAGS;
-  return measuring ? [...base, ...UNCAPPED_FRAME_FLAGS] : [...base];
+  return [...base, ...(measuring ? UNCAPPED_FRAME_FLAGS : []), ...extraArguments];
 }
 
 // WEBGPU_ADAPTER=fallback forces the software adapter (test-side only, never the default).
@@ -44,11 +45,9 @@ function isWebGpuError(text) {
   return lowered.includes('webgpu') && lowered.includes('error');
 }
 
-// contextOptions (viewport, hasTouch, isMobile, deviceScaleFactor) opens the page in its own context.
-export async function launchWebGpuBrowser({ measuring = false, contextOptions = null } = {}) {
-  const argumentsList = webGpuFlagsFor({ platform: process.platform, measuring });
-  const browser = await chromium.launch({ headless: true, args: argumentsList });
-  const page = contextOptions ? await (await browser.newContext(contextOptions)).newPage() : await browser.newPage();
+// Gives a page the fallback adapter script (WEBGPU_ADAPTER=fallback) and collects its console
+// errors in page.consoleErrors; launchWebGpuBrowser does this for its page, a check for its others.
+export async function watchPage(page) {
   const initScript = fallbackAdapterInitScript();
   if (initScript) await page.addInitScript(initScript);
   page.consoleErrors = [];
@@ -61,5 +60,14 @@ export async function launchWebGpuBrowser({ measuring = false, contextOptions = 
   page.on('pageerror', (error) => {
     page.consoleErrors.push(`pageerror: ${error.message}`);
   });
+  return page;
+}
+
+// contextOptions (viewport, hasTouch, isMobile, deviceScaleFactor) opens the page in its own context.
+export async function launchWebGpuBrowser({ measuring = false, contextOptions = null, extraArguments = [] } = {}) {
+  const argumentsList = webGpuFlagsFor({ platform: process.platform, measuring, extraArguments });
+  const browser = await chromium.launch({ headless: true, args: argumentsList });
+  const page = contextOptions ? await (await browser.newContext(contextOptions)).newPage() : await browser.newPage();
+  await watchPage(page);
   return { browser, page };
 }
