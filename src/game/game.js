@@ -598,10 +598,10 @@ export class Game {
     return seat.index === this.localSeatIndex ? this.input.state : this.input.seatTwoState;
   }
 
-  // Gamepad and keyboard restart: a fresh fire or bomb press once the guard window has passed.
+  // Gamepad and keyboard restart: a fresh fire or bomb press once the guard window has passed (online, both restart).
   updateGameOver(deltaSeconds, pressed) {
     this.gameOverSeconds += deltaSeconds;
-    if (pressed && this.gameOverSeconds > RESTART_GUARD_SECONDS) this.restart();
+    if (pressed && this.gameOverSeconds > RESTART_GUARD_SECONDS) (this.online ? this.online.requestRestart() : this.restart());
   }
 
   // No spawns and no gates between death and respawn: the arena stays clear for the pause.

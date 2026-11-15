@@ -142,13 +142,16 @@ test('queued events go out on the events channel at the end of the update', asyn
   const { host, guest, stepBoth, startMatch } = await createOnlinePair();
   const hostSent = recordSends(host.online.transport);
   await startMatch('versus');
-  host.online.queueEvent({ type: 'pause', seat: 0 });
-  assert.equal(hostSent.length, 0);
+  // The session's ready, start and pings went out during startMatch; a pause would pause the
+  // guest's session (online-session.js), so the queued event is a capture.
+  const sentBefore = hostSent.length;
+  host.online.queueEvent({ type: 'hiveCaptured', hive: 0, seat: 0 });
+  assert.equal(hostSent.length, sentBefore);
   stepBoth(STEP);
-  assert.deepEqual(hostSent.filter((entry) => entry.message.type === 'pause').map((entry) => entry.channel), ['events']);
+  assert.deepEqual(hostSent.filter((entry) => entry.message.type === 'hiveCaptured').map((entry) => entry.channel), ['events']);
   // Delivered after the guest's update, it is drained in the guest's next one.
   stepBoth(STEP);
-  assert.deepEqual(guest.online.receivedEvents.filter((event) => event.type === 'pause'), [{ type: 'pause', seat: 0 }]);
+  assert.deepEqual(guest.online.receivedEvents.filter((event) => event.type === 'hiveCaptured'), [{ type: 'hiveCaptured', hive: 0, seat: 0 }]);
   stepBoth(STEP);
   assert.equal(guest.online.receivedEvents.length, 0, 'the list holds this update\'s events only');
 });
@@ -247,10 +250,11 @@ test('an event that does not decode is dropped and the next one still arrives', 
   const { guest, pair, stepBoth, startMatch } = await createOnlinePair();
   await startMatch('versus');
   pair.host.send('events', Uint8Array.of(250));
-  pair.host.send('events', encodeEvent({ type: 'quit' }));
+  // A quit would end the session (online-session.js), so the event that follows is a capture.
+  pair.host.send('events', encodeEvent({ type: 'hiveCaptured', hive: 0, seat: 0 }));
   pair.host.send('state', Uint8Array.of(9, 9));
   stepBoth(2 * STEP);
-  assert.ok(guest.online.receivedEvents.some((event) => event.type === 'quit'));
+  assert.ok(guest.online.receivedEvents.some((event) => event.type === 'hiveCaptured'));
 });
 
 // The spawns queued with owner seat, in queue order.

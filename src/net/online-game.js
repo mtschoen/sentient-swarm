@@ -1,3 +1,4 @@
+// About 500 lines: the one adapter behind every online hook the game calls; its parts live in the other online-*.js modules.
 // The online game adapter (game.online): one machine's side of an online versus or hives match.
 // Each machine runs its own seat (the local seat: 0 on the host, 1 on the guest) from its own input
 // and draws the other (the remote seat) from that machine's SeatSnapshots. attach marks the remote
@@ -10,7 +11,8 @@
 //   afterUpdate (the last line of Game.update): the match clock runs while Playing and not paused;
 //     from the run start on a snapshot of the local seat goes out every SNAPSHOT_UPDATE_INTERVAL
 //     updates, stamped with the match time after this update; queued events are flushed on the
-//     events channel and a ping goes out every PING_INTERVAL_SECONDS of session time.
+//     events channel, then onUpdated runs (the session's tick). The session (online-session.js)
+//     pings on its own timer and calls resetMatch before every start and restart.
 // Shots (Task 3.4): the local seat's spawns of an update (recordShots) go out as one shots event
 // stamped with the match time after the update; replayRemoteFire (after fireSeats' loop) queues the
 // received ones aged to the remote's time this update ends at, and sets the remote seat's beam in
@@ -45,7 +47,9 @@
 // Bombs and the HUD (Task 4.4): the host keeps the one bomb pool (online-bombs.js); the guest's
 // HUD shows the host's score, multiplier and bombs from the newest host state (sharedHud).
 // Pings and pongs are answered and fed to the clock as they arrive; every other event is kept for
-// the update that drains it (receivedEvents). A message that does not decode is dropped.
+// the update that drains it (receivedEvents). A message that does not decode is dropped, and so is
+// a snapshot, shots or wiped event stamped well past the remote's match time now (one sent in the
+// last match, still in flight at a restart).
 
 import { RunPhase } from '../game/run.js';
 import { SPECIES_COUNT } from '../sim/layout.js';
@@ -56,7 +60,7 @@ import { endMatch, losingSeat } from '../game/match-end.js';
 import { MatchReferee } from './match-referee.js';
 import { DENSITY_REFERENCE_CAPACITY } from '../sim/species.js';
 import { decodeEvent, encodeEvent } from './event-codec.js';
-import { HOST_STATE_UPDATE_INTERVAL, INTERPOLATION_DELAY_SECONDS, PING_INTERVAL_SECONDS, SNAPSHOT_UPDATE_INTERVAL } from './protocol.js';
+import { HOST_STATE_UPDATE_INTERVAL, INTERPOLATION_DELAY_SECONDS, SNAPSHOT_UPDATE_INTERVAL } from './protocol.js';
 import { RemoteSeatDriver } from './remote-seat.js';
 import { ShotRelay } from './shot-relay.js';
 import { buildSeatSnapshot } from './seat-snapshot.js';
@@ -74,6 +78,9 @@ export const OnlineRole = Object.freeze({ Host: 'host', Guest: 'guest' });
 const SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
 // A captured hive ripples the warp grid as updateHives does on the host (hive-seats.js).
 const HIVE_CAPTURE_IMPULSE_STRENGTH = 0.4;
+// A message stamped this far past the remote's match time now belongs to the last match.
+export const STALE_MATCH_MARGIN_SECONDS = 2;
+const MATCH_STAMPED_EVENTS = new Set(['shots', 'wiped']);
 
 // Kills at this capacity as kills at the reference capacity (the swarm's density is normalized so).
 export function onlineGrowth(kills, capacity) {
@@ -86,7 +93,6 @@ export class OnlineGame {
   #attachedSeat = null;
   #updatesInRun = 0;
   #snapshotSequence = 0;
-  #lastPingSessionSeconds = null;
   // True once a sampled mirror has replaced the remote seat's swarm in this run.
   #mirroredInRun = false;
   #localBeam = null;
@@ -122,6 +128,9 @@ export class OnlineGame {
     // The host names its director's pickups; the guest keeps the host's (from attach).
     this.pickupLedger = new PickupLedger();
     this.guestPickups = null;
+    // The session's hooks: the end of every update, and a game over restart press.
+    this.onUpdated = null;
+    this.onRestartRequest = null;
     transport.onMessage((channel, bytes) => this.#receive(channel, bytes));
   }
 
@@ -137,9 +146,8 @@ export class OnlineGame {
     this.#attachedSeat = game.seats[this.remoteSeatIndex];
     this.#attachedSeat.remote = true;
     this.#mirroredInRun = false;
-    this.referee.reset();
-    this.#resultSent = false;
     this.guestPickups = new GuestPickups(game.pickups);
+    game.setFullRateLock(true);
     game.online = this;
   }
 
@@ -147,8 +155,35 @@ export class OnlineGame {
     if (this.#attachedSeat !== null) this.#attachedSeat.remote = false;
     this.#attachedSeat = null;
     for (const seat of game.seats) seat.remote = false;
+    game.setFullRateLock(false);
     game.online = null;
     if (game.run.phase === RunPhase.Ready) game.setLocalSeat(0);
+  }
+
+  // For a new match (the session's start and restart, before the game's): the referee and its
+  // result, the driver's snapshots and suppressions, the beams, the shots not yet sent, the received
+  // messages not yet drained, the host state and the pickups. Sequences keep counting per sender.
+  resetMatch() {
+    this.driver.reset();
+    this.referee.reset();
+    this.#resultSent = false;
+    this.#remoteBeamShown = false;
+    this.#localBeam = null;
+    this.#shotOwner = null;
+    this.#shotSpawns = [];
+    this.#inbox.length = 0;
+    this.#outbox.length = 0;
+    this.receivedEvents = [];
+    this.#mirroredInRun = false;
+    this.#updatesInRun = 0;
+    this.#remoteNow = 0;
+    this.resetHostState();
+    this.resetPickups();
+  }
+
+  // A game over press (Game.updateGameOver): the session asks for the restart both machines run.
+  requestRestart() {
+    this.onRestartRequest?.();
   }
 
   // Sent on the events channel at the end of this update.
@@ -366,11 +401,7 @@ export class OnlineGame {
     }
     for (const event of this.#outbox) this.transport.send(TransportChannel.Events, encodeEvent(event));
     this.#outbox.length = 0;
-    const sessionSeconds = this.clock.sessionSeconds;
-    if (this.#lastPingSessionSeconds === null || sessionSeconds - this.#lastPingSessionSeconds >= PING_INTERVAL_SECONDS) {
-      this.#lastPingSessionSeconds = sessionSeconds;
-      this.transport.send(TransportChannel.Events, encodeEvent(this.clock.ping()));
-    }
+    this.onUpdated?.(game);
   }
 
   // Host: the guest's wipes to the referee, its decision, and the result out once. Guest: the
@@ -439,13 +470,18 @@ export class OnlineGame {
     else this.#inbox.push({ channel, event });
   }
 
+  #stale(matchSeconds) {
+    return matchSeconds > this.clock.remoteMatchNow() + STALE_MATCH_MARGIN_SECONDS;
+  }
+
   #drain(game) {
     this.receivedEvents = [];
     for (const message of this.#inbox) {
-      if (message.channel === TransportChannel.Events) this.receivedEvents.push(message.event);
-      else {
+      if (message.channel === TransportChannel.Events) {
+        if (!MATCH_STAMPED_EVENTS.has(message.event.type) || !this.#stale(message.event.matchSeconds)) this.receivedEvents.push(message.event);
+      } else {
         const snapshot = this.#decode(decodeSnapshot, message.bytes);
-        if (snapshot === null) continue;
+        if (snapshot === null || this.#stale(snapshot.matchSeconds)) continue;
         this.driver.receive(snapshot);
         if (this.isGuest && snapshot.hostState !== null) this.#receiveHostState(game, snapshot.hostState);
         if (this.isGuest && snapshot.host !== null && snapshot.sequence > this.#hostBlockSequence) {

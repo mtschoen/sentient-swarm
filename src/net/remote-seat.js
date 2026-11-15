@@ -139,6 +139,12 @@ export class RemoteSeatDriver {
     return interpolate(snapshots[olderIndex], snapshots[olderIndex + 1], renderMatchSeconds);
   }
 
+  // For a new match: forgets every held snapshot and suppression.
+  reset() {
+    this.#snapshots = [];
+    this.#suppressed.clear();
+  }
+
   // Leaves the ship (slot, generation) out of every later apply until a sample shows the slot dead
   // or with another generation.
   suppress(slot, generation) {

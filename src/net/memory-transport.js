@@ -1,4 +1,7 @@
 // An in-memory transport pair for tests and the two-game harness: virtual time, delay, loss and reorder on the state channel.
+// An endpoint's close() is the quitter's (as the RTC one): its later sends are dropped and the pair
+// closes once the events it queued before have been delivered (at once when there are none, or
+// when the connection is not open). The pair's close() ends it at once, dropping what is queued.
 
 import { TransportState, TransportChannel, validateChannel } from './transport.js';
 
@@ -7,6 +10,8 @@ export function createMemoryTransportPair({ delaySeconds = 0, lossFraction = 0, 
   let sequence = 0;
   let connection = TransportState.Open;
   const queue = [];
+  // Endpoints that asked to close, waiting for their queued events to be delivered.
+  const closing = new Set();
 
   function createEndpoint() {
     return { state: TransportState.Open, messageHandlers: [], stateHandlers: [] };
@@ -24,7 +29,7 @@ export function createMemoryTransportPair({ delaySeconds = 0, lossFraction = 0, 
 
   function send(from, channel, bytes) {
     validateChannel(channel);
-    if (connection === TransportState.Closed) return;
+    if (connection === TransportState.Closed || closing.has(from)) return;
     const copy = Uint8Array.from(bytes);
     let deliverAt = time + delaySeconds;
     if (channel === TransportChannel.State) {
@@ -32,7 +37,7 @@ export function createMemoryTransportPair({ delaySeconds = 0, lossFraction = 0, 
       if (lossFraction > 0 && random() < lossFraction) return;
       if (reorderSeconds > 0) deliverAt += random() * reorderSeconds;
     }
-    queue.push({ to: from === endpoints.host ? endpoints.guest : endpoints.host, channel, bytes: copy, deliverAt, sequence });
+    queue.push({ from, to: from === endpoints.host ? endpoints.guest : endpoints.host, channel, bytes: copy, deliverAt, sequence });
     sequence += 1;
   }
 
@@ -42,8 +47,28 @@ export function createMemoryTransportPair({ delaySeconds = 0, lossFraction = 0, 
       onMessage: (handler) => { endpoint.messageHandlers.push(handler); },
       onStateChange: (handler) => { endpoint.stateHandlers.push(handler); },
       get state() { return endpoint.state; },
-      close: () => close(),
+      close: () => closeEndpoint(endpoint),
     };
+  }
+
+  function eventsQueuedFrom(endpoint) {
+    return queue.some((message) => message.from === endpoint && message.channel === TransportChannel.Events);
+  }
+
+  function closeDrained() {
+    for (const endpoint of closing) {
+      if (!eventsQueuedFrom(endpoint)) {
+        close();
+        return;
+      }
+    }
+  }
+
+  function closeEndpoint(endpoint) {
+    if (connection === TransportState.Closed) return;
+    closing.add(endpoint);
+    if (connection !== TransportState.Open) close();
+    else closeDrained();
   }
 
   function advance(seconds) {
@@ -59,6 +84,7 @@ export function createMemoryTransportPair({ delaySeconds = 0, lossFraction = 0, 
       queue.splice(index, 1);
       for (const handler of [...message.to.messageHandlers]) handler(message.channel, message.bytes);
     }
+    closeDrained();
   }
 
   function disconnect() {
@@ -67,6 +93,7 @@ export function createMemoryTransportPair({ delaySeconds = 0, lossFraction = 0, 
       if (queue[index].channel === TransportChannel.State) queue.splice(index, 1);
     }
     setConnection(TransportState.Disconnected);
+    if (closing.size > 0) close();
   }
 
   function reconnect() {

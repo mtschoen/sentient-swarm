@@ -149,3 +149,30 @@ test('setLossFraction changes the state channel loss from the next send on', () 
   pair.advance(0);
   assert.deepEqual(received, [['state', 1], ['events', 3], ['state', 4]]);
 });
+
+test('an endpoint close delivers the events it queued first, then both sides see closed', () => {
+  const pair = createMemoryTransportPair({ delaySeconds: 0.05 });
+  const received = [];
+  const hostStates = [];
+  pair.host.onMessage((channel, bytes) => received.push([channel, bytes[0]]));
+  pair.host.onStateChange((state) => hostStates.push(state));
+  pair.guest.send('events', Uint8Array.of(1));
+  pair.guest.close();
+  pair.guest.send('events', Uint8Array.of(3));
+  assert.equal(pair.guest.state, TransportState.Open, 'open until the queued events are delivered');
+  pair.advance(0.06);
+  assert.deepEqual(received, [['events', 1]], 'a send after close is dropped');
+  assert.deepEqual(hostStates, ['closed']);
+  assert.equal(pair.guest.state, TransportState.Closed);
+});
+
+test('an endpoint close with nothing queued, or on a dropped connection, closes at once', () => {
+  const idle = createMemoryTransportPair();
+  idle.host.close();
+  assert.equal(idle.guest.state, TransportState.Closed);
+  const dropped = createMemoryTransportPair();
+  dropped.guest.send('events', Uint8Array.of(1));
+  dropped.disconnect();
+  dropped.guest.close();
+  assert.equal(dropped.host.state, TransportState.Closed);
+});

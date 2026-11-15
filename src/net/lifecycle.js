@@ -8,6 +8,8 @@ import {
   START_LEAD_SECONDS,
 } from './protocol.js';
 
+const COUNTDOWN_ROUNDING_SECONDS = 1e-9;
+
 export const LifecyclePhase = Object.freeze({
   Title: 'title',
   Starting: 'starting',
@@ -70,7 +72,8 @@ export class SessionLifecycle {
 
   get countdownNumber() {
     if (this.#phase !== LifecyclePhase.Countdown) return null;
-    return Math.max(1, Math.ceil(this.#countdownEnd - this.#lastSeconds));
+    // Less a rounding margin, so an end of now + 3 reads 3 rather than 4.
+    return Math.max(1, Math.ceil(this.#countdownEnd - this.#lastSeconds - COUNTDOWN_ROUNDING_SECONDS));
   }
 
   // Announces the local ready flag to the peer, once.
