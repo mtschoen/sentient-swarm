@@ -2,17 +2,14 @@
 // particles. A spaceship silhouette with its nose along the facing: a pointed fuselage, two swept
 // wings, a cockpit, wingtip lights and a flickering engine flame that grows with thrust, all in the armed weapon's hue
 // over white; plus a thin world-aligned ring (radius RING_RADIUS) whose arc length is the charge,
-// hidden on the base gun; plus one short rail-hue tick per rail turret (owner ruling R29) crossing the
-// ring at the turret's direction (drawn facing plus its offset), shown with or without the ring.
-// Common and quad headers prepended (hsvToRgb, quadCorner, worldFeather); ShipRenderer substitutes
-// the rail constants (SHIP_SHADER_CONSTANTS).
+// hidden on the base gun. Common and quad headers prepended (hsvToRgb, quadCorner, worldFeather).
 // Local coordinates: +x is the nose, +y is to the ship's right (world y grows downward).
 
 // Uniform layout, total 80 bytes; ShipRenderer in ship.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
 //  28 header padding f32, 32 position vec2f, 40 facing f32 (radians), 44 charge f32 (0..1),
 //  48 hue f32, 52 ringShown f32 (0 or 1), 56 brightness f32 (blink), 60 thrust f32 (0..1),
-//  64 turretCount f32 (0..MAXIMUM_RAIL_TURRETS), 68 turret padding vec3 as three f32
+//  64 viewPadding vec4f (unused; the rail turrets are gunner ships drawn by swarm.wgsl)
 struct ShipView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
@@ -26,10 +23,7 @@ struct ShipView {
   ringShown: f32,
   brightness: f32,
   thrust: f32,
-  turretCount: f32,
-  turretPaddingOne: f32,
-  turretPaddingTwo: f32,
-  turretPaddingThree: f32,
+  viewPadding: vec4f,
 }
 
 @group(0) @binding(0) var<uniform> view: ShipView;
@@ -46,14 +40,6 @@ const FLAME_IDLE_LENGTH: f32 = 0.24;
 const FLAME_THRUST_LENGTH: f32 = 0.46;
 const FLAME_IDLE_WIDTH: f32 = 0.08;
 const FLAME_THRUST_WIDTH: f32 = 0.11;
-// Rail turret ticks: radial segments across the ring, from TICK_INNER to TICK_OUTER world units.
-const RAIL_TURRET_SPACING_RADIANS: f32 = __RAIL_TURRET_SPACING_RADIANS__;
-const MAXIMUM_RAIL_TURRETS: i32 = __MAXIMUM_RAIL_TURRETS__;
-const RAIL_HUE: f32 = __RAIL_HUE__;
-const PI: f32 = 3.14159265359;
-const TICK_INNER: f32 = 0.26;
-const TICK_OUTER: f32 = 0.4;
-const TICK_HALF_WIDTH: f32 = 0.016;
 
 struct ShipVaryings {
   @builtin(position) position: vec4f,
@@ -145,20 +131,6 @@ fn shipFragment(input: ShipVaryings) -> @location(0) vec4f {
   let filled = select(0.0, 1.0, turn <= view.charge);
   let ringColor = tint * (ringBand * (0.12 + 1.5 * filled) + ringGlow * 0.35 * filled);
   color += ringColor * view.ringShown;
-
-  // Rail turret ticks: the same centered-on-the-rear spacing as railTurretOffsets in weapons.js.
-  let turretCount = i32(view.turretCount + 0.5);
-  let railTint = hsvToRgb(RAIL_HUE, SATURATION, 1.0);
-  var tick = 0.0;
-  for (var index = 0; index < MAXIMUM_RAIL_TURRETS; index += 1) {
-    if (index >= turretCount) { break; }
-    let angle = view.facing + PI + (f32(index) - f32(turretCount - 1) * 0.5) * RAIL_TURRET_SPACING_RADIANS;
-    let direction = vec2f(cos(angle), sin(angle));
-    let along = clamp(dot(input.offset, direction), TICK_INNER, TICK_OUTER);
-    let tickDistance = length(input.offset - direction * along);
-    tick = max(tick, 1.0 - smoothstep(TICK_HALF_WIDTH, TICK_HALF_WIDTH + feather * 2.0, tickDistance));
-  }
-  color += (railTint * 1.6 + vec3f(0.35)) * tick;
 
   return vec4f(color * view.brightness, 0.0);
 }
