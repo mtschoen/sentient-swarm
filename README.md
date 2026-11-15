@@ -47,6 +47,14 @@ Two people can play on one screen. On the title screen, press a button on a seco
 - A player whose swarm is wiped while the other still flies is down: they lose their weapons and sit out until the survivor scores 100 more kills, then return with 12 ships beside the survivor and 2 seconds of immunity. The run ends when both swarms are wiped.
 - The camera centers between the swarms and zooms out as they separate, down to the whole arena.
 - If player 2's controller disconnects mid-run the game pauses; reconnecting it gives the seat back.
+- The bottom left of the title shows what each player's controller is doing: its name, a dot that lights while a button is held, and a warning when the browser reports an unusual button layout. A browser lists a controller only after a button is pressed on it.
+
+With player 2 joined, the button beside Play picks the mode: CO-OP (the rules above), VERSUS or HIVES.
+
+- **Versus**: the two swarms fight each other. A shot kills one opposing ship and stops; opposing ships that touch both die. Neutral kills grow only the swarm of the player who made them. A player who loses their last ship is out and the other wins; there is no revive. The players start on opposite sides of the arena, and the time warp and the beam are left out.
+- **Hives**: versus with three hives, one on each player's side and one in the middle, that the neutral swarm emerges from. Park ships on a hive to capture it; everything a captured hive spawns hunts only the other player, and kills near a hive you own count double toward your swarm. Wipe out the other swarm or hold all three hives for 20 seconds to win.
+
+In a solo run the difficulty keeps rising after the first two minutes: killed enemies return faster, they chase harder, and waves come more often, until a run can no longer be survived.
 
 ### Weapons and pickups
 
