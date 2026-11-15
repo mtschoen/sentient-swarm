@@ -7,6 +7,10 @@
 // buttons and on a non-primary face button; Lab and Settings never start play. Callers hide the menu themselves once the run has started.
 // The title menu also carries a footer link to the source repository (SOURCE_URL): a plain anchor
 // that opens a new tab, outside the focus list, and following it is not a tap on the arena.
+// An item may carry an id, a className and enabled: false (ghosted: aria-disabled, the menu-disabled
+// class, skipped by the focus ring, its click and confirm do nothing); setItem(id, { label, enabled })
+// changes one in place, so the list never gains or loses a button. The title menu's optional
+// modeItem (the co-op or versus choice, mode-choice.js) is such an item, second in the focus order.
 export const SOURCE_URL = 'https://github.com/mtschoen/sentient-swarm';
 
 function buildMenu({ documentObject, className, title, items, footerLink = null, onBackdrop = null, onAltConfirm = null, onBack = null }) {
@@ -27,19 +31,22 @@ function buildMenu({ documentObject, className, title, items, footerLink = null,
   let focusFromPointer = false;
   let visible = true;
 
-  const buttons = items.map(({ label, primary, action }, index) => {
-    const button = make('button', primary ? 'menu-item menu-primary' : 'menu-item', label);
+  const enabled = items.map((item) => item.enabled !== false);
+  const buttons = items.map(({ label, primary, action, className: itemClass }, index) => {
+    const button = make('button', ['menu-item', primary ? 'menu-primary' : '', itemClass ?? ''].filter(Boolean).join(' '), label);
     // The menu owns the focus ring; a natively focused button would also fire on Enter or Space.
     button.setAttribute('tabindex', '-1');
+    if (!enabled[index]) renderEnabled(button, false);
     button.addEventListener('click', (event) => {
       event.stopPropagation?.();
       button.blur?.();
-      if (!visible) return;
+      if (!visible || !enabled[index]) return;
       focusIndex = index;
       renderFocus();
       action();
     });
     button.addEventListener('pointerenter', () => {
+      if (!enabled[index]) return;
       focusIndex = index;
       focusFromPointer = true;
       renderFocus();
@@ -55,6 +62,20 @@ function buildMenu({ documentObject, className, title, items, footerLink = null,
     link.setAttribute('rel', 'noopener noreferrer');
     link.addEventListener('click', (event) => event.stopPropagation?.());
     element.append(link);
+  }
+
+  function renderEnabled(button, on) {
+    button.setAttribute('aria-disabled', on ? 'false' : 'true');
+    button.classList.toggle('menu-disabled', !on);
+  }
+
+  // The next enabled index from focusIndex in direction (1 or -1), wrapping; focusIndex when none is.
+  function stepFocus(direction) {
+    for (let offset = 1; offset <= buttons.length; offset += 1) {
+      const index = (focusIndex + direction * offset + buttons.length * offset) % buttons.length;
+      if (enabled[index]) return index;
+    }
+    return focusIndex;
   }
 
   function renderFocus() {
@@ -93,23 +114,39 @@ function buildMenu({ documentObject, className, title, items, footerLink = null,
         if (primaryIndex >= 0) focusIndex = primaryIndex;
       }
       if (action === 'down' || action === 'up') focusFromPointer = false;
-      if (action === 'down') focusIndex = (focusIndex + 1) % buttons.length;
-      else if (action === 'up') focusIndex = (focusIndex + buttons.length - 1) % buttons.length;
-      else if (action === 'confirm') items[focusIndex].action();
+      if (action === 'down') focusIndex = stepFocus(1);
+      else if (action === 'up') focusIndex = stepFocus(-1);
+      else if (action === 'confirm' && enabled[focusIndex]) items[focusIndex].action();
       else if (action === 'altConfirm') onAltConfirm?.();
       else if (action === 'back') onBack?.();
       renderFocus();
     },
+    // Relabels and enables or ghosts the item with this id; a ghosted focused item hands the focus
+    // to the first item.
+    setItem(id, { label, enabled: on }) {
+      const index = items.findIndex((item) => item.id === id);
+      if (index < 0) throw new RangeError(`no menu item ${id}`);
+      if (buttons[index].textContent !== label) buttons[index].textContent = label;
+      if (enabled[index] === on) return;
+      enabled[index] = on;
+      renderEnabled(buttons[index], on);
+      if (!on && focusIndex === index) {
+        focusIndex = 0;
+        renderFocus();
+      }
+    },
   };
 }
 
-export function createMenu({ onStart, onLab, onSettings, documentObject = document }) {
+// modeItem (optional): { id, label, enabled, action } for the mode choice, placed beside Play.
+export function createMenu({ onStart, onLab, onSettings, modeItem = null, documentObject = document }) {
   return buildMenu({
     documentObject,
     className: 'menu-title-screen',
     title: 'SENTIENT SWARM',
     items: [
       { label: 'Play', primary: true, action: () => onStart() },
+      ...(modeItem === null ? [] : [{ ...modeItem, className: 'menu-mode' }]),
       { label: 'Lab', action: () => onLab() },
       { label: 'Settings', action: () => onSettings() },
     ],

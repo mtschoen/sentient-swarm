@@ -6,13 +6,16 @@
 .menu-pause { background: rgba(5, 6, 10, 0.78); z-index: 21; }
 .menu-title { font-size: clamp(28px, 9vmin, 76px); letter-spacing: 0.12em; color: #19e6ff; text-shadow: 0 0 12px #19e6ff, 0 0 36px #19e6ff; }
 .menu-pause .menu-title { color: #ff2fd0; text-shadow: 0 0 12px #ff2fd0, 0 0 36px #ff2fd0; }
-.menu-list { display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: min(260px, 70vw); cursor: default; }
+.menu-list { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 10px; min-width: min(260px, 70vw); cursor: default; }
 .menu-item { font: inherit; font-size: clamp(14px, 3.4vmin, 22px); padding: 10px 24px; color: #cfe8ff; background: rgba(25, 230, 255, 0.08);
   border: 2px solid rgba(25, 230, 255, 0.45); border-radius: 6px; text-transform: uppercase; cursor: pointer; touch-action: manipulation; }
 .menu-primary { font-size: clamp(20px, 6vmin, 36px); padding: 14px 32px; color: #05060a; background: #ffe84a; border-color: #ffe84a;
   box-shadow: 0 0 18px #ffe84a; }
 /* The focus ring is visible for keyboard and gamepad as well as the mouse. */
 .menu-item.menu-focused { outline: 3px solid #ffe84a; outline-offset: 3px; box-shadow: 0 0 16px #ffe84a; }
+/* The mode choice (mode-choice.js) sits beside Play, out of the flex flow so the list never moves; ghosted until player 2 joins. */
+.menu-mode { position: absolute; left: calc(100% + 16px); top: 0; white-space: nowrap; }
+.menu-item.menu-disabled { opacity: 0.35; cursor: default; box-shadow: none; }
 /* The title menu's source link sits at the bottom edge, clear of the centered list. */
 .menu-link { position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 8px 12px;
   font-size: clamp(11px, 2.4vmin, 14px); font-weight: 600; letter-spacing: 0.08em; white-space: nowrap; color: rgba(207, 232, 255, 0.7);

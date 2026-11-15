@@ -101,7 +101,8 @@ export function createHud(rootElement, {
 
   const finalScore = make('div', 'hud-final-score');
   const playAgain = make('button', 'hud-play-again', 'Play again');
-  const gameOver = row('hud-gameover', [make('div', 'hud-gameover-title', 'GAME OVER'), finalScore, playAgain]);
+  const gameOverTitle = make('div', 'hud-gameover-title', 'GAME OVER');
+  const gameOver = row('hud-gameover', [gameOverTitle, finalScore, playAgain]);
   gameOver.hidden = true;
   // The panels are display-only: a thumb that lands on one must not start a touch stick (touch.js
   // skips touches inside data-touch-exclusive rectangles). Their rectangles are the full panel
@@ -207,10 +208,13 @@ export function createHud(rootElement, {
       chargeFill.style.width = `${Math.round(Math.min(1, Math.max(0, state.charge ?? 0)) * 100)}%`;
     },
 
-    showGameOver(finalPoints, onRestart) {
+    // banner (optional, gameOverBanner in hud-seat.js): the title and its color, a versus winner.
+    showGameOver(finalPoints, onRestart, banner = { title: 'GAME OVER', color: null }) {
       restartHandler = onRestart;
       shownAt = now();
       setText(finalScore, groupDigits(finalPoints));
+      setText(gameOverTitle, banner.title);
+      gameOverTitle.style.color = banner.color ?? '';
       gameOver.hidden = false;
     },
 

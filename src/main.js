@@ -36,6 +36,8 @@ import { createRotateOverlay } from './ui/rotateOverlay.js';
 import { createFullscreenController } from './ui/fullscreen.js';
 import { createMenuInput } from './input/menuInput.js';
 import { createCoopJoin } from './ui/coop-join.js';
+import { createModeControl } from './ui/mode-choice.js';
+import { gameOverBanner } from './ui/hud-seat.js';
 import { shortPadId } from './ui/pad-status.js';
 import { createRotateBackHandler, createSettingsOpener, routeMenuActions, routeSettingsKey } from './ui/menuRouting.js';
 
@@ -289,6 +291,8 @@ async function boot() {
     audio.unlock();
     audio.restartRun();
     game.setPlayerCount(coopJoin.playerCount);
+    // Co-op unless player 2 joined and chose versus at the title.
+    game.setMode(modeControl.mode);
     game.start();
     menu.hide();
   };
@@ -312,7 +316,11 @@ async function boot() {
     audio.setPaused(true);
     pauseMenu.show();
   };
-  const menu = createMenu({ onStart: startRun, onLab: openLab, onSettings: openSettings });
+  // The co-op or versus choice beside Play, ghosted until player 2 joins.
+  const modeControl = createModeControl();
+  const menu = createMenu({ onStart: startRun, onLab: openLab, onSettings: openSettings, modeItem: modeControl.menuItem });
+  modeControl.attach(menu);
+  window.__murmuration.modeChoice = modeControl;
   const pauseMenu = createPauseMenu({
     onResume: () => {
       fullscreen.enter();
@@ -386,7 +394,7 @@ async function boot() {
     fireDebug?.update(fireLog);
     lifeWatcher.update(state);
     const isGameOver = state.phase === 'gameOver';
-    if (isGameOver && !gameOverShown) hud.showGameOver(state.score, restartFromGameOver);
+    if (isGameOver && !gameOverShown) hud.showGameOver(state.score, restartFromGameOver, gameOverBanner(state.matchResult));
     else if (!isGameOver && gameOverShown) hud.hideGameOver();
     gameOverShown = isGameOver;
 
@@ -403,6 +411,7 @@ async function boot() {
     if (menu.visible) fullscreen.exit();
     const warming = !warmUp.done;
     coopJoin.update({ titleOpen: menu.visible && !warming });
+    modeControl.update({ joined: coopJoin.playerCount === 2 });
     game.startsOnGesture = !menu.visible && !warming;
     // Gamepad edges and key presses are consumed every frame so none go stale; only a free screen
     // acts on them, and none does while the loading screen is up.
