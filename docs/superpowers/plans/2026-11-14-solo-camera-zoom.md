@@ -285,7 +285,7 @@ Because `captureLabState` and `restoreLabState` iterate `MIX_KNOB_SPECS`, leavin
 - Modify: `AGENTS.md`
 
 - [ ] **Step 1: Run the docs-update check** and update, with exact wording drawn from the new code: the Global constraints camera paragraph ("at zoom 1 in solo" gains "unless the lab's solo zoom is on, default off; `soloZoom*` knobs"); the Co-op "Camera" bullet (co-op unchanged, the solo controller idle with two live seats); Frame order step 2 (`Game.followCamera` solo branch, hold rules, reduced motion forces 1); the view dependants list from Design decision 5 (bomb, safe distance and pickups unzoomed, gate ring zoomed but capped at zoom 1); File map entries for `solo-zoom.js`, `zoom-pressure.js`, `solo-zoom-step.js` (if created) and the new tests; the browser check entry; and a sentence pointing to `tests/game/solo-zoom-guard.test.js` like the seek range one.
-- [ ] **Step 2: Verify** no em-dashes: `rg -n "—" AGENTS.md docs/superpowers/plans` finds nothing in the lines you touched; run `npm test`.
+- [ ] **Step 2: Verify** no em-dashes: `rg -n "\x{2014}" AGENTS.md docs/superpowers/plans` finds nothing in the lines you touched; run `npm test`.
 - [ ] **Step 3: Commit** `Document the solo camera zoom lab knobs`.
 
 ---
