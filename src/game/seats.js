@@ -94,7 +94,7 @@ export function uploadSwarms(game) {
   }
 }
 
-// Every seat that is not down fires: its shots and turret spawns are queued, its beam set in its
+// Every seat that is not down fires: its shots and gunner needles are queued, its beam set in its
 // own slot (a two-seat game only), and at most one weaponFire cue plays per update, seat 1 first.
 export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
   const { projectiles, effects } = game;
@@ -118,7 +118,7 @@ export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
     if (!cued && (fire.spawns.length > 0 || (fire.beam !== null && !fire.expired))) {
       effects?.weaponFire?.(kind, tier);
       cued = true;
-    } else if (!cued && fire.turretSpawns.length > 0) {
+    } else if (!cued && shots.turretSpawns.length > 0) {
       effects?.weaponFire?.('rail', railTier);
       cued = true;
     }

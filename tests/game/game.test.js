@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../../src/game/game.js';
 import { RunPhase } from '../../src/game/run.js';
+import { railTurretOffsets } from '../../src/game/weapons.js';
 import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND, PICKUP_TYPE_NAMES } from '../../src/game/weaponTypes.js';
 import { WORLD_HEIGHT, WORLD_WIDTH, WORLD_BOUNDS } from '../../src/sim/layout.js';
 import { CAMERA_OVERSHOOT_FRACTION } from '../../src/game/camera.js';
@@ -1016,7 +1017,7 @@ test('a collected rail pickup adds a turret and keeps the armed weapon, its tier
   assert.deepEqual([armed, tier, charge, railTurrets, railTier], ['scatter', 1, 1, 1, 1]);
 });
 
-test('turret shots are queued with the weapon shots, and a turret-only frame plays the rail cue at the turret tier', async () => {
+test('gunner needles are queued with the weapon shots, leave along the station angles, and a gunner-only frame plays the rail cue at the turret tier', async () => {
   const gpu = createFakeGpu();
   const simulation = createFakeSimulation();
   const input = createFakeInput();
@@ -1042,19 +1043,69 @@ test('turret shots are queued with the weapon shots, and a turret-only frame pla
   }
   const railShots = projectiles.spawns.filter((spawn) => spawn.kind === game.weapons.types.rail.kind);
   const baseShots = projectiles.spawns.filter((spawn) => spawn.kind === game.weapons.types.base.kind);
-  // Four volleys from 12 turrets at tier 2 (two parallel rails each).
-  assert.equal(railShots.length, 4 * 12 * 2);
+  // Three to five volleys per gunner over 1.2 s at the 0.3 s interval, two parallel needles each at tier 2.
+  assert.ok(railShots.length >= 3 * 12 * 2 && railShots.length <= 5 * 12 * 2, `rail needles: ${railShots.length}`);
+  const degrees = new Set(railShots.map((spawn) => Math.round((Math.atan2(spawn.velocityY, spawn.velocityX) * 180) / Math.PI + 360) % 360));
+  const expected = new Set(railTurretOffsets(12).map((offset) => Math.round((offset * 180) / Math.PI + 360) % 360));
+  assert.deepEqual([...degrees].sort((a, b) => a - b), [...expected].sort((a, b) => a - b));
   assert.ok(baseShots.length > 0);
-  // The cues follow the weapon's own volleys (swarm shots are staggered across other frames).
   assert.ok(played.length > 0 && framesThatFired > 0);
   assert.equal(mostCuesInOneFrame, 1, 'at most one cue per frame');
-  assert.ok(played.includes('fire rail 2'), 'a turret-only frame plays the rail cue');
+  assert.ok(played.includes('fire rail 2'), 'a gunner-only frame plays the rail cue');
   assert.ok(played.every((entry) => entry === 'fire rail 2' || entry === 'fire base 1'));
   // A frame where both fire keeps the armed weapon's cue: the beam fires every frame.
   played.length = 0;
   game.weapons.collect('beam');
   runFor(game, 1);
   assert.ok(played.length > 0 && played.every((entry) => entry === 'fire beam 1'));
+});
+
+const gunnerShips = (seat) => seat.swarm.ships.filter((ship) => ship.gunnerIndex >= 0);
+
+test('rail gunners are ships of the swarm and the HUD readout is unchanged', async () => {
+  const { game } = await createGame();
+  game.start();
+  game.debugArm('rail', 3);
+  runFor(game, 0.1);
+  assert.equal(gunnerShips(game.seats[0]).length, 3);
+  assert.equal(game.state.railTurrets, 3);
+  assert.equal(game.state.seats[0].railTurrets, 3);
+});
+
+test('a gunner that is hit passes its turret on', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  game.debugArm('rail', 3);
+  runFor(game, 0.1);
+  const [victim] = gunnerShips(game.seats[0]);
+  const slot = victim.slot;
+  const before = game.seats[0].aliveCount;
+  simulation.scriptedStats.push(stats({ frameSequence: simulation.frameSequence + 1, swarmHitMask: maskFor([slot]) }));
+  game.update(STEP);
+  runFor(game, 0.1);
+  assert.equal(game.seats[0].aliveCount, before - 1);
+  assert.equal(gunnerShips(game.seats[0]).length, 3);
+  assert.ok(gunnerShips(game.seats[0]).every((ship) => ship.slot !== slot));
+  assert.equal(game.state.railTurrets, 3);
+});
+
+test('quit to title and death leave no gunners', async () => {
+  const { game, simulation } = await createGame();
+  game.start();
+  game.debugArm('rail', 4);
+  runFor(game, 0.1);
+  assert.equal(gunnerShips(game.seats[0]).length, 4);
+  hitNow(game, simulation);
+  runFor(game, 0.1);
+  assert.equal(game.state.railTurrets, 0);
+  assert.equal(gunnerShips(game.seats[0]).length, 0);
+  game.start();
+  game.debugArm('rail', 4);
+  runFor(game, 0.1);
+  assert.equal(gunnerShips(game.seats[0]).length, 4);
+  game.quitToTitle();
+  game.update(STEP);
+  assert.equal(gunnerShips(game.seats[0]).length, 0);
 });
 
 test('quit to title clears the turrets', async () => {

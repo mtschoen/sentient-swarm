@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PlayerSeat, SWARM_PICKUP_RADIUS } from '../../src/game/player-seat.js';
+import { gunnerShotRecipe } from '../../src/game/swarm-shots.js';
 import { PickupDirector } from '../../src/game/pickups.js';
 import { InputState } from '../../src/input/input.js';
 import { WORLD_HEIGHT, WORLD_WIDTH } from '../../src/sim/layout.js';
@@ -131,4 +132,33 @@ test('applyHits reports the killed ships and wiped only when the last one dies',
   assert.equal(second.wiped, true);
   assert.equal(second.last, second.killed[1]);
   assert.deepEqual(seat.applyHits({ frameSequence: 4 }), { killed: [], last: null, wiped: false });
+});
+
+test('flock syncs the gunner count from the weapons, and dropAll clears it', () => {
+  const seat = new PlayerSeat({ random: () => 0.5 });
+  seat.reset(12);
+  for (let count = 0; count < 3; count += 1) seat.weapons.collect('rail');
+  seat.flock(1 / 60, false);
+  assert.equal(seat.swarm.ships.filter((ship) => ship.gunnerIndex >= 0).length, 3);
+  seat.weapons.dropAll();
+  seat.flock(1 / 60, false);
+  assert.equal(seat.swarm.ships.filter((ship) => ship.gunnerIndex >= 0).length, 0);
+});
+
+test('fire passes the rail tier to the gunners: tier 2 volleys are two needles at the tier 2 radius', () => {
+  const seat = new PlayerSeat({ random: () => 0.5 });
+  seat.reset(12);
+  for (let count = 0; count < 13; count += 1) seat.weapons.collect('rail');
+  assert.equal(seat.weapons.railTier, 2);
+  seat.player.aim.x = 1;
+  seat.player.aim.y = 0;
+  const needles = [];
+  for (let step = 0; step < 90; step += 1) {
+    seat.flock(1 / 60, true);
+    needles.push(...seat.fire(1 / 60, { playing: true, firing: true }).shots.turretSpawns);
+  }
+  const recipe = gunnerShotRecipe(2);
+  assert.ok(needles.length > 0 && needles.length % recipe.needleCount === 0);
+  assert.equal(recipe.needleCount, 2);
+  assert.ok(needles.every((needle) => needle.radius === recipe.radius));
 });

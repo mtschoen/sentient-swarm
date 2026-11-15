@@ -206,6 +206,41 @@ test('each seat moves from its own input and fires from its own ships', async ()
   assert.ok(second.point.x < before[1].x - 0.5);
 });
 
+test('two seats keep their own gunners, and each fires from its own ships', async () => {
+  const { game, input, projectiles } = await startTwoSeats();
+  game.seats[0].weapons.collect('rail');
+  game.seats[0].weapons.collect('rail');
+  game.seats[0].weapons.collect('rail');
+  game.seats[0].weapons.collect('rail');
+  game.seats[1].weapons.collect('rail');
+  game.seats[1].weapons.collect('rail');
+  runFor(game, 0.1);
+  const gunnersOf = (seat) => seat.swarm.ships.filter((ship) => ship.gunnerIndex >= 0);
+  assert.deepEqual(game.seats.map((seat) => gunnersOf(seat).length), [4, 2]);
+  projectiles.spawns.length = 0;
+  input.seatTwoState.firing = true;
+  input.seatTwoState.aim = { x: 0, y: -1 };
+  runFor(game, 0.5);
+  const needles = projectiles.spawns.filter((spawn) => spawn.kind === game.weapons.types.rail.kind);
+  assert.ok(needles.length > 0);
+  const [first, second] = game.seats;
+  assert.ok(needles.every((spawn) => Math.hypot(spawn.x - second.point.x, spawn.y - second.point.y) < Math.hypot(spawn.x - first.point.x, spawn.y - first.point.y)));
+});
+
+test('a seat that goes down drops its gunners and the other seat keeps its own', async () => {
+  const { game, simulation } = await startTwoSeats();
+  game.seats[0].weapons.collect('rail');
+  game.seats[1].weapons.collect('rail');
+  game.seats[1].weapons.collect('rail');
+  runFor(game, 0.1);
+  updateWithStats(game, simulation, SECOND_WIPE);
+  runFor(game, 0.1);
+  assert.equal(game.seats[1].down, true);
+  assert.equal(game.seats[1].weapons.railTurrets, 0);
+  assert.equal(game.seats[1].swarm.ships.filter((ship) => ship.gunnerIndex >= 0).length, 0);
+  assert.equal(game.seats[0].swarm.ships.filter((ship) => ship.gunnerIndex >= 0).length, 1);
+});
+
 test('the second seek point is the second live seat and clears once that seat is down', async () => {
   const { game, simulation } = await startTwoSeats();
   const last = simulation.secondPlayerCalls.at(-1);

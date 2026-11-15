@@ -177,6 +177,8 @@ export class PlayerSeat {
     swarmControls.firing = firing;
     swarmControls.aimX = aimLength > 0 ? this.player.aim.x / aimLength : 0;
     swarmControls.aimY = aimLength > 0 ? this.player.aim.y / aimLength : 0;
+    // The rail turrets are gunner ships: the swarm marks as many as the weapons hold (none after dropAll).
+    this.swarm.setGunnerCount(this.weapons.railTurrets);
     this.swarm.update(deltaSeconds, x, y, swarmControls);
   }
 
@@ -197,6 +199,7 @@ export class PlayerSeat {
       deltaSeconds,
       kind,
       tier,
+      railTier,
     });
     return { fire, shots, kind, tier, railTier };
   }
