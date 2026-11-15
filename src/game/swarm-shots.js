@@ -1,7 +1,8 @@
 // Per-kind swarm shot recipes: what ONE ship shot is for each armed weapon and tier, and the
 // aggregate rate it is fired at (src/game/swarm-fire-rate.js). Speeds, kinds and the homing and
 // density values come from WEAPON_TYPES; everything a swarm shot adds is stated here.
-// The beam has no recipe (it fires from the centroid), nor does rail (turrets only).
+// The beam has no recipe (it fires from the centroid); rail is fired by gunner ships and has its
+// own recipe, gunnerShotRecipe.
 import { WEAPON_TYPES } from './weaponTypes.js';
 
 const DEGREES = Math.PI / 180;
@@ -95,4 +96,21 @@ export function swarmShotRecipe(kindName, tierNumber) {
     default:
       return null;
   }
+}
+
+// What one rail gunner volley is at a rail tier (1 to 3, clamped): needleCount parallel needles
+// parallelOffset apart, one volley per intervalSeconds. Values come from WEAPON_TYPES.rail.
+export function gunnerShotRecipe(railTier) {
+  const definition = WEAPON_TYPES.rail;
+  const values = definition.tiers[Math.max(0, Math.min(2, railTier - 1))];
+  return Object.freeze({
+    kind: definition.kind,
+    speed: values.speed,
+    radius: values.radius,
+    lifetime: values.lifetime,
+    needleCount: values.projectilesPerShot,
+    parallelOffset: values.parallelOffset,
+    intervalSeconds: values.fireInterval,
+    extra: values.extra,
+  });
 }
