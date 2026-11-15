@@ -27,28 +27,35 @@
 // removes the guest's from the mirror at once and suppresses them in the driver (so a snapshot that
 // still shows one alive cannot touch again), and names them to the guest in one contactKills event
 // per update; the guest kills each named ship of the named generation and never pairs ships. The
-// host then runs the hives; the guest does not (the host's state reaches it from Task 4.2).
+// host then runs the hives; the guest does not.
+// Hives (Task 4.2): the host alone runs capture and the hold; each capture it sees (an owner
+// changed by updateHives) goes out as a hiveCaptured event, which plays the guest's capture
+// shockwave once. Every HOST_STATE_UPDATE_INTERVAL-th update's snapshot carries the host's
+// HostState (host-state.js), which the guest applies only when newer than the last (hostState).
 // Pings and pongs are answered and fed to the clock as they arrive; every other event is kept for
 // the update that drains it (receivedEvents). A message that does not decode is dropped.
 
 import { RunPhase } from '../game/run.js';
-import { hiveGrowth, updateHives } from '../game/hive-seats.js';
+import { hiveGrowth, hivesOf, updateHives } from '../game/hive-seats.js';
 import { contactPairs } from '../game/ship-contact.js';
 import { SHIP_CONTACT_DISTANCE } from '../game/versus-seats.js';
 import { endMatch, losingSeat } from '../game/match-end.js';
 import { MatchReferee } from './match-referee.js';
 import { DENSITY_REFERENCE_CAPACITY } from '../sim/species.js';
 import { decodeEvent, encodeEvent } from './event-codec.js';
-import { INTERPOLATION_DELAY_SECONDS, PING_INTERVAL_SECONDS, SNAPSHOT_UPDATE_INTERVAL } from './protocol.js';
+import { HOST_STATE_UPDATE_INTERVAL, INTERPOLATION_DELAY_SECONDS, PING_INTERVAL_SECONDS, SNAPSHOT_UPDATE_INTERVAL } from './protocol.js';
 import { RemoteSeatDriver } from './remote-seat.js';
 import { ShotRelay } from './shot-relay.js';
 import { buildSeatSnapshot } from './seat-snapshot.js';
+import { applyHostState, buildHostState } from './host-state.js';
 import { decodeSnapshot, encodeSnapshot } from './snapshot-codec.js';
 import { TransportChannel } from './transport.js';
 
 export const OnlineRole = Object.freeze({ Host: 'host', Guest: 'guest' });
 // A ship lost ripples the warp grid as a couch one does (seats.js).
 const SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
+// A captured hive ripples the warp grid as updateHives does on the host (hive-seats.js).
+const HIVE_CAPTURE_IMPULSE_STRENGTH = 0.4;
 
 // Kills at this capacity as kills at the reference capacity (the swarm's density is normalized so).
 export function onlineGrowth(kills, capacity) {
@@ -73,6 +80,9 @@ export class OnlineGame {
   #remoteBeamShown = false;
   // True once this match's result went to the guest (host).
   #resultSent = false;
+  // The host's HostState sequence sent last (host), and the one applied last (guest).
+  #hostStateSequence = 0;
+  #appliedHostStateSequence = 0;
 
   constructor({ role, transport, clock }) {
     if (role !== OnlineRole.Host && role !== OnlineRole.Guest) throw new RangeError(`online role must be host or guest, got ${role}`);
@@ -84,6 +94,8 @@ export class OnlineGame {
     // The events drained in the latest update, pings and pongs excepted.
     this.receivedEvents = [];
     this.droppedMessages = 0;
+    // The newest HostState the guest applied (null before the first, and on the host).
+    this.hostState = null;
     transport.onMessage((channel, bytes) => this.#receive(channel, bytes));
   }
 
@@ -150,10 +162,40 @@ export class OnlineGame {
   stepVersus(game, deltaSeconds) {
     if (this.isGuest) {
       this.#applyContactKills(game);
+      this.#playHiveCaptures(game);
       return;
     }
     this.#refereeContact(game);
+    const owners = hivesOf(game)?.owners ?? [];
     updateHives(game, deltaSeconds);
+    const after = hivesOf(game)?.owners ?? [];
+    owners.forEach((owner, hive) => {
+      if (after[hive] !== owner && after[hive] !== null) this.queueEvent({ type: 'hiveCaptured', hive, seat: after[hive] });
+    });
+  }
+
+  // Guest: the capture shockwave at each hive the host captured.
+  #playHiveCaptures(game) {
+    const hives = hivesOf(game);
+    if (hives === null) return;
+    for (const event of this.receivedEvents) {
+      const hive = event.type === 'hiveCaptured' ? hives.hives[event.hive] : undefined;
+      if (hive !== undefined) game.queueImpulse(hive.x, hive.y, HIVE_CAPTURE_IMPULSE_STRENGTH, false);
+    }
+  }
+
+  // For a new match (Task 5.2's resetMatch): forgets the applied host state. The applied sequence
+  // stays, since the host's sequence keeps counting, so a state from the last match cannot apply.
+  resetHostState() {
+    this.hostState = null;
+  }
+
+  // Guest: a host state newer than the last applied becomes the game's hives and hostState.
+  #receiveHostState(game, state) {
+    const applied = applyHostState(game, state, this.#appliedHostStateSequence);
+    if (applied === this.#appliedHostStateSequence) return;
+    this.#appliedHostStateSequence = applied;
+    this.hostState = state;
   }
 
   // Host: touching ships die one for one (applyShipContact's guards, plus either seat's immunity).
@@ -218,7 +260,7 @@ export class OnlineGame {
   }
 
   applyRemoteSeats(game, deltaSeconds) {
-    this.#drain();
+    this.#drain(game);
     const seat = game.seats[this.remoteSeatIndex];
     if (seat === undefined || !seat.remote) return;
     const playing = game.run.phase === RunPhase.Playing;
@@ -243,7 +285,7 @@ export class OnlineGame {
     if (phase === RunPhase.Ready) this.#updatesInRun = 0;
     else {
       this.#updatesInRun += 1;
-      if (this.#updatesInRun % SNAPSHOT_UPDATE_INTERVAL === 0) this.#sendSnapshot(game);
+      if (this.#updatesInRun % SNAPSHOT_UPDATE_INTERVAL === 0) this.#sendSnapshot(game, this.#updatesInRun % HOST_STATE_UPDATE_INTERVAL === 0);
     }
     for (const event of this.#outbox) this.transport.send(TransportChannel.Events, encodeEvent(event));
     this.#outbox.length = 0;
@@ -288,7 +330,8 @@ export class OnlineGame {
     endMatch(game, result, game.simulation.frameSequence, { x: point.x, y: point.y });
   }
 
-  #sendSnapshot(game) {
+  // withHostState: the host adds its HostState (every HOST_STATE_UPDATE_INTERVAL-th update).
+  #sendSnapshot(game, withHostState) {
     const seat = game.seats[this.localSeatIndex];
     if (seat === undefined) return;
     this.#snapshotSequence += 1;
@@ -299,6 +342,10 @@ export class OnlineGame {
       beam: this.#localBeam,
       invulnerable: seat.invulnerableSeconds > 0 || game.debugInvulnerableSeats.has(seat.index),
     });
+    if (this.isHost && withHostState) {
+      this.#hostStateSequence += 1;
+      snapshot.hostState = buildHostState(game, this.#hostStateSequence);
+    }
     this.transport.send(TransportChannel.State, encodeSnapshot(snapshot));
   }
 
@@ -314,13 +361,15 @@ export class OnlineGame {
     else this.#inbox.push({ channel, event });
   }
 
-  #drain() {
+  #drain(game) {
     this.receivedEvents = [];
     for (const message of this.#inbox) {
       if (message.channel === TransportChannel.Events) this.receivedEvents.push(message.event);
       else {
         const snapshot = this.#decode(decodeSnapshot, message.bytes);
-        if (snapshot !== null) this.driver.receive(snapshot);
+        if (snapshot === null) continue;
+        this.driver.receive(snapshot);
+        if (this.isGuest && snapshot.hostState !== null) this.#receiveHostState(game, snapshot.hostState);
       }
     }
     this.#inbox.length = 0;
