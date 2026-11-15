@@ -1,3 +1,4 @@
+import { BEAM_SHARDS_NEEDED } from '../game/beam-shards.js';
 import { SEAT_COLORS } from '../game/seat-colors.js';
 import { LIFE_ICON, seatReadoutText, tierNumeral, weaponText } from './hud-seat.js';
 
@@ -22,8 +23,6 @@ export const MINIMUM_BAND_FONT_CSS_PIXELS = 13;
 const TOP_OPACITY = '0.6';
 const RESTART_GUARD_MILLISECONDS = 700;
 const BOMB_ICON = '●';
-// Pips shown before the game reports its count (the contract's BeamShards.needed default).
-const DEFAULT_BEAM_SHARDS_NEEDED = 6;
 
 // Font sizes (CSS px) that fit each band element's widest text into a band of this width.
 export function bandFontSizes(bandWidth) {
@@ -150,7 +149,8 @@ export function createHud(rootElement, {
       else pip.classList.remove('hud-pip-filled');
     });
   };
-  setBeamPips(0, DEFAULT_BEAM_SHARDS_NEEDED);
+  // Pips shown before the game reports its count.
+  setBeamPips(0, BEAM_SHARDS_NEEDED);
 
   let restartHandler = null;
   let shownAt = 0;
@@ -189,7 +189,7 @@ export function createHud(rootElement, {
       const warpLeft = Math.min(1, Math.max(0, state.timeWarp ?? 0));
       warp.style.visibility = warpLeft > 0 ? 'visible' : 'hidden';
       warpFill.style.width = `${Math.round(warpLeft * 100)}%`;
-      const needed = Math.max(0, Math.floor(state.beamShardsNeeded ?? DEFAULT_BEAM_SHARDS_NEEDED));
+      const needed = Math.max(0, Math.floor(state.beamShardsNeeded ?? BEAM_SHARDS_NEEDED));
       setBeamPips(Math.max(0, state.beamShards ?? 0), needed);
       const beamLeft = Math.min(1, Math.max(0, state.beamTime ?? 0));
       beam.style.visibility = beamLeft > 0 ? 'visible' : 'hidden';

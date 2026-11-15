@@ -3,8 +3,10 @@
 //   A. solo at 1280 by 720: a shard spawns by itself off screen and inside the world, its pointer
 //      throbs (and stops under reduced motion), six shards are collected, the sixth arms the beam and
 //      surges the spawning, and 8 s later the old weapon, the count and the surge are back.
-//   B. solo at 844 by 390: the pointer, the pips row and the BEAM bar overlap neither the pause
-//      button nor the weapon text, and no HUD element that shows at 1280 is missing (nothing pops).
+//   B. solo at 844 by 390: the pips row and the BEAM bar overlap neither the pause button, the
+//      weapon text nor Settings, and no HUD element that shows at 1280 is missing (nothing pops).
+//      In A and B a shard straight above the view gets a visible pointer that intersects neither
+//      the pause button nor the weapon text (other HUD elements are only in the screenshot).
 //   C. co-op with two synthetic pads at 1280 by 720: seat 2 collects six, both seats get the beam.
 //   D. co-op at 844 by 390: the pips row and the bar overlap no seat row, the pause button, the
 //      weapon text or the Settings button.
@@ -185,7 +187,8 @@ async function checkPointer(page, label) {
   expect(reduced.width === POINTER_WIDTH && style.width === POINTER_WIDTH, `${label}: the pointer widths are ${style.width} and ${reduced.width}`);
 }
 
-// A temporary shard straight above the view, to see whether its pointer reaches the HUD's top row.
+// A temporary shard straight above the view: its pointer must be visible and clear of the pause
+// button and the weapon text (asserted), and the screenshot shows the rest of the top row.
 async function pointerAboveView(page, name) {
   await page.evaluate(() => {
     const { game } = window.__murmuration;
@@ -195,19 +198,22 @@ async function pointerAboveView(page, name) {
   });
   await waitFrames(page, 30);
   await screenshot(page, name);
-  const report = await page.evaluate(() => {
-    const hudBoxes = [...document.querySelectorAll('#hud .hud-panel > *, #hud .hud-pause, #hud .settings-open')]
+  const { hidden: report, visibleCount } = await page.evaluate(() => {
+    const hudBoxes = [...document.querySelectorAll('#hud .hud-pause, #hud .hud-weapon')]
       .filter((element) => getComputedStyle(element).display !== 'none' && getComputedStyle(element).visibility !== 'hidden')
       .map((element) => ({ name: element.className, box: element.getBoundingClientRect() }));
-    const hidden = [...document.querySelectorAll('.beam-shard-pointer')].filter((element) => Number(getComputedStyle(element).opacity) > 0).flatMap((element) => {
+    const shown = [...document.querySelectorAll('.beam-shard-pointer')].filter((element) => Number(getComputedStyle(element).opacity) > 0);
+    const hidden = shown.flatMap((element) => {
       const pointer = element.getBoundingClientRect();
       return hudBoxes.filter(({ box }) => box.width > 0 && box.height > 0 && box.left < pointer.right && box.right > pointer.left && box.top < pointer.bottom && box.bottom > pointer.top).map(({ name }) => name);
     });
     const { game } = window.__murmuration;
     game.pickups.pickups = game.pickups.pickups.filter((pickup) => pickup !== window.__temporaryShard);
-    return hidden;
+    return { hidden, visibleCount: shown.length };
   });
-  console.log(`${name}: the pointer overlaps HUD elements: ${report.length === 0 ? 'none' : report.join(', ')}`);
+  expect(visibleCount > 0, `${name}: no pointer was visible for a shard straight above the view`);
+  expect(report.length === 0, `${name}: the pointer overlaps ${report.join(', ')}`);
+  console.log(`${name}: the pointer for a shard straight above the view clears the pause button and the weapon text`);
 }
 
 // Collects shards with the given seat until the shared count reaches the needed number.

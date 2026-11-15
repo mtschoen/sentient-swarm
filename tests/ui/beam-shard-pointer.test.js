@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  BEAM_SHARD_POINTER_INSET_CSS_PIXELS, BEAM_SHARD_POINTER_SLOTS, beamShardTargets, createBeamShardPointers,
+  BEAM_SHARD_POINTER_INSET_CSS_PIXELS, BEAM_SHARD_POINTER_LAYER_Z_INDEX, BEAM_SHARD_POINTER_SLOTS, beamShardTargets, createBeamShardPointers,
 } from '../../src/ui/beam-shard-pointer.js';
 
 const VIEW = { minX: 10, minY: 5, maxX: 26, maxY: 14, width: 16, height: 9 };
@@ -38,13 +38,13 @@ test('eight slots persist; an off-screen shard shows, an on-screen one and unuse
   assert.equal(pointers.element.children.length, 8);
 });
 
-test('the pointer sits at the 40 pixel inset for a target straight right', () => {
-  assert.equal(BEAM_SHARD_POINTER_INSET_CSS_PIXELS, 40);
+test('the pointer sits at the 64 pixel inset for a target straight right', () => {
+  assert.equal(BEAM_SHARD_POINTER_INSET_CSS_PIXELS, 64);
   const pointers = createBeamShardPointers({ append() {} }, { documentObject: fakeDocument() });
   pointers.update([{ x: 30, y: 9.5 }], VIEW, RECT);
   const match = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(pointers.element.children[0].style.transform);
   const half = pointers.chevronSizeCssPixels / 2;
-  assert.equal(Number(match[1]) + half, 1600 - 40);
+  assert.equal(Number(match[1]) + half, 1600 - 64);
   assert.equal(Number(match[2]) + half, 450);
 });
 
@@ -61,4 +61,18 @@ test('the stylesheet throbs with compositor properties only and has the reduced 
   assert.ok(!css.includes('box-shadow'));
   assert.match(css, /html\[data-reduced-motion\] \.beam-shard-pointer-chevron\s*\{\s*animation: none/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]*animation: none/);
+});
+
+test('the layer is level with the edge indicators, under the HUD, and a shard straight above clears the pause button', () => {
+  assert.equal(BEAM_SHARD_POINTER_LAYER_Z_INDEX, '4');
+  const pointers = createBeamShardPointers({ append() {} }, { documentObject: fakeDocument() });
+  assert.equal(pointers.element.style.zIndex, '4');
+  const hudCss = readFileSync(new URL('../../src/ui/hud.css', import.meta.url), 'utf8');
+  assert.match(hudCss, /#hud \{[^}]*z-index: 5/);
+  pointers.update([{ x: 18, y: 0 }], VIEW, RECT);
+  const match = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(pointers.element.children[0].style.transform);
+  const half = pointers.chevronSizeCssPixels / 2;
+  const PAUSE_BUTTON_BOTTOM_CSS_PIXELS = 38;
+  const THROB_SCALE = 1.25;
+  assert.ok(Number(match[2]) + half - half * THROB_SCALE > PAUSE_BUTTON_BOTTOM_CSS_PIXELS);
 });

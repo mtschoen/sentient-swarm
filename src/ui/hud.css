@@ -21,7 +21,7 @@
   color: #d8ccff; text-shadow: 0 0 6px #a68cff; }
 .hud-warp-track { flex: 1; height: 6px; border: 1px solid #d8ccff; border-radius: 3px; }
 .hud-warp-fill { height: 100%; background: #d8ccff; box-shadow: 0 0 8px #a68cff; }
-/* Beam shards (hud.js): a pips row that is always present (ghost rings when empty, filled with glow when
+/* Beam shards (hud.js; hue 331 mirrors WEAPON_HUES.beam in weaponTypes.js): a pips row that is always present (ghost rings when empty, filled with glow when
    collected) and the BEAM time bar under it, its row reserved while hidden like WARP. Both ride the panel
    backdrop; the 13 px floor and fixed min-heights keep every row in place. */
 .hud-beam-pips { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; min-height: 16px;

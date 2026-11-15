@@ -1,4 +1,5 @@
-/* The beam shard pointer (beam-shard-pointer.js): an arrowhead in the beam hue with a static glow.
+/* The beam shard pointer (beam-shard-pointer.js): an arrowhead in the beam hue (hue 331, WEAPON_HUES.beam
+   in weaponTypes.js) with a static glow.
    The outer slot is positioned and rotated inline; the inner element throbs. The throb animates
    opacity and transform only, so it stays on the compositor. */
 .beam-shard-pointer {
