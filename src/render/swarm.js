@@ -11,7 +11,8 @@ import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
 const HEADER_FLOATS = 12;
 const FLOATS_PER_SHIP = 4;
-const VIEW_FLOATS = WORLD_VIEW_FLOATS + HEADER_FLOATS + MAXIMUM_SWARM_SHIPS * FLOATS_PER_SHIP;
+// After the ships comes one float per ship (1 for a rail gunner), packed four to a vec4f.
+const VIEW_FLOATS = WORLD_VIEW_FLOATS + HEADER_FLOATS + MAXIMUM_SWARM_SHIPS * FLOATS_PER_SHIP + MAXIMUM_SWARM_SHIPS;
 export const SWARM_VIEW_BYTES = VIEW_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 const VERTICES_PER_QUAD = 4;
 
@@ -22,8 +23,10 @@ export function packSwarmView({ viewport, time, ships, facing, pointX, pointY, p
   const count = Math.min(ships.length, MAXIMUM_SWARM_SHIPS);
   // On-screen ship size follows the glyphs' square-root law: exactly SWARM_SHIP_SIZE at zoom 1.
   const shipSize = SWARM_SHIP_SIZE * viewport.cameraZoom ** (SHIP_ZOOM_EXPONENT - 1);
-  floats.set([facing, pointX, pointY, pointShown ? 1 : 0, WEAPON_HUES[armed] ?? WEAPON_HUES.base, count, shipSize, 0, bodyColor[0], bodyColor[1], bodyColor[2], 0], WORLD_VIEW_FLOATS);
+  floats.set([facing, pointX, pointY, pointShown ? 1 : 0, WEAPON_HUES[armed] ?? WEAPON_HUES.base, count, shipSize, WEAPON_HUES.rail, bodyColor[0], bodyColor[1], bodyColor[2], 0], WORLD_VIEW_FLOATS);
   const first = WORLD_VIEW_FLOATS + HEADER_FLOATS;
+  const marksFirst = first + MAXIMUM_SWARM_SHIPS * FLOATS_PER_SHIP;
+  floats.fill(0, marksFirst, marksFirst + MAXIMUM_SWARM_SHIPS);
   for (let index = 0; index < count; index += 1) {
     const ship = ships[index];
     const offset = first + index * FLOATS_PER_SHIP;
@@ -31,6 +34,7 @@ export function packSwarmView({ viewport, time, ships, facing, pointX, pointY, p
     floats[offset + 1] = ship.y;
     floats[offset + 2] = ship.age;
     floats[offset + 3] = ship.heading ?? 0;
+    floats[marksFirst + index] = ship.gunnerIndex >= 0 ? 1 : 0;
   }
   return { floats, count };
 }

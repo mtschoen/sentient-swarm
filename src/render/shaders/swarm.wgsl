@@ -3,14 +3,15 @@
 // marker (a faint ring with a dot) when markerShown is 1. Ships are small white darts with a bright
 // outline and a halo, nose along each ship's own heading (its velocity, so it banks through
 // curves), drawn at shipSize (SWARM_SHIP_SIZE) of the first spike's dart, and a cockpit in the armed weapon's hue; a new
-// ship flashes for its first SPAWN_FLASH_SECONDS. Max-blended (MAX_BLEND) after the particles.
+// ship flashes for its first SPAWN_FLASH_SECONDS. A rail gunner (gunnerMarks) also gets a thin rail-hue ring. Max-blended (MAX_BLEND) after the particles.
 // Common and quad headers prepended (hsvToRgb, quadCorner, worldFeather).
 
-// Uniform layout, total 4176 bytes; SwarmRenderer in swarm.js writes it.
+// Uniform layout, total 5200 bytes; SwarmRenderer in swarm.js writes it.
 //   0 worldToClipScale vec2f, 8 worldToClipOffset vec2f, 16 devicePixelToClip vec2f, 24 time f32,
 //  28 header padding f32, 32 facing f32, 36 markerX f32, 40 markerY f32, 44 markerShown f32,
-//  48 hue f32, 52 count f32, 56 shipSize f32, 60 padding f32, 64 bodyColor vec3f, 76 padding f32,
-//  then from 80 MAXIMUM_SWARM_SHIPS vec4f (x, y, age, heading). facing (the aim) is unused by the ships since they face their heading.
+//  48 hue f32, 52 count f32, 56 shipSize f32, 60 railHue f32, 64 bodyColor vec3f, 76 padding f32,
+//  then from 80 MAXIMUM_SWARM_SHIPS vec4f (x, y, age, heading), then from 4176 MAXIMUM_SWARM_SHIPS / 4 vec4f gunnerMarks
+//  (one float per ship, 1 for a rail gunner: ship i is component i % 4 of element i / 4). facing (the aim) is unused by the ships since they face their heading.
 struct SwarmView {
   worldToClipScale: vec2f,
   worldToClipOffset: vec2f,
@@ -24,10 +25,11 @@ struct SwarmView {
   hue: f32,
   count: f32,
   shipSize: f32,
-  padding: f32,
+  railHue: f32,
   bodyColor: vec3f,
   bodyPadding: f32,
   ships: array<vec4f, MAXIMUM_SWARM_SHIPS>,
+  gunnerMarks: array<vec4f, MAXIMUM_SWARM_SHIPS / 4u>,
 }
 
 @group(0) @binding(0) var<uniform> view: SwarmView;
@@ -38,6 +40,8 @@ const MARKER_RADIUS: f32 = 0.12;
 // Local hull scale at shipSize 1: the dart's nose is SHIP_SCALE * 0.3 ahead of its centre.
 const SHIP_SCALE: f32 = 0.4;
 const SPAWN_FLASH_SECONDS: f32 = 0.4;
+// Rail gunners wear a thin ring in the rail hue; the dart's nose is 0.12 times shipSize from its centre.
+const GUNNER_RING_RADIUS: f32 = 0.14;
 
 struct SwarmVaryings {
   @builtin(position) position: vec4f,
@@ -45,6 +49,7 @@ struct SwarmVaryings {
   @location(1) @interpolate(flat) marker: f32,
   @location(2) @interpolate(flat) age: f32,
   @location(3) @interpolate(flat) heading: f32,
+  @location(4) @interpolate(flat) gunnerMark: f32,
 }
 
 @vertex
@@ -56,12 +61,15 @@ fn swarmVertex(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index)
   var halfExtent = MARKER_HALF_EXTENT;
   output.age = 0.0;
   output.heading = 0.0;
+  output.gunnerMark = 0.0;
   if (!isMarker) {
     let ship = view.ships[min(instanceIndex, MAXIMUM_SWARM_SHIPS - 1u)];
     center = ship.xy;
     halfExtent = SHIP_HALF_EXTENT * view.shipSize;
     output.age = ship.z;
     output.heading = ship.w;
+    let markIndex = min(instanceIndex, MAXIMUM_SWARM_SHIPS - 1u);
+    output.gunnerMark = view.gunnerMarks[markIndex / 4u][markIndex % 4u];
   }
   output.offset = corner * halfExtent;
   output.marker = select(0.0, 1.0, isMarker);
@@ -120,6 +128,9 @@ fn swarmFragment(input: SwarmVaryings) -> @location(0) vec4f {
   let halo = exp(-max(distance, 0.0) * 30.0 / view.shipSize) * 0.5;
   let cockpit = (1.0 - smoothstep(0.0, 0.02 * view.shipSize + feather, length(local - vec2f(0.07, 0.0)) * scale)) * body;
   let flash = 1.0 + 2.0 * clamp(1.0 - input.age / SPAWN_FLASH_SECONDS, 0.0, 1.0);
-  let color = (view.bodyColor * 1.1 * body + view.bodyColor * 2.0 * outline + view.bodyColor * 0.8 * halo) * flash + tint * cockpit * 1.5;
+  let gunnerRingDistance = abs(length(input.offset) - GUNNER_RING_RADIUS * view.shipSize);
+  let gunnerRing = 1.0 - smoothstep(0.006 * view.shipSize, 0.006 * view.shipSize + feather * 2.0, gunnerRingDistance);
+  let gunnerColor = hsvToRgb(view.railHue, 0.8, 1.0) * 1.2 * gunnerRing * input.gunnerMark;
+  let color = (view.bodyColor * 1.1 * body + view.bodyColor * 2.0 * outline + view.bodyColor * 0.8 * halo) * flash + tint * cockpit * 1.5 + gunnerColor;
   return vec4f(color, 0.0);
 }
