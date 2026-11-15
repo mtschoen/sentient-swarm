@@ -12,7 +12,7 @@
 // by the title menu, which then owns the start (a menu cursor must not start the run). One update
 // is one step:
 //   1. input.update and read input.state (a gesture starts or restarts the run); a rising bomb
-//      edge that run.useBomb accepts calls simulation.requestRadialKill before this step (around
+//      edge that run.useBomb accepts (bomb-step.js) calls simulation.requestRadialKill before this step (around
 //      the swarm centroid, bombRadiusForView of the view; a start and the death clear stay
 //      world-wide kill-alls), so the bomb kills before projectiles and contact.
 //   2. player.update (Playing only), with mouse aim derived as pointerWorld minus the player; with
@@ -89,6 +89,7 @@ import { NEUTRAL_INPUT, PlayerSeat, SWARM_PICKUP_RADIUS } from './player-seat.js
 import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND } from './weaponTypes.js';
 import { PickupDirector } from './pickups.js';
 import { collectFor } from './pickup-collect.js';
+import { pressBombs } from './bomb-step.js';
 import { BeamTime } from './beam-time.js';
 import { BeamShards } from './beam-shards.js';
 import { cancelBeamTime, rebaseShardCadence, spawnShardsForWaves, tickBeamTime } from './beam-time-seats.js';
@@ -101,12 +102,12 @@ import { DEFAULT_BEAM_TIME_SURGE, SpawnPressure, validateBeamTimeSurge } from '.
 import { createWatchPressure, moveWatchPoint } from './watch.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
 import { MAXIMUM_PLAYER_SEATS, SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
-import { Camera, bombRadiusForView, fitZoom, framingCenter } from './camera.js';
+import { Camera, fitZoom, framingCenter } from './camera.js';
 import { SeatRevival } from './seat-revival.js';
 import { SoloZoomController } from './solo-zoom.js';
 import { Escalation, NEUTRAL_ESCALATION } from './escalation.js';
 import { applyEscalation } from './escalation-step.js';
-import { SOLO_ZOOM_BOMB_HOLD_SECONDS, easeOutLimits, soloZoomOptions } from './solo-zoom-step.js';
+import { easeOutLimits, soloZoomOptions } from './solo-zoom-step.js';
 import { applyVersusHits, gameModeOf, growSwarms, leaveVersus, setGameMode, startsFor, stepVersus } from './versus-seats.js';
 import { hiveGateTable, hiveView } from './hive-seats.js';
 import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, tickInvulnerability, uploadSwarms } from './seats.js';
@@ -289,6 +290,8 @@ export class Game {
       offeredType: this.pickups.offeredType,
       phase: this.paused ? 'paused' : this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
+      // Online the guest shows the host's score, multiplier and bombs.
+      ...this.online?.sharedHud,
     };
   }
 
@@ -507,16 +510,7 @@ export class Game {
     }
 
     this.bombHoldRemaining = Math.max(0, this.bombHoldRemaining - deltaSeconds);
-    seats.forEach((seat, index) => {
-      const pressed = seat.bombEdge(inputs[index]);
-      if (pressed && !seat.down && this.run.useBomb(seat.point)) {
-        this.bombHoldRemaining = SOLO_ZOOM_BOMB_HOLD_SECONDS;
-        // The bomb clears around the swarm out past the view's corners (bombRadiusForView), not the whole world.
-        const center = seat.aliveCount > 0 ? seat.centroid : seat.point;
-        this.simulation.requestRadialKill(center.x, center.y, bombRadiusForView(this.viewSize.width, this.viewSize.height));
-        this.effects?.bomb(...(seats.length > 1 ? [seat.index] : []));
-      }
-    });
+    pressBombs(this, inputs);
 
     const playing = this.run.phase === RunPhase.Playing;
     const controls = seats.map((seat, index) => seat.controlsFrom(inputs[index]));
@@ -652,7 +646,8 @@ export class Game {
       this.lastScoredFrameSequence = stats.frameSequence;
       if (stats.ringsThisFrame > 0) this.queueImpulse(stats.lastRingX, stats.lastRingY, RING_IMPULSE_STRENGTH, false);
       if (this.run.phase === RunPhase.Playing) {
-        this.score.recordKills(stats.killsSinceLastRead);
+        // Online the host keeps the one score (the guest's awards then earn nothing at its score 0).
+        if (!this.online?.isGuest) this.score.recordKills(stats.killsSinceLastRead);
         // Kills grow every swarm still in the run and revive down seats (versus: growSwarms); award
         // lives are superseded by it, bombs stay.
         growSwarms(this, stats);

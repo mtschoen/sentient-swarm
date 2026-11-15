@@ -39,6 +39,8 @@
 // machine arms the weapon and the other plays the same blast at the same place with no weapon
 // change (applyCollection's arm false). The guest removes a pickup on its collection or expiry,
 // which also answers its claim; a refused claim is never sent again.
+// Bombs and the HUD (Task 4.4): the host keeps the one bomb pool (online-bombs.js); the guest's
+// HUD shows the host's score, multiplier and bombs from the newest host state (sharedHud).
 // Pings and pongs are answered and fed to the clock as they arrive; every other event is kept for
 // the update that drains it (receivedEvents). A message that does not decode is dropped.
 
@@ -56,6 +58,9 @@ import { ShotRelay } from './shot-relay.js';
 import { buildSeatSnapshot } from './seat-snapshot.js';
 import { GuestPickups, PickupLedger, findReachedPickup } from './pickup-ledger.js';
 import { applyCollection } from '../game/pickup-collect.js';
+import { pressOnlineBomb, receiveBombs } from './online-bombs.js';
+
+export { ONLINE_BOMB_RADIUS } from './online-bombs.js';
 import { applyHostState, buildHostState } from './host-state.js';
 import { decodeSnapshot, encodeSnapshot } from './snapshot-codec.js';
 import { TransportChannel } from './transport.js';
@@ -203,6 +208,18 @@ export class OnlineGame {
     this.guestPickups?.reset();
   }
 
+  // The local seat's bomb press (bomb-step.js): the host spends the pool, the guest asks the host.
+  pressBomb(game, seat) {
+    pressOnlineBomb(this, game, seat);
+  }
+
+  // The guest's HUD numbers from the host ({} on the host and before the first host state).
+  get sharedHud() {
+    if (this.isHost || this.hostState === null) return {};
+    const { score, multiplier, bombs } = this.hostState;
+    return { score, multiplier, bombs };
+  }
+
   // The local seat's beam this update (fireSeats), for the next snapshot.
   recordBeam(beam) {
     this.#localBeam = beam;
@@ -335,6 +352,7 @@ export class OnlineGame {
 
   applyRemoteSeats(game, deltaSeconds) {
     this.#drain(game);
+    receiveBombs(this, game);
     const seat = game.seats[this.remoteSeatIndex];
     if (seat === undefined || !seat.remote) return;
     const playing = game.run.phase === RunPhase.Playing;
