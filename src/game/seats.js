@@ -98,7 +98,8 @@ export function uploadSwarms(game) {
 // Every seat that is not down fires: its shots and gunner needles are queued, its beam set in its
 // own slot (a two-seat game only), and at most one weaponFire cue plays per update, seat 1 first.
 // In versus every projectile and beam carries its seat as owner (it can hit the other swarm).
-// A remote seat (online) fires on its own machine, so it is skipped here.
+// A remote seat (online) fires on its own machine, so it is skipped here; the local seat's shots go
+// to the other machine and the remote seat's arrive from it (game.online).
 export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
   const { projectiles, effects } = game;
   let cued = false;
@@ -117,6 +118,10 @@ export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
     const ownerArguments = game.versus ? [seat.index] : [];
     shots.spawns.forEach((spawn) => projectiles.queueSpawn(spawn, ...ownerArguments));
     shots.turretSpawns.forEach((spawn) => projectiles.queueSpawn(spawn, ...ownerArguments));
+    if (index === game.localSeatIndex) {
+      game.online?.recordShots(seat.index, shots.spawns);
+      game.online?.recordShots(seat.index, shots.turretSpawns);
+    }
     const beam = fire.expired ? null : shots.beam;
     if (index === game.localSeatIndex) game.online?.recordBeam(beam);
     if (game.seats.length > 1) projectiles.setBeam(beam, seat.index, ...ownerArguments);
@@ -132,6 +137,8 @@ export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
     }
     if (fire.expired) effects?.expiry?.();
   });
+  // Online: the remote seat's shots and beam, replayed from the other machine.
+  game.online?.replayRemoteFire(game);
 }
 
 // Swarm ships the GPU reported hit die (a small shockwave each). A seat that loses its last ship

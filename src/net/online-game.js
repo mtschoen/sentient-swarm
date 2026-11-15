@@ -11,6 +11,10 @@
 //     from the run start on a snapshot of the local seat goes out every SNAPSHOT_UPDATE_INTERVAL
 //     updates, stamped with the match time after this update; queued events are flushed on the
 //     events channel and a ping goes out every PING_INTERVAL_SECONDS of session time.
+// Shots (Task 3.4): the local seat's spawns of an update (recordShots) go out as one shots event
+// stamped with the match time after the update; replayRemoteFire (after fireSeats' loop) queues the
+// received ones aged to the remote's time this update ends at, and sets the remote seat's beam in
+// its own slot from its snapshot (cleared once when it stops firing one, or outside Playing).
 // Pings and pongs are answered and fed to the clock as they arrive; every other event is kept for
 // the update that drains it (receivedEvents). A message that does not decode is dropped.
 
@@ -18,6 +22,7 @@ import { RunPhase } from '../game/run.js';
 import { decodeEvent, encodeEvent } from './event-codec.js';
 import { INTERPOLATION_DELAY_SECONDS, PING_INTERVAL_SECONDS, SNAPSHOT_UPDATE_INTERVAL } from './protocol.js';
 import { RemoteSeatDriver } from './remote-seat.js';
+import { ShotRelay } from './shot-relay.js';
 import { buildSeatSnapshot } from './seat-snapshot.js';
 import { decodeSnapshot, encodeSnapshot } from './snapshot-codec.js';
 import { TransportChannel } from './transport.js';
@@ -36,6 +41,12 @@ export class OnlineGame {
   // True once a sampled mirror has replaced the remote seat's swarm in this run.
   #mirroredInRun = false;
   #localBeam = null;
+  #shotOwner = null;
+  #shotSpawns = [];
+  // The remote's match time this update ends at (applyRemoteSeats), for replaying its shots.
+  #remoteNow = 0;
+  #shotRelay = new ShotRelay();
+  #remoteBeamShown = false;
 
   constructor({ role, transport, clock }) {
     if (role !== OnlineRole.Host && role !== OnlineRole.Guest) throw new RangeError(`online role must be host or guest, got ${role}`);
@@ -82,6 +93,30 @@ export class OnlineGame {
     this.#localBeam = beam;
   }
 
+  // Some of the local seat's spawns this update (its shots, then its gunners' needles).
+  recordShots(owner, spawns) {
+    this.#shotOwner = owner;
+    for (const spawn of spawns) this.#shotSpawns.push(spawn);
+  }
+
+  // The remote seat's fire on this machine: its received shots aged, then its beam.
+  replayRemoteFire(game) {
+    const seat = game.seats[this.remoteSeatIndex];
+    if (seat === undefined || !seat.remote) return;
+    const playing = game.run.phase === RunPhase.Playing;
+    const remoteIndex = this.remoteSeatIndex;
+    if (playing) {
+      for (const event of this.receivedEvents) {
+        if (event.type === 'shots' && event.owner === remoteIndex) this.#shotRelay.replay(event, this.#remoteNow, game.projectiles);
+      }
+    }
+    // The beam slot is set while the remote fires one and cleared once when it stops.
+    const beam = playing ? seat.remoteBeam : null;
+    if (beam === null && !this.#remoteBeamShown) return;
+    game.projectiles.setBeam(beam, remoteIndex, remoteIndex);
+    this.#remoteBeamShown = beam !== null;
+  }
+
   applyRemoteSeats(game, deltaSeconds) {
     this.#drain();
     const seat = game.seats[this.remoteSeatIndex];
@@ -89,6 +124,7 @@ export class OnlineGame {
     const playing = game.run.phase === RunPhase.Playing;
     // The remote seat at the moment this update ends (the time the local snapshot will carry).
     const remoteNow = this.clock.remoteMatchNow() + (playing ? deltaSeconds : 0);
+    this.#remoteNow = remoteNow;
     const renderMatchSeconds = remoteNow - (this.clock.roundTripSeconds ?? 0) / 2 - INTERPOLATION_DELAY_SECONDS;
     const { lost } = this.driver.apply(seat, renderMatchSeconds, deltaSeconds);
     if (playing && this.#mirroredInRun) lost.forEach((ship) => game.queueImpulse(ship.x, ship.y, REMOTE_SHIP_LOSS_IMPULSE_STRENGTH, false));
@@ -100,6 +136,9 @@ export class OnlineGame {
     const running = phase === RunPhase.Playing && !game.paused;
     this.clock.setMatchRunning(running);
     if (running) this.clock.advanceMatch(deltaSeconds);
+    const shots = this.#shotRelay.record(this.#shotOwner, this.#shotSpawns, this.clock.matchSeconds);
+    if (shots !== null) this.queueEvent(shots);
+    this.#shotSpawns = [];
     if (phase === RunPhase.Ready) this.#updatesInRun = 0;
     else {
       this.#updatesInRun += 1;

@@ -252,3 +252,49 @@ test('an event that does not decode is dropped and the next one still arrives', 
   stepBoth(2 * STEP);
   assert.ok(guest.online.receivedEvents.some((event) => event.type === 'quit'));
 });
+
+// The spawns queued with owner seat, in queue order.
+function ownedSpawns(projectiles, seat) {
+  return projectiles.spawns.filter((spawn, index) => projectiles.spawnOwners[index][0] === seat);
+}
+
+test('every host shot reaches the guest with its owner, aged by the delay', async () => {
+  const { host, guest, stepBoth, startMatch } = await createOnlinePair({ delaySeconds: 0.05 });
+  await startMatch('versus');
+  host.game.debugArm('scatter', 2);
+  host.input.state.firing = true;
+  host.input.state.aim = { x: 1, y: 0 };
+  stepBoth(1);
+  host.input.state.firing = false;
+  stepBoth(0.2);
+  const fired = ownedSpawns(host.projectiles, 0);
+  const replayed = ownedSpawns(guest.projectiles, 0);
+  assert.ok(fired.length > 20);
+  assert.equal(replayed.length, fired.length);
+  replayed.forEach((copy, index) => {
+    const original = fired[index];
+    const age = original.lifetime - copy.lifetime;
+    assert.ok(Math.abs(age - 0.05) <= STEP + 1e-4, `age ${age}`);
+    assert.ok(Math.abs(copy.x - (original.x + original.velocityX * age)) < 1e-4);
+    assert.ok(Math.abs(copy.y - (original.y + original.velocityY * age)) < 1e-4);
+    assert.equal(copy.kind, original.kind);
+  });
+  assert.equal(ownedSpawns(host.projectiles, 1).length, 0, 'the guest fired nothing');
+});
+
+test('the remote beam follows the remote seat and stops with it', async () => {
+  const { host, guest, stepBoth, startMatch } = await createOnlinePair({ delaySeconds: 0.05 });
+  await startMatch('versus');
+  host.game.debugArm('beam');
+  host.input.state.firing = true;
+  host.input.state.aim = { x: 1, y: 0 };
+  stepBoth(0.5);
+  const seatZeroBeams = () => guest.projectiles.beams.filter((beam, index) => guest.projectiles.beamSeats[index] === 0);
+  const firing = seatZeroBeams();
+  assert.ok(firing.some((beam) => beam !== null));
+  assert.ok(firing.at(-1) !== null);
+  assert.ok(guest.projectiles.beamOwners.filter((owner, index) => guest.projectiles.beamSeats[index] === 0).every((owner) => owner[0] === 0));
+  host.input.state.firing = false;
+  stepBoth(0.3);
+  assert.equal(seatZeroBeams().at(-1), null);
+});
