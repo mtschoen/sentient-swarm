@@ -252,6 +252,48 @@ test('the guest connect timeout counts from Copy reply', async () => {
   assert.equal(online.panel.messageText, 'Your two networks cannot connect directly.');
 });
 
+test('after a guest connect timeout the panel keeps the start until it is cancelled, and stays gone after', async () => {
+  const factory = countingConnectionFactory();
+  const { fakes, timers, items } = createFakes();
+  const online = createOnlineWiring({ ...fakes, createConnection: factory.create });
+  const offer = await encodeSignal({ kind: 'offer', sdp: SAMPLE_SDP });
+  online.openFromHash(`#join=${offer}`);
+  online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
+  await settle();
+  const copyReply = allNodes(online.panel.element).find((node) => node.tagName === 'BUTTON' && node.textContent === 'Copy reply');
+  await copyReply.fire('click');
+  await settle();
+  timers.advanceTo(10);
+  assert.equal(online.panel.messageText, 'Your two networks cannot connect directly.');
+  assert.equal(online.panel.visible, true);
+  assert.equal(online.active, true, 'the panel still holds the title');
+  assert.equal(online.handleStart(), true, 'Play under the panel starts no couch run');
+  online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
+  assert.equal(items.get('play').enabled, false);
+  const cancel = allNodes(online.panel.element).find((node) => node.tagName === 'BUTTON' && node.textContent === 'Cancel');
+  await cancel.fire('click');
+  assert.equal(online.panel.visible, false);
+  assert.equal(online.active, false);
+  assert.equal(online.handleStart(), false);
+  for (let frame = 0; frame < 3; frame += 1) online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
+  assert.equal(online.panel.visible, false, 'a dismissed panel does not come back');
+  assert.equal(factory.count, 1);
+});
+
+test('Play is ghosted while a connection is pending and enabled again once it is cancelled', () => {
+  const factory = countingConnectionFactory();
+  const { fakes, items } = createFakes();
+  const online = createOnlineWiring({ ...fakes, createConnection: factory.create });
+  online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
+  assert.equal(items.get('play').enabled, true);
+  online.toggleOnline();
+  online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
+  assert.deepEqual(items.get('play'), { label: 'Play', enabled: false });
+  online.toggleOnline();
+  online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
+  assert.equal(items.get('play').enabled, true);
+});
+
 test('the host connect timeout counts from an accepted reply and returns a fresh invite', async () => {
   const factory = countingConnectionFactory();
   const { fakes, timers } = createFakes();

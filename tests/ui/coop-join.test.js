@@ -51,6 +51,26 @@ test('coop-join seats the pad in the input, toasts, and reports playerCount 2 un
   assert.equal(state.extraPad, null);
 });
 
+test('reset hides the join banner and the pad status rows until the next title update', () => {
+  const created = [];
+  const documentObject = { createElement: () => { const element = { style: {}, hidden: false, textContent: '' }; created.push(element); return element; } };
+  const join = createCoopJoin({
+    input: { setSeatTwoPad() {}, seatOnePadIndex: () => 0 },
+    menuInput: { setExtraPad() {} },
+    hud: { showToast() {} },
+    menuElement: { append() {} },
+    navigatorObject: { getGamepads: () => [pad(0)] },
+    documentObject,
+  });
+  join.update({ titleOpen: true });
+  const shown = created.filter((element) => element.hidden === false);
+  assert.ok(shown.length >= 2, 'the banner and the rows show at the title');
+  join.reset();
+  assert.deepEqual(shown.filter((element) => element.hidden === false), [], 'nothing of the couch join lingers (an online session skips update)');
+  join.update({ titleOpen: true });
+  assert.ok(created.filter((element) => element.hidden === false).length >= 2);
+});
+
 test('a press while the title is closed never joins', () => {
   const { join, state } = setup();
   state.gamepads = [pad(0), pad(1, [0])];

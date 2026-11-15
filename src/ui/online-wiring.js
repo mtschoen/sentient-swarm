@@ -73,6 +73,9 @@ export function createOnlineWiring({
   let seatOnePad = null;
 
   const live = () => session !== null && connected;
+  // A connection in progress, or the panel still up after one failed: the title belongs to online
+  // play (no couch start, join or Lab) until the panel is cancelled.
+  const holding = () => connection !== null || panel.visible;
 
   function clearConnectTimer() {
     if (connectTimer !== null) clearTimer(connectTimer);
@@ -293,8 +296,9 @@ export function createOnlineWiring({
     }
     const view = onlineTitleView({ connected: live(), role, roundTripMilliseconds: session?.roundTripMilliseconds ?? null, waitingFor: session?.waitingFor ?? null });
     menu.setItem(ONLINE_ITEM_ID, { label: view.onlineLabel, enabled: true });
-    menu.setItem('play', { label: view.playLabel, enabled: view.playEnabled });
-    menu.setItem('lab', { label: 'Lab', enabled: view.labEnabled && connection === null });
+    const pending = holding() && !live();
+    menu.setItem('play', { label: view.playLabel, enabled: view.playEnabled && !pending });
+    menu.setItem('lab', { label: 'Lab', enabled: view.labEnabled && !holding() });
     onlineTitle.update(view, { visible: titleOpen && live() });
   }
 
@@ -302,8 +306,8 @@ export function createOnlineWiring({
     panel,
     onlineTitle,
     countdown,
-    // A connection or session exists (connecting included).
-    get active() { return connection !== null; },
+    // A connection or session exists (connecting included), or the panel is still up after a failed one.
+    get active() { return holding(); },
     get role() { return role; },
     get session() { return session; },
     get inviteUrl() { return invite; },
@@ -313,7 +317,7 @@ export function createOnlineWiring({
     },
     // The title's Play: the host starts both matches; the guest's Play is ghosted.
     handleStart() {
-      if (connection === null) return false;
+      if (!holding()) return false;
       if (live() && role === 'host' && session.waitingFor === null) session.start(modeControl.mode);
       return true;
     },
@@ -347,7 +351,7 @@ export function createOnlineWiring({
     toggleOnline() {
       audio?.unlock?.();
       if (live()) session.quit();
-      else if (connection !== null) cancel();
+      else if (holding()) cancel();
       else beginHost();
     },
     openFromHash,

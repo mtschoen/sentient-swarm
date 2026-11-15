@@ -43,6 +43,8 @@ export function createCoopJoin({ input, menuInput, hud, menuElement, navigatorOb
       seatJoin.reset();
       seatPad(seatJoin.seatTwoPad);
       banner.update({ joined: seatJoin.joined, visible: false, sparring });
+      // Hidden until the next title update (an online session skips update, so nothing lingers).
+      padStatus.update({ pads: gamepads(), seatTwoPad: seatJoin.joined ? seatJoin.seatTwoPad : null, visible: false, sparring });
     },
     padForSeat(seat) {
       if (seat === 1) return seatJoin.virtual ? null : seatJoin.seatTwoPad ?? undefined;
