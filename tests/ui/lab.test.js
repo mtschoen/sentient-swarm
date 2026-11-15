@@ -15,6 +15,7 @@ import { TIME_WARP_SCALE, TIME_WARP_SECONDS, TimeWarp } from '../../src/game/tim
 import { BEAM_SHARDS_NEEDED, BEAM_SHARD_WAVE_INTERVAL, BeamShards } from '../../src/game/beam-shards.js';
 import { BEAM_TIME_SECONDS, BeamTime } from '../../src/game/beam-time.js';
 import { SOLO_ZOOM_DEFAULTS, SOLO_ZOOM_RANGES, SoloZoomController } from '../../src/game/solo-zoom.js';
+import { ESCALATION_DEFAULTS, Escalation } from '../../src/game/escalation.js';
 import { DEFAULT_BEAM_TIME_SURGE, MAXIMUM_BEAM_TIME_SURGE } from '../../src/sim/spawner.js';
 
 const CAPACITY = 65536;
@@ -75,6 +76,7 @@ function createContext() {
       this.beamTimeSurge = strength;
     },
     soloZoom: new SoloZoomController(),
+    escalation: new Escalation(),
     setSoloZoomSetting(name, value) { this.soloZoom.set(name, value); },
     simulationRate: 'full',
     setSimulationRate(rate) { this.simulationRate = rate; },
@@ -279,6 +281,44 @@ test('LabMode: leaving the lab puts the seek range back', () => {
   assert.equal(game.simulation.seekRange, 18.5);
   lab.leave();
   assert.equal(game.simulation.seekRange, 0);
+});
+
+const ESCALATION_KNOBS = ['escalationRate', 'escalationRefillGrowthSeconds', 'escalationCeiling', 'escalationSeekMaximum', 'escalationPredatorShift', 'escalationWaveGrowthSeconds'];
+
+test('the escalation knobs default to the shipped escalation and round-trip through a shared mix', () => {
+  assert.deepEqual(ESCALATION_KNOBS.map((key) => LAB_KNOB_DEFAULTS[key]), [
+    ESCALATION_DEFAULTS.rate, ESCALATION_DEFAULTS.refillGrowthSeconds, ESCALATION_DEFAULTS.ceilingFraction,
+    ESCALATION_DEFAULTS.seekMaximum, ESCALATION_DEFAULTS.predatorShift, ESCALATION_DEFAULTS.waveGrowthSeconds,
+  ]);
+  const source = createContext();
+  writeKnob(source, specFor('escalationRate'), 0);
+  writeKnob(source, specFor('escalationCeiling'), 0.3);
+  const mix = decodeMix(encodeMix(captureMix(source)));
+  assert.equal(mix.knobs.escalationRate, 0);
+  const target = createContext();
+  applyMix(target, mix);
+  assert.equal(target.game.escalation.settings.rate, 0);
+  assert.equal(target.game.escalation.settings.ceilingFraction, 0.3);
+});
+
+test('an old shared mix without the escalation knobs still decodes and plays the shipped escalation', () => {
+  const knobs = captureMix(createContext()).knobs;
+  for (const key of ESCALATION_KNOBS) delete knobs[key];
+  const mix = decodeMix(encodeMix({ ...captureMix(createContext()), knobs }));
+  assert.notEqual(mix, null);
+  const target = createContext();
+  target.game.escalation.set('rate', 3);
+  applyMix(target, mix);
+  assert.deepEqual(target.game.escalation.settings, { ...ESCALATION_DEFAULTS });
+});
+
+test('LabMode: leaving the lab puts the escalation back', () => {
+  const { lab, game } = createLab();
+  lab.enter();
+  writeKnob(lab.context, specFor('escalationRate'), 2.5);
+  assert.equal(game.escalation.settings.rate, 2.5);
+  lab.leave();
+  assert.equal(game.escalation.settings.rate, ESCALATION_DEFAULTS.rate);
 });
 
 test('applying a mix without a knobs map (a bundled mix) resets every knob to its default first', () => {

@@ -41,7 +41,12 @@
 // allowance rate by strength for as long as the game sets it (every step; 1 is no surge). The
 // surged target is capped at BEAM_TIME_SURGE_CEILING_FRACTION (40 percent) of capacity, or at the
 // plain target when that is higher, against the 10 percent R37 ramp ceiling: intentionally above
-// it for the 8 seconds of the event. The frame cap still bounds every step.
+// it for the length of beam time. The frame cap still bounds every step.
+// Escalation (src/game/escalation.js, after the ramp ends): setEscalation({ targetMultiplier,
+// refillMultiplier }) multiplies the plain alive target and the refill allowance rate (both 1, no
+// escalation, by default; the game sets them every step and keeps them 1 outside a Playing run).
+// The surge applies on top of the escalated target, with the same 40 percent cap. secondsPastRamp
+// is the escalation's clock: the elapsed time past rampSeconds, so it restarts with the ramp.
 import { SPECIES_COUNT } from './layout.js';
 
 // A frame spawns at most capacity / SPAWN_CAP_DIVISOR agents (the first fill runs at this cap alone).
@@ -149,6 +154,23 @@ export class SpawnPressure {
     this.newestStats = null;
     // Beam time multiplier on the target and the refill rate; 1 is no surge. Set every step by the game.
     this.surgeStrength = 1;
+    // Escalation multipliers on the plain target and the refill rate; 1 is none. Set every step by the game.
+    this.targetMultiplier = 1;
+    this.refillMultiplier = 1;
+  }
+
+  // Both multipliers positive and finite; throws RangeError and changes nothing otherwise.
+  setEscalation({ targetMultiplier = 1, refillMultiplier = 1 } = {}) {
+    for (const [name, value] of [['targetMultiplier', targetMultiplier], ['refillMultiplier', refillMultiplier]]) {
+      if (!(Number.isFinite(value) && value > 0)) throw new RangeError(`SpawnPressure ${name} must be positive and finite, got ${value}`);
+    }
+    this.targetMultiplier = targetMultiplier;
+    this.refillMultiplier = refillMultiplier;
+  }
+
+  // Seconds of ramp time past rampSeconds (0 during the ramp): the escalation's clock.
+  get secondsPastRamp() {
+    return Math.max(0, this.elapsed - this.ramp.rampSeconds);
   }
 
   // Strength in [1, MAXIMUM_BEAM_TIME_SURGE]; throws RangeError otherwise.
@@ -174,7 +196,7 @@ export class SpawnPressure {
   }
 
   get targetAlive() {
-    const base = this.capacity * lerp(this.ramp.floorFraction, this.ramp.ceilingFraction, this.rampProgress);
+    const base = this.capacity * lerp(this.ramp.floorFraction, this.ramp.ceilingFraction, this.rampProgress) * this.targetMultiplier;
     if (this.surgeStrength === 1) return base;
     return Math.min(base * this.surgeStrength, Math.max(base, this.capacity * BEAM_TIME_SURGE_CEILING_FRACTION));
   }
@@ -209,7 +231,7 @@ export class SpawnPressure {
     if (this.filling) return this.maximumPerFrame;
     const bankLimit = wave && deficit > 0 ? Math.max(1, wave.burstFraction * this.targetAlive) : 1;
     this.refillAllowance = Math.min(this.refillAllowance, bankLimit)
-      + this.ramp.refillFractionPerSecond * this.surgeStrength * this.targetAlive * deltaSeconds;
+      + this.ramp.refillFractionPerSecond * this.surgeStrength * this.refillMultiplier * this.targetAlive * deltaSeconds;
     if (!wave) return Math.min(this.maximumPerFrame, Math.floor(this.refillAllowance));
     if (!wave.emitting) return 0;
     const releasedShare = Math.min(1, deltaSeconds / Math.max(deltaSeconds, wave.remainingSeconds));

@@ -13,12 +13,13 @@
 //          inside its range; the lab (lab.js LAB_KNOB_BINDINGS) applies them, clamped to its slider
 //          ranges (panelModel.js LAB_KNOBS), through SpawnPressure.setRamp, SpawnDirector.setSchedule,
 //          the Simulation setters (spawn, particles, walls, comfort radius, seek range (0 is
-//          unlimited), coarse-field pressure 0 or 1), the projectile budgets, the pickup blast, the beam shards needed, waves per shard, beam time seconds and spawn surge, the solo zoom (default off), the watch alive target, same-species
+//          unlimited), coarse-field pressure 0 or 1), the projectile budgets, the pickup blast, the beam shards needed, waves per shard, beam time seconds and spawn surge, the solo zoom, the escalation (rate 0 is off), the watch alive target, same-species
 //          cohesion (0 or 1) and the renderer settings (exposure included). A knob the map leaves
 //          out (every knob, for a mix without the map) is applied at its shipped default. effects,
 //          shake and trails (settings panel percents) are accepted but the lab sets the raw
 //          renderer values instead.
 // The encoded text is the compact JSON as URL-safe base64 without padding.
+import { ESCALATION_RANGES } from '../game/escalation.js';
 import { SOLO_ZOOM_RANGES } from '../game/solo-zoom.js';
 import { SPECIES_COUNT } from '../sim/layout.js';
 import { DEFAULT_SHARES, defaultMatrix, defaultSpecies } from '../sim/species.js';
@@ -34,7 +35,17 @@ export const RULE_RANGES = {
 const MATRIX_RANGE = [-4, 4];
 const NEIGHBOR_RADIUS_RANGE = [0.05, 0.5];
 const SIMULATION_RATES = ['full', 'half'];
+// The escalation's lab knobs, by the Escalation setting each one drives (src/game/escalation.js).
+export const ESCALATION_KNOB_SETTINGS = Object.freeze({
+  escalationRate: 'rate',
+  escalationRefillGrowthSeconds: 'refillGrowthSeconds',
+  escalationCeiling: 'ceilingFraction',
+  escalationSeekMaximum: 'seekMaximum',
+  escalationPredatorShift: 'predatorShift',
+  escalationWaveGrowthSeconds: 'waveGrowthSeconds',
+});
 export const KNOB_RANGES = {
+  ...Object.fromEntries(Object.entries(ESCALATION_KNOB_SETTINGS).map(([key, setting]) => [key, ESCALATION_RANGES[setting]])),
   floorFraction: [0, 1], rampSeconds: [1, 3600], ceilingFraction: [0, 1], curveExponent: [0.1, 8],
   seekFloorFraction: [0, 1], spawnDistanceStartFraction: [0.25, 0.5], refillFractionPerSecond: [0, 1],
   spawnBandWidth: [0.05, 4.5], spawnDensityBias: [0, 1], killBurstParticles: [0, 64], sameSpeciesCohesion: [0, 1],

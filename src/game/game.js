@@ -41,7 +41,9 @@
 //   5. simulation.setPlayerState (setPlayer only while Ready, so contact stays off until start).
 //   6. the spawn director (gates and waves; no waves in Ready) and spawn pressure (both paused
 //      while Dying and Respawning, when the step gets no gates), its seek scale and its spawn
-//      distance (setSeekScale, setSpawnDistanceFraction: both ramp with the count), then the
+//      distance (setSeekScale, setSpawnDistanceFraction: both ramp with the count; past the ramp
+//      the escalation, escalation-step.js, raises the target, refill, seek, Predator share and
+//      wave rate in a Playing run), then the
 //      simulation step is submitted with the director's gate table. At half simulation rate
 //      (setSimulationRate('half')) step 6 runs every other update with the two updates' summed
 //      delta, so speeds, spawn pressure per second, fire rate and charge drain (steps 1 to 5
@@ -96,6 +98,8 @@ import { MAXIMUM_PLAYER_SEATS, SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOU
 import { Camera, bombRadiusForView, fitZoom, framingCenter } from './camera.js';
 import { SeatRevival } from './seat-revival.js';
 import { SoloZoomController } from './solo-zoom.js';
+import { Escalation, NEUTRAL_ESCALATION } from './escalation.js';
+import { applyEscalation } from './escalation-step.js';
 import { SOLO_ZOOM_BOMB_HOLD_SECONDS, easeOutLimits, soloZoomOptions } from './solo-zoom-step.js';
 import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, reviveSeats, seatStarts, tickInvulnerability, uploadSwarms } from './seats.js';
 
@@ -163,6 +167,9 @@ export class Game {
     this.clock = clock ?? (() => this.simulation.time);
     this.spawnPressure = spawnPressure ?? new SpawnPressure({ capacity });
     this.spawnDirector = spawnDirector ?? new SpawnDirector({ random });
+    // The run's difficulty escalation past the ramp (escalation.js) and this step's levels.
+    this.escalation = new Escalation();
+    this.escalationLevels = NEUTRAL_ESCALATION;
     // The lab's watch mode spawn pressure (setWatch), or null in play.
     this.watchPressure = null;
     // The gate table for the next simulation step (null while Dying and Respawning).
@@ -542,7 +549,7 @@ export class Game {
       this.updatesSinceSimulationStep = 0;
       const spawnPerSpecies = this.spawnCounts(simulationSeconds);
       const pressure = this.activeSpawnPressure;
-      this.simulation.setSeekScale(pressure.seekScale);
+      this.simulation.setSeekScale(pressure.seekScale * this.escalationLevels.seekMultiplier);
       this.simulation.setSpawnDistanceFraction(pressure.spawnDistanceFraction);
       uploadSwarms(this);
       this.stepSimulation(simulationSeconds, spawnPerSpecies, this.stepGates, projectileSeconds);
@@ -600,6 +607,8 @@ export class Game {
     const phase = this.run.phase;
     const pressure = this.activeSpawnPressure;
     this.stepGates = null;
+    // The escalation's multipliers and shares for this step (neutral outside a Playing run).
+    const shares = applyEscalation(this, pressure);
     if (phase === RunPhase.Dying || phase === RunPhase.Respawning) return NO_SPAWNS;
     const primary = primarySeat(this.seats);
     const surging = this.beamTime.active && !this.watching;
@@ -612,7 +621,7 @@ export class Game {
       // Gates open in a ring just outside what the camera shows.
       view: this.ringView,
       filling: pressure.filling,
-      shares: this.simulation.shares,
+      shares,
       // The Ready arena (before a run) trickles from every gate; waves start with the run.
       continuous: phase === RunPhase.Ready,
       // Waves avoid the gates in the player's aim lane (the lane being shot open).
@@ -624,7 +633,7 @@ export class Game {
     this.stepGates = this.spawnDirector.spawnGates;
     if (phase === RunPhase.Playing) spawnShardsForWaves(this);
     // Beam time surges the spawning: a null wave trickles refills every step, past the wave bank.
-    return pressure.update(deltaSeconds, this.latestStats, this.simulation.shares, this.simulation.frameSequence + 1, surging ? null : this.spawnDirector.wave);
+    return pressure.update(deltaSeconds, this.latestStats, shares, this.simulation.frameSequence + 1, surging ? null : this.spawnDirector.wave);
   }
 
   stepSimulation(deltaSeconds, spawnPerSpecies, spawnGates = null, projectileDeltaSeconds = deltaSeconds) {
