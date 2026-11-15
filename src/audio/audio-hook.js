@@ -109,7 +109,8 @@ export function installAudio({ windowObject = window, documentObject = document,
     weaponFire: (kind, tier) => effects.weaponFire(kind, tier),
     kills: (count) => effects.kills(count),
     // A time warp pickup (owner ruling R31) plays its falling cue; the warp itself slows the
-    // music through update's timeScale, so the rising music riser stays out.
+    // music through update's timeScale, so the rising music riser stays out. The beam shard and beam time pickups play their effect
+    // runs and the riser, like a weapon pickup.
     pickup: (type = null) => {
       effects.pickup(type);
       if (type !== 'timewarp') music.cue('pickup');

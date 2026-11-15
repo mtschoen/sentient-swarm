@@ -96,9 +96,13 @@ const WEAPON_VOICES = Object.freeze({
 
 export const WEAPON_VOICE_KINDS = Object.freeze(Object.keys(WEAPON_VOICES));
 
-// MIDI notes of the pickup cue's rising run, and the time warp's falling one below it.
+// MIDI notes of the pickup cue's rising run, the time warp's falling one below it, the beam shard's
+// run an octave above the weapon run, and the beam time's, the weapon run then the raised one.
 const WEAPON_PICKUP_NOTES = Object.freeze([72, 76, 79, 84]);
+const BEAM_SHARD_PICKUP_NOTES = Object.freeze(WEAPON_PICKUP_NOTES.map((note) => note + 12));
+const BEAM_TIME_PICKUP_NOTES = Object.freeze([...WEAPON_PICKUP_NOTES, ...BEAM_SHARD_PICKUP_NOTES]);
 const TIME_WARP_PICKUP_NOTES = Object.freeze([67, 62, 58, 55]);
+const PICKUP_NOTES_BY_TYPE = Object.freeze({ timewarp: TIME_WARP_PICKUP_NOTES, beamshard: BEAM_SHARD_PICKUP_NOTES, beamtime: BEAM_TIME_PICKUP_NOTES });
 
 export class EffectsSynth {
   constructor(engine) {
@@ -146,12 +150,13 @@ export class EffectsSynth {
     return true;
   }
 
-  // type 'timewarp' (owner ruling R31) plays the same run falling and an octave and a half lower.
+  // type 'timewarp' (owner ruling R31) plays the same run falling and an octave and a half lower;
+  // 'beamshard' the run an octave higher; 'beamtime' the weapon run then the raised one.
   pickup(type = null) {
     const target = this.target();
     if (target === null) return;
     const { context, output, time } = target;
-    const notes = type === 'timewarp' ? TIME_WARP_PICKUP_NOTES : WEAPON_PICKUP_NOTES;
+    const notes = PICKUP_NOTES_BY_TYPE[type] ?? WEAPON_PICKUP_NOTES;
     notes.forEach((note, index) => {
       playTone(context, output, time + index * 0.05, { type: 'square', fromFrequency: 440 * 2 ** ((note - 69) / 12), level: 0.22, decaySeconds: 0.1 });
     });

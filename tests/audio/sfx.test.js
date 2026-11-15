@@ -104,3 +104,27 @@ test('pickup("timewarp") plays a falling run below the weapon pickup', () => {
   assert.ok(warp.every((frequency, index) => index === 0 || frequency < warp[index - 1]), 'falling');
   assert.ok(Math.max(...warp) < Math.min(...weapon), 'lower');
 });
+
+test('pickup("beamshard") raises the weapon run an octave and pickup("beamtime") plays both runs', () => {
+  const frequencies = (type) => {
+    const { context, effects } = unlockedEffects();
+    effects.pickup(type);
+    return context.started.filter((node) => node.kind === 'oscillator').map((node) => node.frequency.events[0].value);
+  };
+  const weapon = frequencies();
+  const shard = frequencies('beamshard');
+  const time = frequencies('beamtime');
+  assert.equal(shard.length, 4);
+  shard.forEach((frequency, index) => assert.ok(Math.abs(frequency - 2 * weapon[index]) < 1e-9, `note ${index}`));
+  assert.equal(time.length, 8);
+  assert.deepEqual(time, [...weapon, ...shard]);
+  assert.deepEqual(frequencies('unknown'), weapon);
+  assert.equal(frequencies('timewarp').length, 4);
+});
+
+test('the beam pickups play nothing while the engine is locked', () => {
+  const locked = new EffectsSynth(new AudioEngine({ contextFactory: () => new FakeAudioContext() }));
+  locked.pickup('beamshard');
+  locked.pickup('beamtime');
+  assert.equal(locked.engine.context?.started?.length ?? 0, 0);
+});

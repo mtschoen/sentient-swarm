@@ -212,3 +212,23 @@ test('update hands the time scale to the music, and the time warp pickup skips t
   assert.ok(audio.engine.context.started.length > before, 'the effect plays');
   assert.ok(!notes.includes('riser'), 'no rising music riser');
 });
+
+test('the beam shard and beam time pickups play the riser, and the time warp still skips it', () => {
+  for (const [type, riser] of [['beamshard', true], ['beamtime', true], ['timewarp', false]]) {
+    const notes = [];
+    const { canvas, audio } = install(() => new FakeAudioContext());
+    canvas.dispatch('pointerdown');
+    audio.music.onNote = (note) => notes.push(note.voice);
+    const before = audio.engine.context.started.length;
+    audio.cues.pickup(type);
+    assert.ok(audio.engine.context.started.length > before, `${type} plays the effect`);
+    assert.equal(notes.includes('riser'), riser, `${type} riser`);
+  }
+});
+
+test('the beam pickups play nothing before the engine is unlocked', () => {
+  const { audio } = install(() => new FakeAudioContext());
+  audio.cues.pickup('beamshard');
+  audio.cues.pickup('beamtime');
+  assert.equal(audio.engine.context?.started?.length ?? 0, 0);
+});
