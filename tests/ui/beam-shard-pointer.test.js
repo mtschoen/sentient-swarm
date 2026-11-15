@@ -48,6 +48,29 @@ test('the pointer sits at the 64 pixel inset for a target straight right', () =>
   assert.equal(Number(match[2]) + half, 450);
 });
 
+test('a pointer toward the bottom left is moved clear of the keep-out rectangles (Settings button, mute hint)', () => {
+  const pointers = createBeamShardPointers({ append() {} }, { documentObject: fakeDocument() });
+  const keepOuts = [{ left: 8, top: 804, right: 90, bottom: 870 }, { left: 10, top: 875, right: 110, bottom: 892 }];
+  const half = pointers.chevronSizeCssPixels / 2;
+  for (const target of [{ x: -4.08, y: 21.08 }, { x: -4.08, y: 23 }, { x: -6, y: 21.08 }, { x: -1.7, y: 18.9 }]) {
+    pointers.update([target], VIEW, RECT, keepOuts);
+    const match = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(pointers.element.children[0].style.transform);
+    const box = { left: Number(match[1]), top: Number(match[2]), right: Number(match[1]) + 2 * half, bottom: Number(match[2]) + 2 * half };
+    for (const keepOut of keepOuts) {
+      const overlaps = box.left < keepOut.right && box.right > keepOut.left && box.top < keepOut.bottom && box.bottom > keepOut.top;
+      assert.equal(overlaps, false, `target ${JSON.stringify(target)} overlaps ${JSON.stringify(keepOut)} at ${JSON.stringify(box)}`);
+    }
+  }
+});
+
+test('a pointer that already clears the keep-outs is not moved', () => {
+  const pointers = createBeamShardPointers({ append() {} }, { documentObject: fakeDocument() });
+  pointers.update([{ x: 30, y: 9.5 }], VIEW, RECT, [{ left: 8, top: 804, right: 90, bottom: 870 }]);
+  const match = /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(pointers.element.children[0].style.transform);
+  assert.equal(Number(match[1]) + pointers.chevronSizeCssPixels / 2, 1600 - 64);
+  assert.equal(Number(match[2]) + pointers.chevronSizeCssPixels / 2, 450);
+});
+
 const css = readFileSync(new URL('../../src/ui/beam-shard-pointer.css', import.meta.url), 'utf8');
 
 test('the stylesheet throbs with compositor properties only and has the reduced motion overrides', () => {

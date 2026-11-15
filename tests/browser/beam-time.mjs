@@ -7,7 +7,8 @@
 //   B. solo at 844 by 390: the pips row and the BEAM bar overlap neither the pause button, the
 //      weapon text nor Settings, and no HUD element that shows at 1280 is missing (nothing pops).
 //      In A and B a shard straight above the view gets a visible pointer that intersects neither
-//      the pause button nor the weapon text (other HUD elements are only in the screenshot).
+//      the pause button nor the weapon text (other HUD elements are only in the screenshot), and a
+//      shard toward the bottom left gets one clear of the Settings button and the mute hint.
 //   C. co-op with two synthetic pads at 1280 by 720: seat 2 collects six, both seats get the beam.
 //   D. co-op at 844 by 390: the pips row and the bar overlap no seat row, the pause button, the
 //      weapon text or the Settings button.
@@ -220,6 +221,40 @@ async function pointerAboveView(page, name) {
   console.log(`${name}: the pointer for a shard straight above the view clears the pause button and the weapon text`);
 }
 
+// A temporary shard just beyond the view's bottom left corner: its pointer must be visible and clear
+// of the Settings button and the mute hint (asserted; the hint is given text if it has none).
+async function pointerBelowLeft(page, name) {
+  await page.evaluate(() => {
+    const { game } = window.__murmuration;
+    const { view } = game;
+    // On the diagonal to the pointer's inset corner (the pointer inset is 64 CSS pixels), so the pointer sits in the corner.
+    const rect = document.querySelector('canvas').getBoundingClientRect();
+    const unitsPerPixel = view.width / rect.width;
+    game.pickups.spawnShard(view.centerX - (rect.width / 2 - 64) * 2 * unitsPerPixel, view.centerY + (rect.height / 2 - 64) * 2 * unitsPerPixel);
+    window.__temporaryShard = game.pickups.pickups.at(-1);
+    const hint = document.getElementById('audio-hint');
+    if (hint && hint.textContent === '') hint.textContent = 'M to mute';
+  });
+  await waitFrames(page, 30);
+  await screenshot(page, name);
+  const { overlaps, visibleCount } = await page.evaluate(() => {
+    const controls = [document.querySelector('.settings-open'), document.getElementById('audio-hint')]
+      .filter((element) => element && getComputedStyle(element).display !== 'none')
+      .map((element) => ({ name: element.className || element.id, box: element.getBoundingClientRect() }));
+    const shown = [...document.querySelectorAll('.beam-shard-pointer')].filter((element) => Number(getComputedStyle(element).opacity) > 0);
+    const hits = shown.flatMap((element) => {
+      const pointer = element.getBoundingClientRect();
+      return controls.filter(({ box }) => box.width > 0 && box.height > 0 && box.left < pointer.right && box.right > pointer.left && box.top < pointer.bottom && box.bottom > pointer.top).map(({ name }) => name);
+    });
+    const { game } = window.__murmuration;
+    game.pickups.pickups = game.pickups.pickups.filter((pickup) => pickup !== window.__temporaryShard);
+    return { overlaps: hits, visibleCount: shown.length };
+  });
+  expect(visibleCount > 0, `${name}: no pointer was visible for a shard toward the bottom left`);
+  expect(overlaps.length === 0, `${name}: the pointer overlaps ${overlaps.join(', ')}`);
+  console.log(`${name}: the pointer for a shard toward the bottom left clears the Settings button and the mute hint`);
+}
+
 // Collects shards with the given seat until the shared count reaches the needed number.
 // Returns the alive count and weapon just before the last shard.
 async function collectAll(page, seat, { onCount = null } = {}) {
@@ -328,6 +363,7 @@ async function runA(browser, server) {
   await checkPointer(page, 'A');
   await screenshot(page, 'beam-pointer-1280x720.png');
   await pointerAboveView(page, 'beam-pointer-top-1280x720.png');
+  await pointerBelowLeft(page, 'beam-pointer-bottom-left-1280x720.png');
   expect(await titleOpacity(page) === 0, 'A: the BEAM TIME! title shows before beam time');
   const before = await collectAll(page, 0, {
     onCount: async (count) => { if (count === 3) { await waitFrames(page, 10); await screenshot(page, 'beam-pips-1280x720.png'); } },
@@ -347,6 +383,7 @@ async function runB(browser, server) {
   await checkPointer(page, 'B');
   await screenshot(page, 'beam-pointer-844x390.png');
   await pointerAboveView(page, 'beam-pointer-top-844x390.png');
+  await pointerBelowLeft(page, 'beam-pointer-bottom-left-844x390.png');
   const before = await collectAll(page, 0);
   const crowded = ['.hud-beam-pips', '.hud-beam'];
   const neighbours = ['.hud-pause', '.hud-weapon', '.settings-open'];

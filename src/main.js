@@ -378,7 +378,7 @@ async function boot() {
     const state = game.state;
     hud.update(state);
     edgeIndicators.update(edgeIndicatorTargets(game.pickups.pickups, game.simulation.spawnGates?.gates ?? []), viewport.visibleBounds, cssArenaRect());
-    beamShardPointers.update(beamShardTargets(game.pickups.pickups), viewport.visibleBounds, cssArenaRect());
+    beamShardPointers.update(beamShardTargets(game.pickups.pickups), viewport.visibleBounds, cssArenaRect(), [hud.settingsButton, document.getElementById('audio-hint')].filter(Boolean).map((element) => element.getBoundingClientRect()));
     beamTimeTitle.update(state.beamTime, deltaSeconds);
     touchOverlay.update(state);
     fireDebug?.update(fireLog);
