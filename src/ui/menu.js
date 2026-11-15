@@ -158,8 +158,10 @@ export function createMenu({ onStart, onLab, onSettings, modeItem = null, online
   });
 }
 
+// The pause menu carries one note line under its items (online: who paused, or the lost connection),
+// always laid out and hidden by visibility while empty (setNote).
 export function createPauseMenu({ onResume, onSettings, onRestart, onQuit, documentObject = document }) {
-  return buildMenu({
+  const menu = buildMenu({
     documentObject,
     className: 'menu-pause',
     title: 'PAUSED',
@@ -171,4 +173,15 @@ export function createPauseMenu({ onResume, onSettings, onRestart, onQuit, docum
     ],
     onBack: () => onResume(),
   });
+  const note = documentObject.createElement('div');
+  note.classList.add('menu-note');
+  note.classList.add('menu-note-hidden');
+  note.textContent = '';
+  menu.element.append(note);
+  menu.note = note;
+  menu.setNote = (text) => {
+    if (note.textContent !== text) note.textContent = text;
+    note.classList.toggle('menu-note-hidden', text === '');
+  };
+  return menu;
 }

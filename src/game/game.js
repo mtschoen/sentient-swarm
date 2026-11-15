@@ -290,7 +290,7 @@ export class Game {
       mode: this.mode,
       matchResult: this.versusMatch?.result ?? null,
       hives: hiveView(this),
-      offeredType: this.pickups.offeredType,
+      offeredType: this.online?.isGuest ? null : this.pickups.offeredType,
       phase: this.paused ? 'paused' : this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
       // Online the guest shows the host's score, multiplier and bombs.

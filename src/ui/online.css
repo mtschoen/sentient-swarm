@@ -11,3 +11,6 @@
 .online-panel-box { font: 600 14px/1.3 monospace; width: min(560px, 86vw); box-sizing: border-box; padding: 8px; resize: none; color: #e8f6ff;
   background: rgba(25, 230, 255, 0.06); border: 2px solid rgba(25, 230, 255, 0.45); border-radius: 6px; }
 .online-panel-box:focus { outline: 3px solid #ffe84a; outline-offset: 3px; }
+/* The resume countdown (resume-countdown.js): one numeral centered over the arena, above the HUD, never taking a touch, hidden by visibility. */
+.resume-countdown { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 23; font-size: clamp(64px, 24vmin, 200px); font-weight: 800; color: #19e6ff; text-shadow: 0 0 18px #19e6ff, 0 0 48px #19e6ff; pointer-events: none; user-select: none; }
+.resume-countdown-hidden { visibility: hidden; }

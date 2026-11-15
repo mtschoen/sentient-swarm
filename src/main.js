@@ -40,6 +40,7 @@ import { createModeControl } from './ui/mode-choice.js';
 import { gameOverBanner } from './ui/hud-seat.js';
 import { shortPadId } from './ui/pad-status.js';
 import { createRotateBackHandler, createSettingsOpener, routeMenuActions, routeSettingsKey } from './ui/menuRouting.js';
+import { createOnlineWiring, onlineMenuItem } from './ui/online-wiring.js';
 
 window.__murmuration = { ready: false, frame: 0, stats: null, loading: { done: false } };
 
@@ -140,9 +141,8 @@ async function boot() {
   // on the game state rumbles them.
   let liveSettings = settings;
   const rumble = createRumble({ isEnabled: () => liveSettings.rumble });
-  // No online session yet: no seat is remote (the online wiring supplies the set).
-  const remoteSeats = Object.freeze(new Set());
-  const padForSeat = (seat) => rumblePadFor(seat, { localSeatIndex: game.localSeatIndex, remoteSeats, couchPadForSeat: (couchSeat) => coopJoin?.padForSeat(couchSeat) });
+  // The online wiring names the remote seat (none without a session), read at each call.
+  const padForSeat = (seat) => rumblePadFor(seat, { localSeatIndex: game.localSeatIndex, remoteSeats: online.remoteSeats(), couchPadForSeat: (couchSeat) => coopJoin?.padForSeat(couchSeat) });
   const lifeWatcher = createLifeWatcher(rumble, () => padForSeat(game.localSeatIndex));
   // Press-to-join state; seat 2's pad also picks the rumble target (coopJoin is created with the menus).
   let coopJoin = null;
@@ -223,6 +223,7 @@ async function boot() {
   });
   // Seat 2's pad leaving mid-run pauses under the pause menu; the same pad returning (any index) reclaims the seat.
   window.addEventListener('gamepaddisconnected', (event) => {
+    if (online.handlePadDisconnected(event.gamepad?.index)) return;
     if (!coopJoin?.handleDisconnect(event.gamepad?.index)) return;
     pauseForMenu();
     hud.showToast('Player 2 controller disconnected');
@@ -292,6 +293,7 @@ async function boot() {
     if (game.run.phase !== 'ready') return;
     fullscreen.enter();
     audio.unlock();
+    if (online.handleStart()) return;
     audio.restartRun();
     game.setPlayerCount(coopJoin.playerCount);
     // Co-op unless player 2 joined and chose versus or hives at the title.
@@ -303,16 +305,19 @@ async function boot() {
   const restartFromGameOver = () => {
     fullscreen.enter();
     audio.unlock();
+    if (online.handleRestart()) return;
     audio.restartRun();
     game.restart();
   };
   const resumeGame = () => {
     pausedByRotate = false;
+    if (online.handleResume()) return;
     pauseMenu.hide();
     game.resume();
     audio.setPaused(false);
   };
   const pauseForMenu = () => {
+    if (online.handlePause()) return;
     if (game.paused && !pausedByRotate) return;
     if (!game.paused && !game.pause()) return;
     pausedByRotate = false;
@@ -321,7 +326,7 @@ async function boot() {
   };
   // The co-op, versus or hives choice beside Play, ghosted until player 2 joins.
   const modeControl = createModeControl();
-  const menu = createMenu({ onStart: startRun, onLab: openLab, onSettings: openSettings, modeItem: modeControl.menuItem });
+  const menu = createMenu({ onStart: startRun, onLab: openLab, onSettings: openSettings, modeItem: modeControl.menuItem, onlineItem: onlineMenuItem(() => online.toggleOnline()) });
   modeControl.attach(menu);
   window.__murmuration.modeChoice = modeControl;
   const pauseMenu = createPauseMenu({
@@ -331,10 +336,12 @@ async function boot() {
     },
     onSettings: openSettings,
     onRestart: () => {
+      if (online.handleRestart()) return;
       resumeGame();
       restartFromGameOver();
     },
     onQuit: () => {
+      if (online.handleQuit()) return;
       resumeGame();
       // Quitting a lab Play run leaves the lab too (it resets the run and shows the title itself).
       if (lab.active) {
@@ -359,6 +366,8 @@ async function boot() {
     hud.showToast('DEBUG SPARRING: player 2 is a dummy');
   }
   window.__murmuration.coop = coopJoin;
+  // Online play (online-wiring.js): built here, connecting only when ONLINE or a #join= link asks.
+  const online = createOnlineWiring({ game, menu, pauseMenu, hud, modeControl, coopJoin, input, audio, sparring, windowObject: window, exposeTo: window.__murmuration });
   let pausedByRotate = false;
   let rotateShowing = false;
   // Settings opened over the rotate overlay: rotating back keeps the run paused under the pause menu.
@@ -408,7 +417,7 @@ async function boot() {
     gameOverShown = isGameOver;
 
     const rotating = rotateOverlay.update();
-    if (rotating && !rotateShowing && game.pause()) {
+    if (rotating && !rotateShowing && (online.active ? online.handlePause() && game.paused : game.pause())) {
       pausedByRotate = true;
       audio.setPaused(true);
     } else if (!rotating && rotateShowing && pausedByRotate) {
@@ -419,8 +428,9 @@ async function boot() {
     // The title menu is never fullscreen, whichever way it came up (quit, leaving the lab).
     if (menu.visible) fullscreen.exit();
     const warming = !warmUp.done;
-    coopJoin.update({ titleOpen: menu.visible && !warming });
-    modeControl.update({ joined: coopJoin.playerCount === 2 });
+    online.update({ titleOpen: menu.visible, warmUpDone: !warming, deltaSeconds });
+    if (!online.active) coopJoin.update({ titleOpen: menu.visible && !warming });
+    if (!online.active) modeControl.update({ joined: coopJoin.playerCount === 2 });
     game.startsOnGesture = !menu.visible && !warming;
     // Gamepad edges and key presses are consumed every frame so none go stale; only a free screen
     // acts on them, and none does while the loading screen is up.
@@ -447,7 +457,7 @@ async function boot() {
   // continues on the old simulation until the new one is in place. The capacity choices stop at
   // the quality probe's ceiling (plus the current one, which a ?capacity= pin may put above it).
   // Leaving restores the state captured on entry; the live settings then go back on top of it.
-  const lab = new LabMode({ game, renderer, viewport, menu, audio, onLeave: () => applySettings(liveSettings) });
+  const lab = new LabMode({ game, renderer, viewport, menu, audio, onLeave: () => applySettings(liveSettings), entryBlocked: () => online.active });
   const ceilingCapacity = PRESETS[initialPreset.ceiling]?.capacity ?? null;
   const capacityOptions = [...new Set([...capacityOptionsUpTo(ceilingCapacity), simulation.capacity])]
     .sort((first, second) => first - second);
@@ -462,6 +472,8 @@ async function boot() {
   window.__murmuration.lab = lab;
   // A shared link (#mix=) opens the lab with its mix; a malformed one opens it on the defaults.
   lab.loadFromHash(location.hash);
+  // An invite link (#join=) opens the Join panel once the title shows.
+  online.openFromHash(location.hash);
 
   const loop = new FrameLoop({ update, render });
   loop.start();

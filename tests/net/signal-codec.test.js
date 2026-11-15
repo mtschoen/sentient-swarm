@@ -35,3 +35,8 @@ test('the invite link keeps the page address and replaces any fragment', () => {
   assert.equal(inviteFromHash('#mix=abc'), null);
   assert.equal(inviteFromHash(''), null);
 });
+
+test('the invite link leaves out the debug query parameter and keeps the rest', () => {
+  assert.equal(inviteUrl('https://example.test/game/?debug=sparring#mix=abc', 'QQ'), 'https://example.test/game/#join=QQ');
+  assert.equal(inviteUrl('https://example.test/game/?probe=off&debug=sparring', 'QQ'), 'https://example.test/game/?probe=off#join=QQ');
+});

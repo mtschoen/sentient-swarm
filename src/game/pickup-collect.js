@@ -2,7 +2,7 @@
 // arms its weapon (or starts the global time warp, or counts a beam shard), and the collection
 // plays the pickup effect, the blast (a radial kill of pickupBlastRadius) and a shockwave at the
 // seat's point. Online (src/net/online-game.js) the machine that did not collect runs
-// applyCollection with arm false: the same blast and shockwave, no weapon, warp or shard change.
+// applyCollection with arm false: the same blast and shockwave, no sound, weapon, warp or shard change.
 import { BEAM_SHARD_TYPE } from './weaponTypes.js';
 import { BEAM_TIME_IMPULSE_STRENGTH, collectShardFor } from './beam-time-seats.js';
 
@@ -21,9 +21,9 @@ export function applyCollection(game, seat, type, x, y, { arm = true } = {}) {
     if (arm) opensBeamTime = collectShardFor(game, seat);
   } else if (timeWarp) {
     if (arm) game.timeWarp.start();
-    game.effects?.pickup?.('timewarp', ...seatArguments);
-  } else {
-    if (arm) seat.weapons.collect(type);
+    if (arm) game.effects?.pickup?.('timewarp', ...seatArguments);
+  } else if (arm) {
+    seat.weapons.collect(type);
     game.effects?.pickup?.(...(seatArguments.length > 0 ? [undefined, ...seatArguments] : []));
   }
   const blast = game.pickupBlastRadiusValue > 0;

@@ -421,6 +421,17 @@ test('LabMode.canEnter: only from the title (Ready, not paused)', () => {
   }
 });
 
+test('LabMode.canEnter: never while entry is blocked (an online session)', () => {
+  const { game } = createLab();
+  let blocked = true;
+  const lab = new LabMode({ game, renderer: {}, viewport: {}, menu: {}, entryBlocked: () => blocked });
+  game.run = { phase: 'ready' };
+  game.paused = false;
+  assert.equal(lab.canEnter, false);
+  blocked = false;
+  assert.equal(lab.canEnter, true);
+});
+
 // Owner ruling R31: two lab sliders tune the time warp; the shipped values are the defaults.
 test('the time warp duration and scale are lab knobs with the shipped defaults, written to the game', () => {
   const context = createContext();

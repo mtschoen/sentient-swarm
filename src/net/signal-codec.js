@@ -37,10 +37,13 @@ export async function encodeSignal({ kind, sdp }) {
   return toBase64Url(await collect(stream));
 }
 
+// The page address with the invite as its fragment. The debug query parameter stays behind, so a
+// host's diagnostic (the sparring dummy, say) never reaches the guest's page.
 export function inviteUrl(locationHref, encoded) {
-  const hashIndex = locationHref.indexOf('#');
-  const base = hashIndex === -1 ? locationHref : locationHref.slice(0, hashIndex);
-  return `${base}${JOIN_MARKER}${encoded}`;
+  const url = new URL(locationHref);
+  url.hash = '';
+  url.searchParams.delete('debug');
+  return `${url.href.replace(/#$/, '')}${JOIN_MARKER}${encoded}`;
 }
 
 export function inviteFromHash(hash) {

@@ -147,3 +147,19 @@ test('resetPickups forgets the guest claims', async () => {
   host.online.resetPickups();
   assert.equal(guest.online.pickupClaimsPending, 0);
 });
+
+test('only the collecting machine plays the pickup sound, and the guest HUD offers no next pickup', async () => {
+  const { host, guest, stepBoth, startMatch } = await createOnlinePair({ delaySeconds: 0.05 });
+  const sounds = { host: 0, guest: 0 };
+  host.game.effects = { pickup: () => { sounds.host += 1; } };
+  guest.game.effects = { pickup: () => { sounds.guest += 1; } };
+  await startMatch('versus');
+  stepBoth(0.2);
+  hostPickup(host, host.game.seats[0].point.x, host.game.seats[0].point.y);
+  stepBoth(0.3);
+  assert.equal(host.game.seats[0].weapons.armed, 'scatter');
+  assert.deepEqual(blasts(guest).length, 1, 'the guest plays the blast');
+  assert.deepEqual(sounds, { host: 1, guest: 0 });
+  assert.equal(guest.game.state.offeredType, null);
+  assert.notEqual(host.game.state.offeredType, null);
+});

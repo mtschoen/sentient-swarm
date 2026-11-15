@@ -175,3 +175,15 @@ test('the pause menu carries no source link', () => {
   const menu = createPauseMenu({ onResume() {}, onSettings() {}, onRestart() {}, onQuit() {}, documentObject: createFakeDocument() });
   assert.equal(menu.element.children.filter((node) => node.tagName === 'A').length, 0);
 });
+
+test('the pause menu note is laid out before any text is set', () => {
+  const menu = createPauseMenu({ onResume() {}, onSettings() {}, onRestart() {}, onQuit() {}, documentObject: createFakeDocument() });
+  assert.ok(menu.element.children.includes(menu.note), 'the note is in the menu from creation');
+  assert.equal(menu.note.textContent, '');
+  assert.equal(menu.note.classList.contains('menu-note-hidden'), true);
+  menu.setNote('PLAYER 2 PAUSED');
+  assert.equal(menu.note.textContent, 'PLAYER 2 PAUSED');
+  assert.equal(menu.note.classList.contains('menu-note-hidden'), false);
+  menu.setNote('');
+  assert.equal(menu.note.classList.contains('menu-note-hidden'), true);
+});

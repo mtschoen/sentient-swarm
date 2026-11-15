@@ -14,7 +14,7 @@
 // inside the lab, Play keeps the lab mix. game.labActive is set while the lab is open, so the
 // quality probe skips lab runs; onLeave (main.js) then re-applies the player's live settings, so a
 // Settings change made inside the lab survives the restore. The backquote key may enter the lab
-// only from the title (canEnter).
+// only from the title (canEnter), and never while entryBlocked() holds (an online session, main.js).
 import { DEFAULT_PICKUP_BLAST_RADIUS } from '../game/game.js';
 import { BEAM_SHARDS_NEEDED, BEAM_SHARD_WAVE_INTERVAL } from '../game/beam-shards.js';
 import { BEAM_TIME_SECONDS } from '../game/beam-time.js';
@@ -312,13 +312,14 @@ export function hashForMix(encoded) {
 // switch; audio (optional): unlocked on Play; panel: { open(), close(), refresh(), setMode(mode),
 // showStatus(text) } from labPanel.js, attached later with attachPanel.
 export class LabMode {
-  constructor({ game, renderer, viewport, menu, audio = null, onLeave = () => {} }) {
+  constructor({ game, renderer, viewport, menu, audio = null, onLeave = () => {}, entryBlocked = () => false }) {
     this.context = { game, renderer, lab: { watchAliveFraction: DEFAULT_WATCH_ALIVE_FRACTION } };
     this.game = game;
     this.viewport = viewport;
     this.menu = menu;
     this.audio = audio;
     this.onLeave = onLeave;
+    this.entryBlocked = entryBlocked;
     this.panel = null;
     this.active = false;
     this.mode = 'watch';
@@ -332,7 +333,7 @@ export class LabMode {
 
   // The title: Ready, not paused, no run in progress.
   get canEnter() {
-    return this.active || (this.game.run.phase === RunPhase.Ready && !this.game.paused);
+    return this.active || (this.game.run.phase === RunPhase.Ready && !this.game.paused && !this.entryBlocked());
   }
 
   enter() {
