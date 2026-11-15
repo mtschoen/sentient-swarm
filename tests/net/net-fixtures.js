@@ -1,5 +1,6 @@
-// Shared sample messages for the net codec tests. Every float is chosen to survive its wire
-// precision exactly where a test compares with deepEqual (f32 values are Math.fround-exact).
+// Shared sample messages and fixtures for the net tests: codec samples (every float survives its wire
+// precision exactly where a test compares with deepEqual), a realistic session description, a versioned
+// signal encoder and a cycling random source.
 
 import { GameMode } from '../../src/game/versus.js';
 
@@ -107,3 +108,60 @@ export const SAMPLE_EVENTS = Object.freeze([
   { type: 'result', winner: 1, draw: false, hives: true },
   { type: 'result', winner: null, draw: true, hives: false },
 ]);
+
+
+function candidateLines() {
+  const lines = [];
+  for (let index = 0; index < 8; index += 1) {
+    lines.push(`a=candidate:${1000 + index} 1 udp ${2122260223 - index} 192.168.${index}.${10 + index} ${50000 + index * 137} typ host generation 0 network-id ${index + 1} network-cost 10`);
+  }
+  for (let index = 0; index < 6; index += 1) {
+    lines.push(`a=candidate:${2000 + index} 1 udp ${1686052607 - index} 203.0.113.${20 + index} ${40000 + index * 211} typ srflx raddr 192.168.${index}.${10 + index} rport ${50000 + index * 137} generation 0 network-id ${index + 1} network-cost 10`);
+  }
+  for (let index = 0; index < 4; index += 1) {
+    lines.push(`a=candidate:${3000 + index} 1 tcp ${1518280447 - index} 192.168.${index}.${10 + index} 9 typ host tcptype active generation 0 network-id ${index + 1} network-cost 10`);
+  }
+  return lines;
+}
+
+export const SAMPLE_SDP = [
+  'v=0',
+  'o=- 4611731400430051336 2 IN IP4 127.0.0.1',
+  's=-',
+  't=0 0',
+  'a=group:BUNDLE 0',
+  'a=extmap-allow-mixed',
+  'a=msid-semantic: WMS',
+  'm=application 9 UDP/DTLS/SCTP webrtc-datachannel',
+  'c=IN IP4 0.0.0.0',
+  'a=ice-ufrag:k3Xp',
+  'a=ice-pwd:Zr8mQ1vTn4yB7cHd2LsWe5Ua',
+  'a=ice-options:trickle',
+  'a=fingerprint:sha-256 4A:1F:90:C3:7B:22:E8:5D:0C:AF:63:19:B4:D7:3E:81:52:6A:F0:9C:2D:E4:17:88:B3:5F:A6:0B:71:CD:3A:94',
+  'a=setup:actpass',
+  'a=mid:0',
+  'a=sctp-port:5000',
+  'a=max-message-size:262144',
+  ...candidateLines(),
+].join('\r\n') + '\r\n';
+
+async function deflateRaw(bytes) {
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// Encodes a signal the way the codec does but with an arbitrary protocol version.
+export async function encodeWithVersion(version, kind, sdp = SAMPLE_SDP) {
+  const json = JSON.stringify({ v: version, k: kind, s: sdp });
+  return Buffer.from(await deflateRaw(new TextEncoder().encode(json))).toString('base64url');
+}
+
+// A random source that cycles through the given values.
+export function sequenceRandom(values) {
+  let index = 0;
+  return () => {
+    const value = values[index % values.length];
+    index += 1;
+    return value;
+  };
+}
