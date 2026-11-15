@@ -1,0 +1,109 @@
+// Versus (stage 2) game-side work, taking the Game as context like seats.js: the mode switch, the
+// swarm growth from kills (co-op's rule too), the per-seat kill credit, the hits (no down and revive), ship to ship contact and the match end. The
+// pure match state is versus.js; ship contact pairing is ship-contact.js.
+//
+// The mode switch (setGameMode) acts only on a change, so a solo or co-op game that never enters
+// versus makes no call the co-op game did not make. Entering versus hands the simulation the
+// projectile buffer (the versus hit pass, versus_hits.wgsl) and takes the time warp out of the pickup
+// rotation; leaving undoes both. Beam shards are not placed in versus (game.js spawnCounts) and the
+// escalation stays neutral (escalation-step.js).
+import { GameMode, VERSUS_PICKUP_ROTATION, VersusMatch, validatedMode } from './versus.js';
+import { contactPairs } from './ship-contact.js';
+import { PICKUP_TYPE_NAMES } from './weaponTypes.js';
+import { SWARM_SHIP_RADIUS } from './player-swarm.js';
+import { RunPhase } from './run.js';
+import { cancelBeamTime } from './beam-time-seats.js';
+import { reviveSeats } from './seats.js';
+import { MAXIMUM_PLAYER_SEATS } from '../sim/layout.js';
+
+// Opposing ships this close (their two contact radii) touch.
+export const SHIP_CONTACT_DISTANCE = 2 * SWARM_SHIP_RADIUS;
+// A lost swarm ship ripples the warp grid this hard (as in seats.js).
+const SHIP_LOSS_IMPULSE_STRENGTH = 0.12;
+
+// Co-op or versus, in Ready only; versus needs two seats. Throws RangeError for an unknown mode or
+// versus with one seat, Error outside Ready.
+export function setGameMode(game, mode) {
+  validatedMode(mode);
+  if (game.run.phase !== RunPhase.Ready) throw new Error('the game mode changes only in Ready');
+  if (mode === GameMode.Versus && game.seats.length !== MAXIMUM_PLAYER_SEATS) throw new RangeError('versus needs two seats');
+  applyMode(game, mode);
+}
+
+// Back to co-op from any phase (quit to title, the lab, one seat); nothing happens outside versus.
+export function leaveVersus(game) {
+  applyMode(game, GameMode.Coop);
+}
+
+function applyMode(game, mode) {
+  if (mode === game.mode) return;
+  const versus = mode === GameMode.Versus;
+  game.versusMatch = versus ? new VersusMatch() : null;
+  game.simulation.setVersusProjectiles(versus ? game.projectiles.buffer : null);
+  game.pickups.setRotation(versus ? VERSUS_PICKUP_ROTATION : PICKUP_TYPE_NAMES);
+}
+
+// A scored stats frame's kills: in co-op they grow every seat that is not down and count toward
+// each down seat's revive; in versus they grow only the seat whose projectiles made them.
+export function growSwarms(game, stats) {
+  if (!game.versus) {
+    for (const seat of game.seats) if (!seat.down) seat.swarm.addKills(stats.killsSinceLastRead);
+    reviveSeats(game, stats.killsSinceLastRead);
+    return;
+  }
+  const credit = stats.ownerKillsSinceLastRead ?? [];
+  game.seats.forEach((seat, index) => {
+    const kills = credit[index] ?? 0;
+    if (kills > 0) seat.swarm.addKills(kills);
+  });
+}
+
+// The GPU's hits (agents and opposing projectiles alike) kill the hit ships; a seat at 0 ships is
+// out and the match is judged.
+export function applyVersusHits(game, stats) {
+  const losses = game.seats.map((seat) => {
+    const result = seat.applyHits(stats);
+    result.killed.forEach((ship) => game.queueImpulse(ship.x, ship.y, SHIP_LOSS_IMPULSE_STRENGTH, false));
+    return result.last;
+  });
+  judgeMatch(game, stats.frameSequence, losses);
+}
+
+// Touching opposing ships both die (Playing only, never while either seat is invulnerable).
+export function applyShipContact(game) {
+  if (game.run.phase !== RunPhase.Playing || game.run.invulnerable || game.debugInvulnerableValue) return;
+  if (game.seats.some((seat) => game.debugInvulnerableSeats.has(seat.index))) return;
+  const [first, second] = game.seats;
+  const pairs = contactPairs(first.swarm.ships, second.swarm.ships, SHIP_CONTACT_DISTANCE);
+  if (pairs.length === 0) return;
+  const losses = [null, null];
+  for (const pair of pairs) {
+    const killed = [first.swarm.killShip(pair.first), second.swarm.killShip(pair.second)];
+    killed.forEach((ship, index) => {
+      game.queueImpulse(ship.x, ship.y, SHIP_LOSS_IMPULSE_STRENGTH, false);
+      losses[index] = ship;
+    });
+  }
+  judgeMatch(game, game.simulation.frameSequence, losses);
+}
+
+// lastLosses: each seat's last ship lost just now, or null. A seat left with no ships ends the
+// match: the run's one death (the death clear at the last wiped seat, seat 2's when both fell, then
+// game over), with the weapons dropped and the multiplier reset as in co-op. A death the run refuses
+// (a stale frame) leaves the match running.
+function judgeMatch(game, frameSequence, lastLosses) {
+  const result = game.versusMatch.judge(game.seats.map((seat) => seat.aliveCount));
+  if (result === null) return;
+  const seatIndex = result.draw ? MAXIMUM_PLAYER_SEATS - 1 : 1 - result.winner;
+  const last = lastLosses[seatIndex] ?? game.seats[seatIndex].point;
+  if (!game.run.playerHit(frameSequence, last)) {
+    game.versusMatch.reset();
+    return;
+  }
+  game.lastWipedSeat = seatIndex;
+  game.seats.forEach((seat) => seat.weapons.dropAll());
+  game.timeWarp.end();
+  cancelBeamTime(game);
+  game.score.recordHit();
+  game.effects?.death();
+}

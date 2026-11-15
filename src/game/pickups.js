@@ -31,6 +31,8 @@ export class PickupDirector {
     this.referenceMaximumDistance = maximumDistance;
     this.bounds = bounds;
     this.random = random;
+    // The offered types in rotation order (setRotation; versus leaves the time warp out).
+    this.rotation = PICKUP_TYPE_NAMES;
     this.setView(VIEW_WIDTH, VIEW_HEIGHT);
     this.reset();
   }
@@ -64,6 +66,17 @@ export class PickupDirector {
     this.pityTimer = 0;
   }
 
+  // The types the rotation offers, in order (a non-empty list of PICKUP_TYPE_NAMES entries); the
+  // rotation restarts at its first. Throws RangeError otherwise.
+  setRotation(types) {
+    if (!(Array.isArray(types) && types.length > 0 && types.every((type) => PICKUP_TYPE_NAMES.includes(type)))) {
+      throw new RangeError(`pickup rotation must be a non-empty list of ${PICKUP_TYPE_NAMES.join(', ')}, got ${types}`);
+    }
+    this.rotation = types;
+    this.rotationIndex = 0;
+    this.rotationTimer = 0;
+  }
+
   // A beam shard waits where it was placed until collected.
   spawnShard(x, y) {
     this.pickups.push({ x, y, type: BEAM_SHARD_TYPE, age: 0, fade: 1, persistent: true });
@@ -74,7 +87,7 @@ export class PickupDirector {
   }
 
   get offeredType() {
-    return PICKUP_TYPE_NAMES[this.rotationIndex];
+    return this.rotation[this.rotationIndex];
   }
 
   update(deltaSeconds, { playerX, playerY, onBaseGun, milestone, phasePlaying, densityAt = null }) {
@@ -83,7 +96,7 @@ export class PickupDirector {
     this.rotationTimer += deltaSeconds;
     while (this.rotationTimer >= this.rotationSeconds - TIME_EPSILON) {
       this.rotationTimer -= this.rotationSeconds;
-      this.rotationIndex = (this.rotationIndex + 1) % PICKUP_TYPE_NAMES.length;
+      this.rotationIndex = (this.rotationIndex + 1) % this.rotation.length;
     }
 
     for (const pickup of this.pickups) {
@@ -136,7 +149,7 @@ export class PickupDirector {
     }
     const placed = chosen ?? this.#fallbackPlacement(playerX, playerY);
     const type = pity && this.offeredType === 'timewarp'
-      ? PICKUP_TYPE_NAMES[(this.rotationIndex + 1) % PICKUP_TYPE_NAMES.length]
+      ? this.rotation[(this.rotationIndex + 1) % this.rotation.length]
       : this.offeredType;
     this.pickups.push({ x: placed.x, y: placed.y, type, age: 0, fade: 1 });
   }

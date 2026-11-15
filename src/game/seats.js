@@ -96,6 +96,7 @@ export function uploadSwarms(game) {
 
 // Every seat that is not down fires: its shots and gunner needles are queued, its beam set in its
 // own slot (a two-seat game only), and at most one weaponFire cue plays per update, seat 1 first.
+// In versus every projectile and beam carries its seat as owner (it can hit the other swarm).
 export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
   const { projectiles, effects } = game;
   let cued = false;
@@ -110,10 +111,12 @@ export function fireSeats(game, deltaSeconds, playing, inputs, controls) {
         aimX: seat.swarmControls.aimX, aimY: seat.swarmControls.aimY, moveX: inputs[0].move.x, moveY: inputs[0].move.y,
       });
     }
-    shots.spawns.forEach((spawn) => projectiles.queueSpawn(spawn));
-    shots.turretSpawns.forEach((spawn) => projectiles.queueSpawn(spawn));
+    // The owner argument is passed in versus only, so solo and co-op make exactly their old calls.
+    const ownerArguments = game.versus ? [seat.index] : [];
+    shots.spawns.forEach((spawn) => projectiles.queueSpawn(spawn, ...ownerArguments));
+    shots.turretSpawns.forEach((spawn) => projectiles.queueSpawn(spawn, ...ownerArguments));
     const beam = fire.expired ? null : shots.beam;
-    if (game.seats.length > 1) projectiles.setBeam(beam, seat.index);
+    if (game.seats.length > 1) projectiles.setBeam(beam, seat.index, ...ownerArguments);
     else projectiles.setBeam(beam);
     // With every ship a gunner the armed weapon is silent, so its volley cue does not sound either.
     const armedAudible = seat.swarm.ships.some((ship) => ship.gunnerIndex < 0);

@@ -74,6 +74,11 @@
 // and seek points reach the simulation (src/game/seats.js); with one seat the calls are exactly the
 // solo ones. A seat wiped while another still has ships goes down; the run's one death is the last
 // seat falling. Kills score once and grow every seat still in the run.
+// Versus (setMode, Ready only, two seats; versus-seats.js): projectiles carry their seat and hit the
+// other swarm, touching opposing ships both die after the flock step, kills grow only the seat whose
+// projectiles made them, and a seat at 0 ships ends the match (no down and revive): the run's one
+// death, then game over with the result in state.matchResult. One seat, quit, the lab and watch mode
+// return to co-op.
 // Watch mode (the lab, task C6b): setWatch(fraction) puts the run in Ready and keeps it there (no
 // gesture starts it, so weapons and contact stay off); the player point follows the pointer (or
 // the move stick without one) so the swarm chases it, and a watch SpawnPressure with full seek
@@ -101,7 +106,9 @@ import { SoloZoomController } from './solo-zoom.js';
 import { Escalation, NEUTRAL_ESCALATION } from './escalation.js';
 import { applyEscalation } from './escalation-step.js';
 import { SOLO_ZOOM_BOMB_HOLD_SECONDS, easeOutLimits, soloZoomOptions } from './solo-zoom-step.js';
-import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, reviveSeats, seatStarts, tickInvulnerability, uploadSwarms } from './seats.js';
+import { applyShipContact, applyVersusHits, growSwarms, leaveVersus, setGameMode } from './versus-seats.js';
+import { GameMode } from './versus.js';
+import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, seatStarts, tickInvulnerability, uploadSwarms } from './seats.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
 // Warp grid impulse strengths; bomb and death shockwaves carry their own (1) from RunState.
@@ -195,6 +202,8 @@ export class Game {
     this.debugInvulnerableSeats = new Set();
     // The revive counts of a down seat; seat.down mirrors it (set together in seats.js).
     this.revival = new SeatRevival({ seatCount: MAXIMUM_PLAYER_SEATS });
+    // The versus match (VersusMatch) while the mode is versus, else null (co-op and solo).
+    this.versusMatch = null;
     this.pickups = new PickupDirector({ random, bounds: this.worldBounds });
     this.score = new ScoreKeeper({ capacity });
     this.awards = new Awards();
@@ -272,6 +281,8 @@ export class Game {
       beamShards: this.beamShards.count,
       beamShardsNeeded: this.beamShards.needed,
       beamTime: this.beamTime.fraction,
+      mode: this.mode,
+      matchResult: this.versusMatch?.result ?? null,
       offeredType: this.pickups.offeredType,
       phase: this.paused ? 'paused' : this.run.phase,
       aliveTotal: this.latestStats?.aliveTotal ?? 0,
@@ -314,7 +325,13 @@ export class Game {
     this.placeSeats();
   }
 
+  get mode() { return this.versusMatch === null ? GameMode.Coop : GameMode.Versus; }
+  get versus() { return this.versusMatch !== null; }
+  // 'coop' (the default) or 'versus' (two seats), changed only in Ready (versus-seats.js).
+  setMode(mode) { setGameMode(this, mode); }
+
   removeSecondSeat() {
+    leaveVersus(this);
     this.seats.length = 1;
     this.simulation.clearSecondPlayer();
     this.simulation.clearSwarmShips(1);
@@ -442,6 +459,7 @@ export class Game {
     this.pickups.reset();
     this.lastWipedSeat = null;
     this.revival.reset();
+    this.versusMatch?.reset();
     const starts = seatStarts(this.seats.length, this.worldBounds);
     this.seats.forEach((seat, index) => seat.reset(this.initialSwarmShips, starts[index]));
     this.followCamera(0, { cut: true });
@@ -509,6 +527,7 @@ export class Game {
       else if (this.watching) moveWatchPoint(seat.player, deltaSeconds, inputs[index], controls[index]);
       seat.flock(deltaSeconds, playing && controls[index].firing);
     });
+    if (this.versus) applyShipContact(this);
     this.followCamera(deltaSeconds);
 
     const anchor = pickupAnchor(seats);
@@ -631,7 +650,7 @@ export class Game {
       surging,
     });
     this.stepGates = this.spawnDirector.spawnGates;
-    if (phase === RunPhase.Playing) spawnShardsForWaves(this);
+    if (phase === RunPhase.Playing && !this.versus) spawnShardsForWaves(this);
     // Beam time surges the spawning: a null wave trickles refills every step, past the wave bank.
     return pressure.update(deltaSeconds, this.latestStats, shares, this.simulation.frameSequence + 1, surging ? null : this.spawnDirector.wave);
   }
@@ -655,14 +674,14 @@ export class Game {
       if (stats.ringsThisFrame > 0) this.queueImpulse(stats.lastRingX, stats.lastRingY, RING_IMPULSE_STRENGTH, false);
       if (this.run.phase === RunPhase.Playing) {
         this.score.recordKills(stats.killsSinceLastRead);
-        // Kills grow every swarm still in the run; award lives are superseded by it, bombs stay.
-        for (const seat of this.seats) if (!seat.down) seat.swarm.addKills(stats.killsSinceLastRead);
-        reviveSeats(this, stats.killsSinceLastRead);
+        // Kills grow every swarm still in the run and revive down seats (versus: growSwarms); award
+        // lives are superseded by it, bombs stay.
+        growSwarms(this, stats);
         const earned = this.awards.update(this.score.score);
         for (let index = 0; index < earned.bombs; index += 1) this.run.addBomb();
       }
     }
-    if (this.run.phase === RunPhase.Playing) applySwarmHits(this, stats);
+    if (this.run.phase === RunPhase.Playing) (this.versus ? applyVersusHits : applySwarmHits)(this, stats);
   }
 
   handleAction(action) {

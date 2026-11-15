@@ -254,6 +254,16 @@ export class PlayerSwarm {
     return killed;
   }
 
+  // Kills the alive ship in slot (versus ship contact, a CPU hit); returns { slot, x, y } or null
+  // when the slot holds no alive ship.
+  killShip(index) {
+    const slot = this.slots[index];
+    if (slot === undefined || !slot.alive) return null;
+    slot.alive = false;
+    this.aliveCountValue -= 1;
+    return { slot: index, x: slot.x, y: slot.y };
+  }
+
   // Scored kills: one new ship (spawned at the target) per KILLS_PER_SWARM_SHIP. At the cap the
   // credit is dropped, so losses are not refilled from kills banked while full. Returns ships grown.
   addKills(count) {
