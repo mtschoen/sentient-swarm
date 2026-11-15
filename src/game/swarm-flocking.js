@@ -34,6 +34,7 @@
 // with a squared-distance early-out (65536 pairs at 256 ships), averaged, never summed.
 
 import { slotHash } from './swarm-hash.js';
+import { GUNNER_BUZZ_SCALE, GUNNER_SEEK, GUNNER_SPEED_FLOOR_SCALE, GUNNER_WANDER_SCALE } from './swarm-gunners.js';
 import { BUZZ_SPEED_SHARE, SWARM_BUZZ, SWARM_ROAM_SCALE, SWARM_TIGHTNESS, TIGHTNESS_WELL_RATE, buzzDirection } from './swarm-motion.js';
 
 export { slotHash };
@@ -185,6 +186,9 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
       separationY -= offsetY * falloff;
       nearCount += 1;
     }
+    // A rail gunner (src/game/swarm-gunners.js) seeks its station instead of the roaming waypoint and
+    // drops the well, cohesion, pressure and attack bias, which would fight the station.
+    const gunner = ship.gunnerIndex >= 0;
     const towardX = targetX - ship.x;
     const towardY = targetY - ship.y;
     const distance = Math.hypot(towardX, towardY);
@@ -196,8 +200,8 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     const axis = slotHash(ship.roamGroup, 31) * TWO_PI + SWARM_ROAM_AXIS_TURN * (slotHash(ship.roamGroup, 32) * 2 - 1) * time;
     const roamAngle = axis + Math.PI * (epoch % 2) + 0.6 * (slotHash(ship.roamGroup, 1000 + epoch) - 0.5);
     const roamRadius = (0.6 + 0.4 * slotHash(ship.roamGroup, 2000 + epoch)) * SWARM_ROAM_REACH * home * SWARM_ROAM_SCALE;
-    const waypointX = targetX + Math.cos(roamAngle) * roamRadius - ship.x;
-    const waypointY = targetY + Math.sin(roamAngle) * roamRadius - ship.y;
+    const waypointX = gunner ? ship.stationX - ship.x : targetX + Math.cos(roamAngle) * roamRadius - ship.x;
+    const waypointY = gunner ? ship.stationY - ship.y : targetY + Math.sin(roamAngle) * roamRadius - ship.y;
     const waypointDistance = Math.hypot(waypointX, waypointY);
     const excess = Math.max(0, reach - 1);
     const maximumSpeed = Math.min(SWARM_MAXIMUM_SPEED, ship.cruiseSpeed * (1 + SWARM_CATCH_UP * excess));
@@ -207,7 +211,7 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     if (waypointDistance > EPSILON) {
       // Seek (seekVelocity in steer.wgsl) toward the group's waypoint.
       const braking = SWARM_ARRIVAL_BRAKING * Math.sqrt(2 * maximumAcceleration * waypointDistance);
-      const seek = Math.min(maximumSpeed, braking) * smoothstep(0, SWARM_ROAM_COMFORT, waypointDistance) * SWARM_SEEK;
+      const seek = Math.min(maximumSpeed, braking) * smoothstep(0, SWARM_ROAM_COMFORT, waypointDistance) * (gunner ? GUNNER_SEEK : SWARM_SEEK);
       desiredX += (waypointX / waypointDistance) * seek;
       desiredY += (waypointY / waypointDistance) * seek;
     }
@@ -216,16 +220,18 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
       const seek = SWARM_LEASH * ship.leash * reach * reach * maximumSpeed;
       desiredX += (towardX / distance) * seek;
       desiredY += (towardY / distance) * seek;
-      // The harmonic well: desired speed grows linearly with the distance from the point.
-      const well = Math.min(maximumSpeed, TIGHTNESS_WELL_RATE * SWARM_TIGHTNESS * distance);
-      desiredX += (towardX / distance) * well;
-      desiredY += (towardY / distance) * well;
+      if (!gunner) {
+        // The harmonic well: desired speed grows linearly with the distance from the point.
+        const well = Math.min(maximumSpeed, TIGHTNESS_WELL_RATE * SWARM_TIGHTNESS * distance);
+        desiredX += (towardX / distance) * well;
+        desiredY += (towardY / distance) * well;
+      }
     }
     if (nearCount > 0) {
       desiredX += (separationX / nearCount) * SWARM_SEPARATION * maximumSpeed;
       desiredY += (separationY / nearCount) * SWARM_SEPARATION * maximumSpeed;
     }
-    if (farCount > 0) {
+    if (farCount > 0 && !gunner) {
       const averageX = centerX / farCount;
       const averageY = centerY / farCount;
       const averageLength = Math.hypot(averageX, averageY);
@@ -240,9 +246,10 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     }
     const ownCourse = Math.atan2(ship.velocityY, ship.velocityX);
     const swing = ship.wander * (0.7 * Math.sin(time * ship.wanderRateOne + ship.wanderPhaseOne) + 0.3 * Math.sin(time * ship.wanderRateTwo + ship.wanderPhaseTwo));
-    desiredX += Math.cos(ownCourse + swing * 1.5) * SWARM_WANDER * maximumSpeed;
-    desiredY += Math.sin(ownCourse + swing * 1.5) * SWARM_WANDER * maximumSpeed;
-    if (attacking) {
+    const wander = gunner ? SWARM_WANDER * GUNNER_WANDER_SCALE : SWARM_WANDER;
+    desiredX += Math.cos(ownCourse + swing * 1.5) * wander * maximumSpeed;
+    desiredY += Math.sin(ownCourse + swing * 1.5) * wander * maximumSpeed;
+    if (attacking && !gunner) {
       const proximity = Math.max(0, 1 - reach / SWARM_ATTACK_REACH) * attackTurn(time, ship.attackPhase);
       desiredX += aimX * SWARM_ATTACK * proximity * maximumSpeed;
       desiredY += aimY * SWARM_ATTACK * proximity * maximumSpeed;
@@ -257,7 +264,7 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     ship.velocityX += steeringX * deltaSeconds;
     ship.velocityY += steeringY * deltaSeconds;
     let speed = Math.hypot(ship.velocityX, ship.velocityY);
-    const floor = SWARM_SPEED_FLOOR * ship.cruiseSpeed;
+    const floor = (gunner ? GUNNER_SPEED_FLOOR_SCALE : 1) * SWARM_SPEED_FLOOR * ship.cruiseSpeed;
     if (speed < EPSILON) {
       ship.velocityX = Math.cos(ownCourse) * floor;
       ship.velocityY = Math.sin(ownCourse) * floor;
@@ -269,7 +276,7 @@ export function flockStep(slots, deltaSeconds, { targetX, targetY, firing, aimX,
     let movementX = ship.velocityX;
     let movementY = ship.velocityY;
     buzzDirection(ship.slot, time, buzzScratch);
-    const buzz = SWARM_BUZZ * BUZZ_SPEED_SHARE * ship.cruiseSpeed;
+    const buzz = SWARM_BUZZ * BUZZ_SPEED_SHARE * ship.cruiseSpeed * (gunner ? GUNNER_BUZZ_SCALE : 1);
     movementX += buzzScratch.x * buzz;
     movementY += buzzScratch.y * buzz;
     ship.course = Math.atan2(movementY + carryY, movementX + carryX);

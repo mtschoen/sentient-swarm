@@ -145,3 +145,12 @@ test('after the aim swings, even right round, the swarm points inside the fire c
     assert.ok(seconds <= 0.1 + 1e-9, `a ${degrees} degree swing took ${seconds.toFixed(3)} s`);
   }
 });
+
+test("a gunner's heading is its station angle, firing or not", () => {
+  const slot = { alive: true, gunnerIndex: 2, stationAngle: 1.2, course: -2, heading: 0 };
+  faceStep([slot], STEP, { firing: true, aimX: 1, aimY: 0 });
+  assert.equal(slot.heading, 1.2);
+  slot.heading = 0;
+  faceStep([slot], STEP, { firing: false, aimX: 1, aimY: 0 });
+  assert.equal(slot.heading, 1.2);
+});

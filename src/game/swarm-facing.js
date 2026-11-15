@@ -66,6 +66,11 @@ export function faceStep(slots, deltaSeconds, { firing, aimX, aimY }) {
   const returnStep = SWARM_FACING_RETURN_RADIANS_PER_SECOND * deltaSeconds;
   for (const ship of slots) {
     if (!ship.alive) continue;
+    // A rail gunner points outward along its station angle (src/game/swarm-gunners.js), instantly.
+    if (ship.gunnerIndex >= 0) {
+      ship.heading = ship.stationAngle;
+      continue;
+    }
     const desired = aiming ? facingFor(ship.course, aimAngle) : ship.course;
     const outside = aiming && Math.abs(wrapAngle(ship.heading - aimAngle)) > SWARM_FIRE_CONE_RADIANS;
     ship.heading = turnHeadingToward(ship.heading, desired, outside ? returnStep : maximumStep);

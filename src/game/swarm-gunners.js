@@ -13,6 +13,9 @@ export const GUNNER_SEEK = 1.6;
 // Wander and buzz shares a gunner keeps, so it hovers on its station instead of jittering off it.
 export const GUNNER_WANDER_SCALE = 0.25;
 export const GUNNER_BUZZ_SCALE = 0.3;
+// Share of the ships' speed floor a gunner keeps: at the full floor a ship never stops and loops
+// 0.2 to 0.3 units around its station instead of holding it.
+export const GUNNER_SPEED_FLOOR_SCALE = 0.1;
 
 const holders = new Int16Array(MAXIMUM_RAIL_TURRETS);
 
