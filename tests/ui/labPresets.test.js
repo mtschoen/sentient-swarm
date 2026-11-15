@@ -70,6 +70,8 @@ test('decodeMix returns null for wrong shapes', () => {
     seekRangeHigh: { ...good, knobs: { seekRange: 41 } },
     beamShardsNeededHigh: { ...good, knobs: { beamShardsNeeded: 9 } },
     beamTimeSurgeLow: { ...good, knobs: { beamTimeSurge: 0.5 } },
+    soloZoomMaximumHigh: { ...good, knobs: { soloZoomMaximum: 9 } },
+    soloZoomEnabledHigh: { ...good, knobs: { soloZoomEnabled: 2 } },
     seekRangeLow: { ...good, knobs: { seekRange: -1 } },
     knobType: { ...good, knobs: { rampSeconds: '60' } },
     knobsArray: { ...good, knobs: [1] },

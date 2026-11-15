@@ -19,6 +19,7 @@ import { DEFAULT_PICKUP_BLAST_RADIUS } from '../game/game.js';
 import { BEAM_SHARDS_NEEDED, BEAM_SHARD_WAVE_INTERVAL } from '../game/beam-shards.js';
 import { BEAM_TIME_SECONDS } from '../game/beam-time.js';
 import { RunPhase } from '../game/run.js';
+import { SOLO_ZOOM_DEFAULTS } from '../game/solo-zoom.js';
 import { TIME_WARP_SCALE, TIME_WARP_SECONDS } from '../game/time-warp.js';
 import { DEFAULT_BASE_KILL_BUDGET, DEFAULT_BEAM_SWEEP_THRESHOLD_DEGREES, DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND } from '../game/weaponTypes.js';
 import { PARTICLE_DEVICE_PIXELS } from '../render/particles.js';
@@ -56,6 +57,10 @@ const gate = (key) => ({
 const simulationValue = (key, setter) => ({
   read: ({ game }) => game.simulation[key],
   write: ({ game }, value) => game.simulation[setter](value),
+});
+const soloZoomValue = (key, setting) => ({
+  read: ({ game }) => game.soloZoom.settings[setting],
+  write: ({ game }, value) => game.setSoloZoomSetting(setting, value),
 });
 const renderSetting = (key) => ({
   read: ({ renderer }) => renderer.settings[key],
@@ -143,6 +148,17 @@ export const LAB_KNOB_BINDINGS = {
     read: ({ game }) => game.beamTimeSurge,
     write: ({ game }, value) => game.setBeamTimeSurge(value),
   },
+  soloZoomEnabled: {
+    read: ({ game }) => (game.soloZoom.settings.enabled ? 1 : 0),
+    write: ({ game }, value) => game.setSoloZoomSetting('enabled', value >= 0.5),
+  },
+  soloZoomMinimum: soloZoomValue('soloZoomMinimum', 'minimum'),
+  soloZoomMaximum: soloZoomValue('soloZoomMaximum', 'maximum'),
+  soloZoomPunchIn: soloZoomValue('soloZoomPunchIn', 'punchIn'),
+  soloZoomPullOut: soloZoomValue('soloZoomPullOut', 'pullOut'),
+  soloZoomSmoothSeconds: soloZoomValue('soloZoomSmoothSeconds', 'smoothSeconds'),
+  soloZoomRateLimit: soloZoomValue('soloZoomRateLimit', 'rateLimit'),
+  soloZoomCrowdReference: soloZoomValue('soloZoomCrowdReference', 'crowdReference'),
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, renderSetting(spec.key)])),
 };
 
@@ -175,6 +191,14 @@ export const LAB_KNOB_DEFAULTS = Object.freeze({
   beamShardWaveInterval: BEAM_SHARD_WAVE_INTERVAL,
   beamTimeSeconds: BEAM_TIME_SECONDS,
   beamTimeSurge: DEFAULT_BEAM_TIME_SURGE,
+  soloZoomEnabled: SOLO_ZOOM_DEFAULTS.enabled ? 1 : 0,
+  soloZoomMinimum: SOLO_ZOOM_DEFAULTS.minimum,
+  soloZoomMaximum: SOLO_ZOOM_DEFAULTS.maximum,
+  soloZoomPunchIn: SOLO_ZOOM_DEFAULTS.punchIn,
+  soloZoomPullOut: SOLO_ZOOM_DEFAULTS.pullOut,
+  soloZoomSmoothSeconds: SOLO_ZOOM_DEFAULTS.smoothSeconds,
+  soloZoomRateLimit: SOLO_ZOOM_DEFAULTS.rateLimit,
+  soloZoomCrowdReference: SOLO_ZOOM_DEFAULTS.crowdReference,
   ...Object.fromEntries(RENDER_SLIDERS.map((spec) => [spec.key, DEFAULT_RENDER_SETTINGS[spec.key]])),
   sameSpeciesCohesion: 1,
 });

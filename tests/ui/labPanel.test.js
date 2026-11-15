@@ -9,6 +9,7 @@ import { defaultMatrix, defaultSpecies, normalizeShares } from '../../src/sim/sp
 import { DEFAULT_RENDER_SETTINGS } from '../../src/render/renderer.js';
 import { SPECIES_COUNT } from '../../src/sim/layout.js';
 import { TimeWarp } from '../../src/game/time-warp.js';
+import { SoloZoomController } from '../../src/game/solo-zoom.js';
 import { BeamShards } from '../../src/game/beam-shards.js';
 import { BeamTime } from '../../src/game/beam-time.js';
 import { DEFAULT_BEAM_TIME_SURGE } from '../../src/sim/spawner.js';
@@ -108,6 +109,8 @@ function createContext() {
     beamTime: new BeamTime(),
     beamTimeSurge: DEFAULT_BEAM_TIME_SURGE,
     setBeamTimeSurge(strength) { this.beamTimeSurge = strength; },
+    soloZoom: new SoloZoomController(),
+    setSoloZoomSetting(name, value) { this.soloZoom.set(name, value); },
     simulationRate: 'full',
     setSimulationRate(rate) { this.simulationRate = rate; },
     watching: false,
@@ -491,4 +494,10 @@ test('the arm weapon select still lists every weapon, the beam included', () => 
   const { select } = setup();
   const names = select('base').children.map((option) => option.value);
   assert.deepEqual(names, ['base', 'beam', 'scatter', 'rail', 'pulse', 'sidewinders']);
+});
+
+test('the Camera group renders eight solo zoom sliders', () => {
+  const { knob } = setup();
+  const keys = ['soloZoomEnabled', 'soloZoomMinimum', 'soloZoomMaximum', 'soloZoomPunchIn', 'soloZoomPullOut', 'soloZoomSmoothSeconds', 'soloZoomRateLimit', 'soloZoomCrowdReference'];
+  for (const key of keys) assert.equal(knob(key).length, 1, key);
 });
