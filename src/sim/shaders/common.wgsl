@@ -33,6 +33,7 @@ const STAT_HIT_LATCH: u32 = __STAT_HIT_LATCH__u;
 // First of the two swarm hit mask words (low, then high).
 const STAT_SWARM_HIT_MASK: u32 = __STAT_SWARM_HIT_MASK__u;
 const STAT_OWNER_KILLS: u32 = __STAT_OWNER_KILLS__u;
+const STAT_OWNER_FEEDING_KILLS: u32 = __STAT_OWNER_FEEDING_KILLS__u;
 const MAXIMUM_SWARM_SHIPS: u32 = __MAXIMUM_SWARM_SHIPS__u;
 
 const FLAG_ALIVE: u32 = 1u;
@@ -40,6 +41,11 @@ const SPAWN_FRAMES_SHIFT: u32 = 8u;
 const SPAWN_FRAMES_MASK: u32 = 255u;
 // Spawn-in frames a new agent starts with (spawn.wgsl); the glyph pass fades ships in over them.
 const SPAWN_IN_FRAMES: u32 = 30u;
+// Flags bits 16 and 17: the seek point plus 1 the agent seeks (hives only), 0 the nearest one.
+const AGENT_TARGET_SHIFT: u32 = __AGENT_TARGET_SHIFT__u;
+const AGENT_TARGET_MASK: u32 = 3u;
+// A feeding ground kill lies within this multiple of its hive's radius (HIVE_FEEDING_REACH_SCALE).
+const HIVE_FEEDING_REACH_SCALE: f32 = __HIVE_FEEDING_REACH_SCALE__;
 
 // 32 bytes, 16-byte aligned for storage arrays.
 struct Agent {
@@ -90,6 +96,8 @@ struct Agent {
 // 236 projectileDt       f32 (the projectile step's dt: unscaled real time during a time warp)
 // 240 worldBounds        vec4f (the playable rectangle inside the world: minX, minY, maxX, maxY)
 // 256 seekRange          f32 (seek fades to zero at this distance from the nearest seek point; 0 is unlimited)
+// 260 spawnGateOwnership u32 (hives only, 4 bits per gate row: bits 0 and 1 the seek point plus 1 its
+//                        spawns seek, bits 2 and 3 the owner seat plus 1; 0 everywhere else)
 struct SimParams {
   dt: f32,
   time: f32,
@@ -129,6 +137,7 @@ struct SimParams {
   projectileDt: f32,
   worldBounds: vec4f,
   seekRange: f32,
+  spawnGateOwnership: u32,
 }
 
 // The player the neutral swarm seeks and spawns keep away from: the nearer of the one or two live
@@ -142,6 +151,48 @@ fn nearestPlayerPosition(position: vec2f, params: SimParams) -> vec2f {
 fn nearestPlayerDistance(position: vec2f, params: SimParams) -> f32 {
   let first = distance(position, params.playerPosition);
   return select(first, min(first, distance(position, params.secondPlayerPosition)), params.secondPlayerActive != 0u);
+}
+
+// The seek point plus 1 a spawn from gate row gate aims at (0: none, the nearest), and its owner seat
+// plus 1 (0: neutral); both 0 outside hives.
+fn gateSeekTarget(gate: u32, params: SimParams) -> u32 {
+  return (params.spawnGateOwnership >> (gate * 4u)) & AGENT_TARGET_MASK;
+}
+
+fn gateOwner(gate: u32, params: SimParams) -> u32 {
+  return (params.spawnGateOwnership >> (gate * 4u + 2u)) & 3u;
+}
+
+fn agentSeekTarget(flags: u32) -> u32 {
+  return (flags >> AGENT_TARGET_SHIFT) & AGENT_TARGET_MASK;
+}
+
+// The point an agent seeks: the first seek point for target 1, the second for target 2 while it is
+// live, else (target 0, every agent outside hives) exactly nearestPlayerPosition.
+fn seekPointFor(position: vec2f, flags: u32, params: SimParams) -> vec2f {
+  let seekTarget = agentSeekTarget(flags);
+  if (seekTarget == 1u) {
+    return params.playerPosition;
+  }
+  if (seekTarget == 2u && params.secondPlayerActive != 0u) {
+    return params.secondPlayerPosition;
+  }
+  return nearestPlayerPosition(position, params);
+}
+
+// Whether position lies on the feeding ground of a gate row owned by owner (seat plus 1): within
+// HIVE_FEEDING_REACH_SCALE times the row's radius of its center. Never true for owner 0.
+fn onFeedingGround(position: vec2f, owner: u32, params: SimParams) -> bool {
+  if (owner == 0u || params.spawnGateOwnership == 0u) {
+    return false;
+  }
+  for (var gate = 0u; gate < min(params.spawnGateCount, 4u); gate = gate + 1u) {
+    let row = params.spawnGates[gate];
+    if (gateOwner(gate, params) == owner && distance(position, row.xy) <= row.z * HIVE_FEEDING_REACH_SCALE) {
+      return true;
+    }
+  }
+  return false;
 }
 
 fn playersCenter(params: SimParams) -> vec2f {

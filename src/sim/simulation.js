@@ -54,7 +54,7 @@ import {
 } from './params.js';
 import { Spawner } from './spawn.js';
 import { DEFAULT_SHARES, defaultMatrix, defaultSpecies, normalizeShares, densityScaleFor, packSpeciesTable } from './species.js';
-import { STATS_BYTES, STATS_PERSISTENT_OFFSET_BYTES, StatsPass, decodeOwnerKills, decodeStats } from './stats.js';
+import { STATS_BYTES, STATS_PERSISTENT_OFFSET_BYTES, StatsPass, decodeFeedingKills, decodeOwnerKills, decodeStats } from './stats.js';
 import { Steering } from './steer.js';
 import { VersusHitPass } from './versus-hits.js';
 
@@ -156,6 +156,8 @@ export class Simulation {
     this.lastKillsTotal = 0;
     // The last read per-seat owner kill counters (stats ownerKills), for ownerKillsSinceLastRead.
     this.lastOwnerKills = new Array(MAXIMUM_PLAYER_SEATS).fill(0);
+    // The same for the hives feeding ground counters (stats ownerFeedingKills).
+    this.lastFeedingKills = new Array(MAXIMUM_PLAYER_SEATS).fill(0);
     this.sameSpeciesCohesion = true;
     // Multiplier on every species' seek weight; the game sets it from SpawnPressure every step.
     this.seekScale = 1;
@@ -528,6 +530,9 @@ export class Simulation {
       stats.ownerKills = decodeOwnerKills(bytes);
       stats.ownerKillsSinceLastRead = Array.from(stats.ownerKills, (total, seat) => (total - this.lastOwnerKills[seat]) >>> 0);
       this.lastOwnerKills = Array.from(stats.ownerKills);
+      const feeding = decodeFeedingKills(bytes);
+      stats.feedingKillsSinceLastRead = Array.from(feeding, (total, seat) => (total - this.lastFeedingKills[seat]) >>> 0);
+      this.lastFeedingKills = Array.from(feeding);
       return stats;
     });
   }
@@ -648,6 +653,7 @@ export class Simulation {
     // The kills counter came over with the tail, so differences continue from the last read.
     next.lastKillsTotal = this.lastKillsTotal;
     next.lastOwnerKills = [...this.lastOwnerKills];
+    next.lastFeedingKills = [...this.lastFeedingKills];
     next.versusProjectiles = this.versusProjectiles;
     next.killAllRequested = this.killAllRequested;
     next.radialKill = this.radialKill === null ? null : { ...this.radialKill };

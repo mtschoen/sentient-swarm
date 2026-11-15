@@ -19,6 +19,8 @@
 //   (saturatedDirection), so float noise in a flat over-dense interior pushes weakly instead of at
 //   full strength in a random direction.
 //
+// Seek aims at seekPointFor (common.wgsl): the nearest seek point, unless the agent's target flag
+// bits (hives only: a spawn from a hive a seat owns) name the opposing seat's point.
 // Seek also fades with distance from the nearest seek point when params.seekRange is above 0
 // (seekRangeFactor, lab only; 0 is unlimited).
 //
@@ -93,7 +95,7 @@ fn saturatedDirection(gradient: vec2f) -> vec2f {
   return gradient / max(length(gradient), GRADIENT_SATURATION);
 }
 
-// Seek, as a desired velocity. Straight at the player at maximumSpeed, braking inside the
+// Seek, as a desired velocity toward seekPoint (the agent's seek point). Straight at the player at maximumSpeed, braking inside the
 // stopping distance: the speed is capped at ARRIVAL_BRAKING * sqrt(2 * maximumAcceleration *
 // distance), so an agent can stop at the player instead of overshooting by speed^2 / (2 *
 // acceleration) and oscillating through it. With orbitRadius > 0: toward the nearest point on
@@ -102,8 +104,8 @@ fn saturatedDirection(gradient: vec2f) -> vec2f {
 // counterclockwise tangent so every orbiter circles with the same handedness. Orbits never brake.
 // Straight seek (orbitRadius 0) also fades by smoothstep over params.comfortRadius around the player;
 // orbit seek is unchanged.
-fn seekVelocity(position: vec2f, orbitRadius: f32, maximumSpeed: f32, maximumAcceleration: f32) -> vec2f {
-  let toPlayer = nearestPlayerPosition(position, params) - position;
+fn seekVelocity(position: vec2f, seekPoint: vec2f, orbitRadius: f32, maximumSpeed: f32, maximumAcceleration: f32) -> vec2f {
+  let toPlayer = seekPoint - position;
   let distance = length(toPlayer);
   if (distance < MINIMUM_LENGTH) {
     return vec2f(0.0, 0.0);
@@ -215,7 +217,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   let maximumAcceleration = speciesField(species, FIELD_MAXIMUM_TURN) * maximumSpeed;
   let targetDensity = max(speciesField(species, FIELD_TARGET_DENSITY), MINIMUM_LENGTH);
 
-  let seek = seekVelocity(agent.position, speciesField(species, FIELD_ORBIT_RADIUS), maximumSpeed, maximumAcceleration);
+  let seek = seekVelocity(agent.position, seekPointFor(agent.position, agent.flags, params), speciesField(species, FIELD_ORBIT_RADIUS), maximumSpeed, maximumAcceleration);
   var desired = seek * speciesField(species, FIELD_SEEK) * params.seekScale * seekRangeFactor(nearestPlayerDistance(agent.position, params));
 
   let neighbors = fineNeighborAverages(index, agent, species);

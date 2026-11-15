@@ -12,7 +12,10 @@
 //      (ownerKillsSinceLastRead [0, 1]); an unowned bullet through another credits no seat;
 // (v6) a seat 1 pulse ring whose band covers seat 2's ships 20 and 21 kills exactly one of them in
 //      the step and lives on; a seat 1 beam along a ray through ships 30 (near) and 31 (far) kills
-//      ship 30 within BEAM_HIT_STEP_INTERVAL steps while ship 31 still lives.
+//      ship 30 within BEAM_HIT_STEP_INTERVAL steps while ship 31 still lives;
+// (v7) the hives feeding ground: with a gate row owned by seat 2 at AGENT (radius 1.5, so a reach of
+//      3), seat 2 bullets through an agent at AGENT and one at SECOND_AGENT (4 away) credit seat 2 two
+//      owner kills and one feeding kill (feedingKillsSinceLastRead [0, 1]); without the row, none.
 import { AGENT_FLAG_ALIVE, AGENT_OFFSETS, AGENT_STRIDE_BYTES, MAXIMUM_SWARM_SHIPS, PROJECTILE_FLAG_ALIVE } from '/src/sim/layout.js';
 import { Simulation } from '/src/sim/simulation.js';
 import { Projectiles, PROJECTILE_STRIDE_BYTES } from '/src/game/projectiles.js';
@@ -74,13 +77,13 @@ export async function runVersusCase(gpu) {
   const removePass = simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const collected = new Map();
   let first = true;
-  const step = async () => {
+  const step = async (spawnGates = null) => {
     simulation.setPlayerState({ x: 1, y: 1 });
     simulation.setSwarmShips(table({ 2: 'own' }, first), SWARM_SHIP_RADIUS);
     simulation.setSwarmShips(table(SEAT_TWO_SHIPS, first), SWARM_SHIP_RADIUS, { seat: 1 });
     first = false;
     const encoder = device.createCommandEncoder({ label: 'versus-check-frame' });
-    simulation.step(encoder, STEP_SECONDS);
+    simulation.step(encoder, STEP_SECONDS, undefined, spawnGates);
     device.queue.submit([encoder.finish()]);
     simulation.afterSubmit();
     await device.queue.onSubmittedWorkDone();
@@ -143,7 +146,18 @@ export async function runVersusCase(gpu) {
   stats = await step();
   const credit = stats.ownerKillsSinceLastRead.join(',');
   verdicts.push([stats.killsSinceLastRead === 2 && credit === '0,1', `(v5) kills ${stats.killsSinceLastRead}, owner credit ${credit} (need 2 and 0,1)`]);
+  verdicts.push([stats.feedingKillsSinceLastRead.join(',') === '0,0', `(v5) feeding credit without hives ${stats.feedingKillsSinceLastRead.join(',')} (need 0,0)`]);
 
+  projectiles.clear();
+
+  // (v7) the feeding ground of a hive seat 2 owns.
+  device.queue.writeBuffer(simulation.agentsBuffer, 0, bytes);
+  const hive = { gates: [{ x: SPOTS.agent[0], y: SPOTS.agent[1], radius: 1.5, emit: 0, species: 0, owner: 1, target: 0 }], speciesBias: 0 };
+  projectiles.queueSpawn(bulletAt('agent'), 1);
+  projectiles.queueSpawn(bulletAt('secondAgent'), 1);
+  stats = await step(hive);
+  const feeding = stats.feedingKillsSinceLastRead.join(',');
+  verdicts.push([stats.ownerKillsSinceLastRead.join(',') === '0,2' && feeding === '0,1', `(v7) owner credit ${stats.ownerKillsSinceLastRead.join(',')}, feeding credit ${feeding} (need 0,2 and 0,1)`]);
   projectiles.clear();
 
   // (v6) a ring and a beam.

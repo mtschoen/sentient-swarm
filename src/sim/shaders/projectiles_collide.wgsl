@@ -63,6 +63,10 @@
 // only) also adds 1 to that owner's workgroup count, flushed by thread 0 into stats word
 // STAT_OWNER_KILLS + seat beside the plain kills; an unowned projectile (solo, co-op) adds nothing
 // there. The rings entry takes each ring's owner in turn, the beam entry its slot's.
+// Hives feeding ground: an owned kill on the feeding ground of a hive its owner holds
+// (onFeedingGround, from the gate table's ownership in params) also adds 1 to the owner's feeding
+// count, flushed into STAT_OWNER_FEEDING_KILLS + seat; with no owned gate row (everywhere but hives)
+// nothing is counted there.
 // Barriers sit outside every branch.
 //
 // Storage buffers: projectiles, agents, cellCounts, cellOffsets, sortedIndices, particles (pool
@@ -109,6 +113,7 @@ var<workgroup> workgroupKills: atomic<u32>;
 var<private> killOwner: u32 = NO_PROJECTILE_OWNER;
 const OWNER_SEATS: u32 = 2u;
 var<workgroup> workgroupOwnerKills: array<atomic<u32>, OWNER_SEATS>;
+var<workgroup> workgroupFeedingKills: array<atomic<u32>, OWNER_SEATS>;
 // Alive pulse ring slots found by this workgroup's scan (zero-initialized per workgroup). The
 // pulse weapon keeps at most about 9 rings alive; rings past MAXIMUM_LISTED_RINGS do not collide.
 const MAXIMUM_LISTED_RINGS: u32 = 256u;
@@ -153,6 +158,9 @@ fn kill(agentIndex: u32, position: vec2f) -> bool {
     atomicAdd(&workgroupKills, 1u);
     if (killOwner != NO_PROJECTILE_OWNER) {
       atomicAdd(&workgroupOwnerKills[killOwner - 1u], 1u);
+      if (onFeedingGround(position, killOwner, params)) {
+        atomicAdd(&workgroupFeedingKills[killOwner - 1u], 1u);
+      }
     }
     emitKillParticles(agentIndex, position, min(agents[agentIndex].species, SPECIES_COUNT - 1u), agents[agentIndex].hueJitter, params.killBurstParticles + params.killFragmentParticles);
     atomicAdd(&threatAccumulator[coarseCellIndexFor(position)], u32(THREAT_FIXED_POINT_SCALE));
@@ -317,6 +325,10 @@ fn flushKills(localIndex: u32) {
       let ownerKills = atomicLoad(&workgroupOwnerKills[seat]);
       if (ownerKills > 0u) {
         atomicAdd(&stats[STAT_OWNER_KILLS + seat], ownerKills);
+      }
+      let feedingKills = atomicLoad(&workgroupFeedingKills[seat]);
+      if (feedingKills > 0u) {
+        atomicAdd(&stats[STAT_OWNER_FEEDING_KILLS + seat], feedingKills);
       }
     }
   }

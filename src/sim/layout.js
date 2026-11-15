@@ -2,6 +2,7 @@
 // size and the derived coarse field and grid sizes live in world.js and are re-exported here.
 import { PROJECTILE_KINDS } from '../game/weaponTypes.js';
 import { COARSE_COLUMNS, COARSE_ROWS, WORLD_HEIGHT, WORLD_WIDTH } from './world.js';
+import { HIVE_FEEDING_REACH_SCALE } from '../game/hive-tuning.js';
 
 export * from './world.js';
 export const SPECIES_COUNT = 5;
@@ -15,6 +16,12 @@ export const AGENT_OFFSETS = { position: 0, velocity: 8, species: 16, flags: 20,
 export const AGENT_FLAG_ALIVE = 1;
 export const AGENT_SPAWN_FRAMES_SHIFT = 8;
 export const AGENT_SPAWN_FRAMES_MASK = 0xff00;
+// Bits 16 and 17: the seek point plus 1 the agent seeks (1 the first, 2 the second; spawn.wgsl writes
+// it from the emitting hive's target, hives only), 0 the nearest seek point as always. Every other
+// pass keeps the bits (integrate rewrites only the spawn frames, the kill passes clear only bit 0)
+// and a spawn writes the whole word, so a reused slot starts untargeted.
+export const AGENT_TARGET_SHIFT = 16;
+export const AGENT_TARGET_MASK = 0x30000;
 // Projectile struct flags bit 0 (common.wgsl).
 export const PROJECTILE_FLAG_ALIVE = 1;
 // Bit 1: a pulse ring made by a sidewinder detonation (drawn in the sidewinder hue).
@@ -61,8 +68,12 @@ export const STATS_INDICES = {
   secondSwarmHitMask: 32,
   // Versus kill credit (projectiles_collide.wgsl): word ownerKills + k is the cumulative count of
   // agents killed by projectiles owned by seat k (u32, wraps; readers take differences). Only
-  // owned projectiles add here, so it stays 0 in solo and co-op. Words 42 to 47 are spare.
+  // owned projectiles add here, so it stays 0 in solo and co-op.
   ownerKills: 40,
+  // Hives feeding ground (projectiles_collide.wgsl): word ownerFeedingKills + k counts seat k's owned
+  // kills inside the feeding reach of a hive seat k owns (the gate table's ownership), cumulative like
+  // ownerKills; only hives sets gate owners, so it stays 0 elsewhere. Words 44 to 47 are spare.
+  ownerFeedingKills: 42,
 };
 export const STATS_PERSISTENT_WORD = 16;
 export const STATS_WORD_COUNT = 48;
@@ -96,6 +107,9 @@ export const SHADER_CONSTANTS = {
   STAT_HIT_LATCH: STATS_INDICES.hitLatch,
   STAT_SWARM_HIT_MASK: STATS_INDICES.swarmHitMask,
   STAT_OWNER_KILLS: STATS_INDICES.ownerKills,
+  STAT_OWNER_FEEDING_KILLS: STATS_INDICES.ownerFeedingKills,
+  AGENT_TARGET_SHIFT,
+  HIVE_FEEDING_REACH_SCALE,
   MAXIMUM_SWARM_SHIPS,
   MAXIMUM_CONTACT_SLOTS,
   PROJECTILE_KIND_BULLET: PROJECTILE_KINDS.bullet,

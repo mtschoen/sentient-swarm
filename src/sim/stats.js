@@ -40,6 +40,11 @@ export function decodeOwnerKills(bytes) {
   return new Uint32Array(bytes, 0, STATS_WORD_COUNT).slice(STATS_INDICES.ownerKills, STATS_INDICES.ownerKills + MAXIMUM_PLAYER_SEATS);
 }
 
+// The cumulative feeding ground kills (hives only; 0 otherwise): seat k's owned kills near a hive it owns.
+export function decodeFeedingKills(bytes) {
+  return new Uint32Array(bytes, 0, STATS_WORD_COUNT).slice(STATS_INDICES.ownerFeedingKills, STATS_INDICES.ownerFeedingKills + MAXIMUM_PLAYER_SEATS);
+}
+
 export class StatsPass {
   constructor(gpu, { common }) {
     this.device = gpu.device;

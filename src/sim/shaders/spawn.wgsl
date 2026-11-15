@@ -37,6 +37,9 @@
 // moves through its spawn-in, so a wave visibly bursts out of the gate). After POSITION_ATTEMPTS
 // unplaceable draws it falls back to the wall band below. No gate emits only between waves, when
 // SpawnPressure requests nothing.
+// Hives: a spawn placed in a gate's disc takes the gate row's seek target (gateSeekTarget, nonzero
+// only for a hive a seat owns) into its target flag bits, so it seeks the opposing seat; wall band
+// and corner spawns, and every spawn outside hives, have target 0 (the nearest seek point).
 // Randomness: a PCG hash (Jarzynski and Olano, "Hash Functions for GPU Rendering", 2020) seeded
 // by the slot index and params.frameSequence, then re-hashed for every draw
 // (pcgHash and nextRandom live in common.wgsl, shared with the kill pass).
@@ -58,6 +61,7 @@ const GATE_EJECT_SPEED: f32 = 1.6;
 struct GateDraw {
   position: vec2f,
   outward: vec2f,
+  gate: u32,
 }
 
 fn claimUnit(species: u32) -> bool {
@@ -156,7 +160,7 @@ fn gatePoint(species: u32, biased: bool, total: f32, spread: f32, randomState: p
   let reach = sqrt(nextRandom(randomState)) * row.z * spread;
   let direction = vec2f(cos(angle), sin(angle));
   let position = clamp(row.xy + direction * reach, params.worldBounds.xy + vec2f(GATE_WALL_MARGIN), params.worldBounds.zw - vec2f(GATE_WALL_MARGIN));
-  return GateDraw(position, direction * (reach / max(row.z * spread, 0.001)));
+  return GateDraw(position, direction * (reach / max(row.z * spread, 0.001)), chosen);
 }
 
 fn coarseDensity(position: vec2f) -> f32 {
@@ -183,6 +187,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   var position = vec2f(0.0, 0.0);
   var velocity = vec2f(0.0, 0.0);
   var found = 0u;
+  var seekTarget = 0u;
   var biased = true;
   var gateTotal = gateWeightTotal(species, true);
   if (gateTotal <= 0.0) {
@@ -196,6 +201,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
       if (!crowded && nearestPlayerDistance(draw.position, params) >= minimumDistance) {
         position = draw.position;
         velocity = draw.outward * GATE_EJECT_SPEED;
+        seekTarget = gateSeekTarget(draw.gate, params);
         found = 1u;
       }
     }
@@ -229,7 +235,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   agent.position = position;
   agent.velocity = velocity;
   agent.species = species;
-  agent.flags = FLAG_ALIVE | (SPAWN_IN_FRAMES << SPAWN_FRAMES_SHIFT);
+  agent.flags = FLAG_ALIVE | (SPAWN_IN_FRAMES << SPAWN_FRAMES_SHIFT) | (seekTarget << AGENT_TARGET_SHIFT);
   agent.phase = nextRandom(&randomState) * TAU;
   agent.hueJitter = nextRandom(&randomState) * 2.0 - 1.0;
   agents[slot] = agent;
