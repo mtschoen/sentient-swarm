@@ -135,6 +135,35 @@ test('a guest wiped by contact kills reports its wipe', async () => {
   assert.deepEqual(host.game.state.matchResult, { winner: 0, draw: false, hives: false });
 });
 
+test('a contact that wipes both last ships at once is a draw on both games', async () => {
+  const { host, guest, stepBoth, startMatch } = await createOnlinePair({ delaySeconds: 0.05 });
+  await startMatch('versus');
+  stepBoth(0.5);
+  // Each machine kills its own ships down to slot 0; the snapshots carry it to the other's mirror.
+  for (const swarm of [host.game.seats[0].swarm, guest.game.seats[1].swarm]) {
+    for (const ship of swarm.ships) if (ship.slot !== 0) swarm.killShip(ship.slot);
+  }
+  stepBoth(0.5);
+  assert.equal(host.game.seats[1].aliveCount, 1, 'the host mirror shows the guest\'s last ship');
+  assert.equal(guest.game.seats[0].aliveCount, 1, 'the guest mirror shows the host\'s last ship');
+  // The host's last ship touches its mirror of the guest's last ship.
+  place(host.game.seats[0].swarm, 0, 16, 9);
+  place(host.game.seats[1].swarm, 0, 16, 9);
+  host.game.online.stepVersus(host.game, STEP);
+  assert.equal(host.game.seats[0].aliveCount, 0);
+  runUntilBothOver(stepBoth, host, guest);
+  assert.equal(guest.game.seats[1].aliveCount, 0, 'the contact kill reached the guest');
+  for (const side of [host, guest]) assert.deepEqual(side.game.state.matchResult, { winner: null, draw: true, hives: false });
+});
+
+function runUntilBothOver(stepBoth, host, guest) {
+  for (let index = 0; index < 600; index += 1) {
+    if (host.game.run.phase === 'gameOver' && guest.game.run.phase === 'gameOver') return;
+    stepBoth(STEP);
+  }
+  assert.fail(`phases ${host.game.run.phase} and ${guest.game.run.phase}`);
+}
+
 test('no contact while either seat is invulnerable', async () => {
   const { host, stepBoth, startMatch } = await createOnlinePair();
   await startMatch('versus');
