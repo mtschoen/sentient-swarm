@@ -19,6 +19,9 @@
 //   (saturatedDirection), so float noise in a flat over-dense interior pushes weakly instead of at
 //   full strength in a random direction.
 //
+// Seek also fades with distance from the nearest seek point when params.seekRange is above 0
+// (seekRangeFactor, lab only; 0 is unlimited).
+//
 // Every term adds to a desired velocity: weight times a direction of length at most 1 times
 // maximumSpeed, except seek (weight times params.seekScale, which ramps with spawn pressure, times
 // seekVelocity, which brakes near the player), alignment (weight times the average neighbor
@@ -52,6 +55,8 @@ const ARRIVAL_BRAKING: f32 = 0.7;
 // desired velocity the turn clamp has to absorb.
 const PRESSURE_MAXIMUM_MULTIPLE: f32 = 2.0;
 const MINIMUM_LENGTH: f32 = 0.000001;
+// Inside this fraction of params.seekRange from the nearest seek point seek is at full strength.
+const SEEK_RANGE_FULL_FRACTION: f32 = 0.6;
 
 struct CoarseSample {
   low: vec4f,
@@ -114,6 +119,16 @@ fn seekVelocity(position: vec2f, orbitRadius: f32, maximumSpeed: f32, maximumAcc
     return vec2f(-radial.y, radial.x) * maximumSpeed;
   }
   return radial * sign(distance - orbitRadius) * maximumSpeed;
+}
+
+// Seek range: 1 within SEEK_RANGE_FULL_FRACTION of params.seekRange from the nearest seek point, easing to 0 at
+// the range, so beyond it an agent only flocks and drifts. 0 is unlimited and returns exactly 1. The edges are
+// ordered low to high because WGSL smoothstep is indeterminate when low >= high.
+fn seekRangeFactor(distance: f32) -> f32 {
+  if (params.seekRange <= 0.0) {
+    return 1.0;
+  }
+  return 1.0 - smoothstep(params.seekRange * SEEK_RANGE_FULL_FRACTION, params.seekRange, distance);
 }
 
 struct NeighborAverages {
@@ -201,7 +216,7 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   let targetDensity = max(speciesField(species, FIELD_TARGET_DENSITY), MINIMUM_LENGTH);
 
   let seek = seekVelocity(agent.position, speciesField(species, FIELD_ORBIT_RADIUS), maximumSpeed, maximumAcceleration);
-  var desired = seek * speciesField(species, FIELD_SEEK) * params.seekScale;
+  var desired = seek * speciesField(species, FIELD_SEEK) * params.seekScale * seekRangeFactor(nearestPlayerDistance(agent.position, params));
 
   let neighbors = fineNeighborAverages(index, agent, species);
   desired = desired + neighbors.separation * speciesField(species, FIELD_SEPARATION) * maximumSpeed;
