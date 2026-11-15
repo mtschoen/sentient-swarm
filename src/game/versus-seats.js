@@ -65,6 +65,11 @@ function applyMode(game, mode) {
 
 // The versus work of a Playing update after the flock step: ship contact, then (hives) capture.
 export function stepVersus(game, deltaSeconds) {
+  // Online the host referees ship contact and the hives (game.online).
+  if (game.online) {
+    game.online.stepVersus(game, deltaSeconds);
+    return;
+  }
   applyShipContact(game);
   updateHives(game, deltaSeconds);
 }

@@ -87,5 +87,7 @@ export function createMemoryTransportPair({ delaySeconds = 0, lossFraction = 0, 
     disconnect,
     reconnect,
     close,
+    // The state channel's loss from the next send on (messages already in flight still arrive).
+    setLossFraction: (fraction) => { lossFraction = fraction; },
   };
 }

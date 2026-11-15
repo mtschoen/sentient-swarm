@@ -135,3 +135,17 @@ test('an unknown channel is rejected', () => {
   const pair = createMemoryTransportPair();
   assert.throws(() => pair.host.send('chat', Uint8Array.of(1)));
 });
+
+test('setLossFraction changes the state channel loss from the next send on', () => {
+  const pair = createMemoryTransportPair({ random: () => 0.5 });
+  const received = [];
+  pair.guest.onMessage((channel, bytes) => received.push([channel, bytes[0]]));
+  pair.host.send('state', Uint8Array.of(1));
+  pair.setLossFraction(1);
+  pair.host.send('state', Uint8Array.of(2));
+  pair.host.send('events', Uint8Array.of(3));
+  pair.setLossFraction(0);
+  pair.host.send('state', Uint8Array.of(4));
+  pair.advance(0);
+  assert.deepEqual(received, [['state', 1], ['events', 3], ['state', 4]]);
+});

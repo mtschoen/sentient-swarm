@@ -23,11 +23,18 @@
 // and decides each update; the host then queues the result and both machines run the match end the
 // same way (announce, then endMatch at the losing seat's swarm). A hives hold the host's updateHives
 // already ended is only queued.
+// Ship contact (Task 3.7): the host pairs its ships with its mirror of the guest's, kills its own,
+// removes the guest's from the mirror at once and suppresses them in the driver (so a snapshot that
+// still shows one alive cannot touch again), and names them to the guest in one contactKills event
+// per update; the guest kills each named ship of the named generation and never pairs ships. The
+// host then runs the hives; the guest does not (the host's state reaches it from Task 4.2).
 // Pings and pongs are answered and fed to the clock as they arrive; every other event is kept for
 // the update that drains it (receivedEvents). A message that does not decode is dropped.
 
 import { RunPhase } from '../game/run.js';
-import { hiveGrowth } from '../game/hive-seats.js';
+import { hiveGrowth, updateHives } from '../game/hive-seats.js';
+import { contactPairs } from '../game/ship-contact.js';
+import { SHIP_CONTACT_DISTANCE } from '../game/versus-seats.js';
 import { endMatch, losingSeat } from '../game/match-end.js';
 import { MatchReferee } from './match-referee.js';
 import { DENSITY_REFERENCE_CAPACITY } from '../sim/species.js';
@@ -137,6 +144,56 @@ export class OnlineGame {
     if (beam === null && !this.#remoteBeamShown) return;
     game.projectiles.setBeam(beam, remoteIndex, remoteIndex);
     this.#remoteBeamShown = beam !== null;
+  }
+
+  // The versus work of a Playing update after the flock step (versus-seats.js stepVersus online).
+  stepVersus(game, deltaSeconds) {
+    if (this.isGuest) {
+      this.#applyContactKills(game);
+      return;
+    }
+    this.#refereeContact(game);
+    updateHives(game, deltaSeconds);
+  }
+
+  // Host: touching ships die one for one (applyShipContact's guards, plus either seat's immunity).
+  #refereeContact(game) {
+    const { run } = game;
+    if (run.phase !== RunPhase.Playing || run.invulnerable || game.debugInvulnerableValue) return;
+    if (game.seats.some((seat) => game.debugInvulnerableSeats.has(seat.index))) return;
+    const local = game.seats[this.localSeatIndex];
+    const remote = game.seats[this.remoteSeatIndex];
+    if (local.invulnerableSeconds > 0 || remote.remoteInvulnerable) return;
+    const pairs = contactPairs(local.swarm.ships, remote.swarm.ships, SHIP_CONTACT_DISTANCE);
+    if (pairs.length === 0) return;
+    const kills = [];
+    for (const pair of pairs) {
+      const generation = remote.swarm.generationOf(pair.second);
+      const killed = [local.swarm.killShip(pair.first), remote.swarm.killShip(pair.second)];
+      killed.forEach((ship) => game.queueImpulse(ship.x, ship.y, SHIP_LOSS_IMPULSE_STRENGTH, false));
+      this.driver.suppress(pair.second, generation);
+      kills.push({ slot: pair.second, generation });
+    }
+    this.queueEvent({ type: 'contactKills', kills });
+    if (local.aliveCount === 0) this.reportWipe();
+  }
+
+  // Guest: the host's contact kills of this seat's ships, each only while its generation matches.
+  #applyContactKills(game) {
+    if (game.run.phase !== RunPhase.Playing) return;
+    const swarm = game.seats[this.localSeatIndex].swarm;
+    let killedAny = false;
+    for (const event of this.receivedEvents) {
+      if (event.type !== 'contactKills') continue;
+      for (const { slot, generation } of event.kills) {
+        if (swarm.generationOf(slot) !== (generation & 15)) continue;
+        const ship = swarm.killShip(slot);
+        if (ship === null) continue;
+        game.queueImpulse(ship.x, ship.y, SHIP_LOSS_IMPULSE_STRENGTH, false);
+        killedAny = true;
+      }
+    }
+    if (killedAny && swarm.aliveCount === 0) this.reportWipe();
   }
 
   // A scored stats frame grows the local seat by its own owned kills (hives: with its feeding
