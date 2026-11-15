@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bombRadiusForView } from '../../src/game/camera.js';
 import { SOLO_ZOOM_RANGES } from '../../src/game/solo-zoom.js';
-import { STEP, SWARM_WIPE_MASK, createGame, runFor, stats } from './game-harness.js';
+import { STEP, SWARM_WIPE_MASK, createGame, hitNow, runFor, stats } from './game-harness.js';
 
 const MINIMUM_REFERENCE = SOLO_ZOOM_RANGES.crowdReference[0];
 
@@ -214,4 +214,23 @@ test('the controller gets the unzoomed view, the pressure sampler the zoomed one
   // The far ring sits at 1.1 zoomed half-diagonals, so inside the unzoomed one.
   const zoomedRing = 1.1 * Math.hypot(game.viewSize.width, game.viewSize.height) / 2 / game.camera.zoom;
   assert.ok(Math.abs(widest - zoomedRing) < 0.5, `ring ${widest} vs ${zoomedRing}`);
+});
+
+test('a solo death and the game over while zoomed in at 1.4 ease out with no per-step jump', async () => {
+  const { game, simulation } = await startedGame();
+  for (let step = 0; step < 1200 && game.camera.zoom < 1.39; step += 1) game.update(STEP);
+  assert.ok(game.camera.zoom >= 1.39, `zoom ${game.camera.zoom}`);
+  hitNow(game, simulation);
+  const phases = new Set();
+  let previous = game.camera.zoom;
+  let largestStep = 0;
+  for (let step = 0; step < 60 * 20; step += 1) {
+    game.update(STEP);
+    phases.add(game.run.phase);
+    largestStep = Math.max(largestStep, Math.abs(game.camera.zoom - previous));
+    previous = game.camera.zoom;
+  }
+  assert.ok(phases.has('gameOver'), `phases ${[...phases]}`);
+  assert.ok(largestStep < 0.1, `largest per-step zoom change ${largestStep}`);
+  assert.ok(game.camera.zoom <= 1.001, `zoom ${game.camera.zoom}`);
 });
