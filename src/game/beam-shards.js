@@ -73,7 +73,10 @@ export class BeamShards {
     }
     this.#tally += newWaves;
     if (this.#tally < this.#waveInterval) return 0;
-    if (waiting + this.#count >= this.#needed) return 0;
+    // With no shard waiting a full count still yields one (only a lowered lab knob gets there: the
+    // shipped rules hold a full count only while beam time runs, which returned above), so the next
+    // collect completes it instead of the flow stopping for the run.
+    if (waiting > 0 && waiting + this.#count >= this.#needed) return 0;
     this.#tally = 0;
     return 1;
   }
@@ -108,10 +111,10 @@ export class BeamShards {
 //   gates: [{ x, y, radius }], shards: [{ x, y }], densityAt: ((x, y) => number) | null }
 export function placeShard(context, random = Math.random) {
   const { bounds, view, anchor, gates, shards, densityAt } = context;
-  const minX = bounds.minX + SHARD_WALL_INSET;
-  const maxX = bounds.maxX - SHARD_WALL_INSET;
-  const minY = bounds.minY + SHARD_WALL_INSET;
-  const maxY = bounds.maxY - SHARD_WALL_INSET;
+  const left = bounds.minX + SHARD_WALL_INSET;
+  const right = bounds.maxX - SHARD_WALL_INSET;
+  const top = bounds.minY + SHARD_WALL_INSET;
+  const bottom = bounds.maxY - SHARD_WALL_INSET;
   const reach = SHARD_MAXIMUM_REACH_HALF_DIAGONALS * Math.hypot(view.width, view.height) / 2;
 
   const offScreen = (x, y) => Math.abs(x - view.centerX) > view.width / 2 + SHARD_VIEW_MARGIN
@@ -129,8 +132,8 @@ export function placeShard(context, random = Math.random) {
   for (const accept of rules) {
     const candidates = [];
     for (let attempt = 0; attempt < SHARD_PLACEMENT_ATTEMPTS && candidates.length < wanted; attempt += 1) {
-      const x = minX + random() * (maxX - minX);
-      const y = minY + random() * (maxY - minY);
+      const x = left + random() * (right - left);
+      const y = top + random() * (bottom - top);
       if (accept(x, y)) candidates.push({ x, y });
     }
     if (candidates.length === 0) continue;
@@ -149,10 +152,10 @@ export function placeShard(context, random = Math.random) {
   }
 
   // Nothing is off screen (a view as large as the world): the inset corner farthest from the anchor.
-  let farthest = { x: minX, y: minY };
+  let farthest = { x: left, y: top };
   let farthestDistance = -1;
-  for (const x of [minX, maxX]) {
-    for (const y of [minY, maxY]) {
+  for (const x of [left, right]) {
+    for (const y of [top, bottom]) {
       const distance = Math.hypot(x - anchor.x, y - anchor.y);
       if (distance > farthestDistance) {
         farthestDistance = distance;

@@ -128,3 +128,13 @@ test('the beam pickups play nothing while the engine is locked', () => {
   locked.pickup('beamtime');
   assert.equal(locked.engine.context?.started?.length ?? 0, 0);
 });
+
+test('pickup with an inherited property name plays the weapon run, not a lookup through the prototype', () => {
+  const frequencies = (type) => {
+    const { context, effects } = unlockedEffects();
+    effects.pickup(type);
+    return context.started.filter((node) => node.kind === 'oscillator').map((node) => node.frequency.events[0].value);
+  };
+  assert.deepEqual(frequencies('constructor'), frequencies());
+  assert.deepEqual(frequencies('toString'), frequencies());
+});

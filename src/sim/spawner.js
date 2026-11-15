@@ -64,6 +64,13 @@ export const DEFAULT_BEAM_TIME_SURGE = 3;
 export const MAXIMUM_BEAM_TIME_SURGE = 6;
 export const BEAM_TIME_SURGE_CEILING_FRACTION = 0.4;
 
+// Throws RangeError unless the strength is a finite number in [1, MAXIMUM_BEAM_TIME_SURGE]; touches nothing.
+export function validateBeamTimeSurge(strength) {
+  if (!(Number.isFinite(strength) && strength >= 1 && strength <= MAXIMUM_BEAM_TIME_SURGE)) {
+    throw new RangeError(`SpawnPressure surge must lie in [1, ${MAXIMUM_BEAM_TIME_SURGE}], got ${strength}`);
+  }
+}
+
 // The spec's minimum spawn distance from the player, as a fraction of the arena width: the end of
 // the spawn distance ramp. The start may lie up to MAXIMUM_SPAWN_DISTANCE_FRACTION, where the
 // arena's far corners still leave room to place spawns around a centered player.
@@ -146,9 +153,7 @@ export class SpawnPressure {
 
   // Strength in [1, MAXIMUM_BEAM_TIME_SURGE]; throws RangeError otherwise.
   setSurge(strength) {
-    if (!(Number.isFinite(strength) && strength >= 1 && strength <= MAXIMUM_BEAM_TIME_SURGE)) {
-      throw new RangeError(`SpawnPressure surge must lie in [1, ${MAXIMUM_BEAM_TIME_SURGE}], got ${strength}`);
-    }
+    validateBeamTimeSurge(strength);
     this.surgeStrength = strength;
   }
 

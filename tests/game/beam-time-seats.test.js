@@ -327,3 +327,15 @@ test('a director reset re-bases the shard cadence: no skipped interval after a r
   game.update(STEP);
   assert.equal(shardsInWorld(game).length, 1);
 });
+
+test('setBeamTimeSurge validates without touching the live pressure, so a running surge is kept', async () => {
+  const { game } = await startedGame({ interval: 60 });
+  startBeamTime(game);
+  game.spawnPressure.setSurge(game.beamTimeSurge);
+  game.setBeamTimeSurge(4);
+  assert.equal(game.beamTimeSurge, 4);
+  assert.equal(game.spawnPressure.surge, 3, 'the live surge is untouched until the next step sets it');
+  assert.throws(() => game.setBeamTimeSurge(7), RangeError);
+  assert.equal(game.beamTimeSurge, 4);
+  assert.equal(game.spawnPressure.surge, 3);
+});

@@ -79,9 +79,8 @@
 // it; start() (the lab's Play) leaves it too.
 import { Projectiles } from './projectiles.js';
 import { PlayerSeat, SWARM_PICKUP_RADIUS } from './player-seat.js';
-import { DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND } from './weaponTypes.js';
+import { BEAM_SHARD_TYPE, DEFAULT_BEAM_TURN_REVOLUTIONS_PER_SECOND, MAXIMUM_BEAM_TURN_REVOLUTIONS_PER_SECOND } from './weaponTypes.js';
 import { PickupDirector } from './pickups.js';
-import { BEAM_SHARD_TYPE } from './weaponTypes.js';
 import { BeamTime } from './beam-time.js';
 import { BeamShards } from './beam-shards.js';
 import { BEAM_TIME_IMPULSE_STRENGTH, cancelBeamTime, collectShardFor, rebaseShardCadence, spawnShardsForWaves, tickBeamTime } from './beam-time-seats.js';
@@ -90,7 +89,7 @@ import { RunPhase, RunState } from './run.js';
 import { CapacitySwap } from './capacity-swap.js';
 import { TimeWarp } from './time-warp.js';
 import { INITIAL_SWARM_SHIPS, MAXIMUM_SWARM_SHIPS } from './player-swarm.js';
-import { DEFAULT_BEAM_TIME_SURGE, SpawnPressure } from '../sim/spawner.js';
+import { DEFAULT_BEAM_TIME_SURGE, SpawnPressure, validateBeamTimeSurge } from '../sim/spawner.js';
 import { createWatchPressure, moveWatchPoint } from './watch.js';
 import { SpawnDirector } from '../sim/spawn-director.js';
 import { MAXIMUM_PLAYER_SEATS, SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
@@ -705,8 +704,7 @@ export class Game {
 
   // The beam time spawn surge strength (the lab sets it); throws RangeError outside [1, MAXIMUM_BEAM_TIME_SURGE].
   setBeamTimeSurge(strength) {
-    this.spawnPressure.setSurge(strength);
-    this.spawnPressure.setSurge(1);
+    validateBeamTimeSurge(strength);
     this.beamTimeSurge = strength;
   }
 

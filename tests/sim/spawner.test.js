@@ -401,3 +401,10 @@ test('the per-frame cap still bounds a step under a surge', () => {
   const refill = pressure.update(100, statsWith(0, 2), EQUAL_SHARES, 2);
   assert.ok(total(refill) <= Math.floor(SURGE_CAPACITY / 60));
 });
+
+test('validateBeamTimeSurge accepts [1, maximum] and throws RangeError outside it, touching nothing', async () => {
+  const { validateBeamTimeSurge, MAXIMUM_BEAM_TIME_SURGE } = await import('../../src/sim/spawner.js');
+  assert.doesNotThrow(() => validateBeamTimeSurge(1));
+  assert.doesNotThrow(() => validateBeamTimeSurge(MAXIMUM_BEAM_TIME_SURGE));
+  for (const bad of [0.99, MAXIMUM_BEAM_TIME_SURGE + 0.01, Number.NaN, Infinity, '3']) assert.throws(() => validateBeamTimeSurge(bad), RangeError, String(bad));
+});

@@ -34,6 +34,8 @@ export class BeamTime {
 
   update(realDeltaSeconds) {
     if (!this.active) return false;
+    // A non-finite or negative delta makes no progress, so the window can still end on a later call.
+    if (!(Number.isFinite(realDeltaSeconds) && realDeltaSeconds > 0)) return false;
     this.remainingSeconds = Math.max(0, this.remainingSeconds - realDeltaSeconds);
     // Float residue below a microsecond counts as over, so the window ends on its last frame.
     if (this.remainingSeconds < 1e-6) {

@@ -156,7 +156,7 @@ export class EffectsSynth {
     const target = this.target();
     if (target === null) return;
     const { context, output, time } = target;
-    const notes = PICKUP_NOTES_BY_TYPE[type] ?? WEAPON_PICKUP_NOTES;
+    const notes = (Object.hasOwn(PICKUP_NOTES_BY_TYPE, type) ? PICKUP_NOTES_BY_TYPE[type] : WEAPON_PICKUP_NOTES);
     notes.forEach((note, index) => {
       playTone(context, output, time + index * 0.05, { type: 'square', fromFrequency: 440 * 2 ** ((note - 69) / 12), level: 0.22, decaySeconds: 0.1 });
     });

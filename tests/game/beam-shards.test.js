@@ -216,3 +216,17 @@ test('rebase restarts the wave count from the director reset and keeps the colle
   assert.equal(shards.onWaves(3, IDLE), 1, 'three fresh waves after a reset are one interval');
   assert.equal(shards.count, 1);
 });
+
+test('lowering needed to the current count with no shard waiting still yields one shard, and collecting it completes', () => {
+  const shards = new BeamShards({ needed: 6, waveInterval: 1 });
+  for (let index = 0; index < 5; index += 1) shards.collect();
+  shards.setNeeded(5);
+  assert.equal(shards.onWaves(1, IDLE), 1);
+  assert.equal(shards.collect().completed, true);
+});
+
+test('a waiting shard that already completes the count still holds the next one back', () => {
+  const shards = new BeamShards({ needed: 6, waveInterval: 1 });
+  for (let index = 0; index < 5; index += 1) shards.collect();
+  assert.equal(shards.onWaves(1, { waiting: 1, beamTimeActive: false }), 0);
+});

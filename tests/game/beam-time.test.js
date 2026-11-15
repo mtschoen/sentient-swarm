@@ -78,3 +78,15 @@ test('480 updates of 1/60 end within one update of 8 seconds', () => {
   assert.ok(endedAt >= 479 && endedAt <= 480, `ended at ${endedAt}`);
   assert.equal(beamTime.active, false);
 });
+
+test('a non-finite or negative delta makes no progress and the timer still ends later', () => {
+  const beamTime = new BeamTime();
+  beamTime.start();
+  for (const delta of [Number.NaN, Infinity, -Infinity, -3]) {
+    assert.equal(beamTime.update(delta), false, String(delta));
+    assert.equal(beamTime.active, true);
+    assert.equal(beamTime.fraction, 1);
+  }
+  assert.equal(beamTime.update(BEAM_TIME_SECONDS), true);
+  assert.equal(beamTime.active, false);
+});
