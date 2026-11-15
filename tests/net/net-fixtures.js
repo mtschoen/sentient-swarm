@@ -165,3 +165,28 @@ export function sequenceRandom(values) {
     return value;
   };
 }
+
+// A seat's SeatSnapshot with shipCount ships (slots 0 up) all at (x, 9) heading 0, no gunners, each
+// slot's generation from generations (0 when not named); the point at (x, 9) aiming along +x.
+export function seatAt({ sequence, matchSeconds, x, seat = 0, shipCount = 12, generations = {}, firing = false, weapons = {} }) {
+  const ships = [];
+  for (let slot = 0; slot < shipCount; slot += 1) {
+    ships.push({ slot, x, y: 9, heading: 0, gunnerIndex: null, generation: generations[slot] ?? 0 });
+  }
+  return {
+    type: 'snapshot',
+    sequence,
+    matchSeconds,
+    seat,
+    point: { x, y: 9, velocityX: 0, velocityY: 0 },
+    aim: { x: 1, y: 0 },
+    firing,
+    invulnerable: false,
+    weapons: { armed: 'base', tier: 0, charge: 0, railTurrets: 0, railTier: 0, ...weapons },
+    aliveCount: shipCount,
+    ships,
+    beam: null,
+    host: null,
+    hostState: null,
+  };
+}
