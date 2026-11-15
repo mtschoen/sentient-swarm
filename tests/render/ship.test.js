@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { BLINK_HERTZ, SHIP_SHADER_CONSTANTS, SHIP_TURN_RATE, SHIP_VIEW_BYTES, ShipRenderer, easeAngle, packShipView } from '../../src/render/ship.js';
-import { MAXIMUM_RAIL_TURRETS, RAIL_TURRET_SPACING_RADIANS, WEAPON_HUES } from '../../src/game/weaponTypes.js';
+import { WEAPON_HUES } from '../../src/game/weaponTypes.js';
 import { substituteConstants } from '../../src/gpu/shaders.js';
 import { Viewport } from '../../src/render/viewport.js';
 
@@ -67,23 +67,10 @@ test('the drawn thrust depends on velocity, not on how often it is sampled', () 
   assert.equal(idle.easedThrust(0, 0, 1 / 144), 0);
 });
 
-// Owner ruling R29: the rail turrets draw as ticks on the charge ring around the drawn facing.
-test('packShipView packs the turret count after the facing it rotates with, clamped to the cap', () => {
-  const view = packShipView({ ...base, railTurrets: 4 });
-  assert.equal(view[10], 1, 'the facing the ticks rotate with');
-  assert.deepEqual(Array.from(view.slice(16, 20)), [4, 0, 0, 0]);
-  assert.equal(packShipView(base)[16], 0);
-  assert.equal(packShipView({ ...base, railTurrets: 40 })[16], MAXIMUM_RAIL_TURRETS);
-});
-
-test('ship.wgsl takes the turret spacing, cap and rail hue from the game tables', () => {
+test('ship.wgsl has no turret constants left', () => {
   const source = readFileSync(new URL('../../src/render/shaders/ship.wgsl', import.meta.url), 'utf8');
-  assert.match(source, /__RAIL_TURRET_SPACING_RADIANS__/);
-  assert.deepEqual(SHIP_SHADER_CONSTANTS, {
-    RAIL_TURRET_SPACING_RADIANS: RAIL_TURRET_SPACING_RADIANS,
-    MAXIMUM_RAIL_TURRETS: MAXIMUM_RAIL_TURRETS,
-    RAIL_HUE: WEAPON_HUES.rail,
-  });
+  assert.doesNotMatch(source, /__RAIL_/);
+  assert.equal(Object.keys(SHIP_SHADER_CONSTANTS).some((name) => name.startsWith('RAIL_')), false);
   assert.doesNotThrow(() => substituteConstants(source, SHIP_SHADER_CONSTANTS));
 });
 

@@ -164,7 +164,18 @@ async function run() {
   const scene = {
     projectiles: createProjectiles(device),
     pickups: [{ x: 13, y: 4, type: 'scatter', fade: 1 }],
-    ship: { x: 3, y: 6, velocityX: 0, velocityY: 0, facing: 0.2, charge: 0.6, armed: 'pulse', invulnerable: false, railTurrets: 3 },
+    ship: { x: 3, y: 6, velocityX: 0, velocityY: 0, facing: 0.2, charge: 0.6, armed: 'pulse', invulnerable: false },
+    // Three rail gunners among a few ordinary ships so the gunner ring shows in the capture.
+    swarm: {
+      ships: [
+        { x: 2.4, y: 6, age: 1, heading: Math.PI, gunnerIndex: 0 },
+        { x: 2.7, y: 6.5, age: 1, heading: Math.PI * 0.8, gunnerIndex: 1 },
+        { x: 2.7, y: 5.5, age: 1, heading: Math.PI * 1.2, gunnerIndex: 2 },
+        { x: 3.4, y: 6.3, age: 1, heading: 0.2, gunnerIndex: -1 },
+        { x: 3.5, y: 5.7, age: 1, heading: 0.3, gunnerIndex: -1 },
+      ],
+      facing: 0.2, pointX: 3, pointY: 6, pointShown: false, armed: 'pulse', bodyColor: [1, 1, 1],
+    },
   };
   const qualities = [];
   for (const quality of Object.keys(BLOOM_DIVISORS)) {
