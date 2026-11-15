@@ -47,6 +47,14 @@ export class VersusMatch {
     return this.result;
   }
 
+  // Ends a running match with a result decided elsewhere (online: the host's referee); returns the
+  // result, or null once over.
+  announce(result) {
+    if (this.result !== null) return null;
+    this.result = result;
+    return this.result;
+  }
+
   // Ends a running match with winner (a seat) for holding every hive; returns the result, or null
   // once over.
   awardHold(winner) {

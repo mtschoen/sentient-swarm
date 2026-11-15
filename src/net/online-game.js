@@ -18,11 +18,18 @@
 // Growth and hits (Task 3.5): each machine grows and hits its own seat alone. Growth is scaled to
 // the reference capacity (onlineGrowth), so two machines on different presets grow alike; the
 // remote seat's mask is the other machine's to apply, and a local wipe is reported (reportWipe).
+// The match end (Task 3.6): online no machine judges the match from its own counts. The host's
+// MatchReferee takes both wipes (its own, and the guest's wiped event converted to host match time)
+// and decides each update; the host then queues the result and both machines run the match end the
+// same way (announce, then endMatch at the losing seat's swarm). A hives hold the host's updateHives
+// already ended is only queued.
 // Pings and pongs are answered and fed to the clock as they arrive; every other event is kept for
 // the update that drains it (receivedEvents). A message that does not decode is dropped.
 
 import { RunPhase } from '../game/run.js';
 import { hiveGrowth } from '../game/hive-seats.js';
+import { endMatch, losingSeat } from '../game/match-end.js';
+import { MatchReferee } from './match-referee.js';
 import { DENSITY_REFERENCE_CAPACITY } from '../sim/species.js';
 import { decodeEvent, encodeEvent } from './event-codec.js';
 import { INTERPOLATION_DELAY_SECONDS, PING_INTERVAL_SECONDS, SNAPSHOT_UPDATE_INTERVAL } from './protocol.js';
@@ -57,6 +64,8 @@ export class OnlineGame {
   #remoteNow = 0;
   #shotRelay = new ShotRelay();
   #remoteBeamShown = false;
+  // True once this match's result went to the guest (host).
+  #resultSent = false;
 
   constructor({ role, transport, clock }) {
     if (role !== OnlineRole.Host && role !== OnlineRole.Guest) throw new RangeError(`online role must be host or guest, got ${role}`);
@@ -64,6 +73,7 @@ export class OnlineGame {
     this.transport = transport;
     this.clock = clock;
     this.driver = new RemoteSeatDriver({ seatIndex: this.remoteSeatIndex });
+    this.referee = new MatchReferee();
     // The events drained in the latest update, pings and pongs excepted.
     this.receivedEvents = [];
     this.droppedMessages = 0;
@@ -82,6 +92,8 @@ export class OnlineGame {
     this.#attachedSeat = game.seats[this.remoteSeatIndex];
     this.#attachedSeat.remote = true;
     this.#mirroredInRun = false;
+    this.referee.reset();
+    this.#resultSent = false;
     game.online = this;
   }
 
@@ -139,12 +151,13 @@ export class OnlineGame {
   applyHits(game, stats) {
     const result = game.seats[this.localSeatIndex].applyHits(stats);
     result.killed.forEach((ship) => game.queueImpulse(ship.x, ship.y, SHIP_LOSS_IMPULSE_STRENGTH, false));
-    if (result.wiped) this.reportWipe(game);
+    if (result.wiped) this.reportWipe();
   }
 
   // The local seat lost its last ship: the guest tells the host, whose referee judges the match.
-  reportWipe(game) {
-    this.queueEvent({ type: 'wiped', seat: this.localSeatIndex, matchSeconds: this.clock.matchSeconds });
+  reportWipe() {
+    if (this.isHost) this.referee.reportWipe(this.localSeatIndex, this.clock.matchSeconds);
+    else this.queueEvent({ type: 'wiped', seat: this.localSeatIndex, matchSeconds: this.clock.matchSeconds });
   }
 
   applyRemoteSeats(game, deltaSeconds) {
@@ -169,6 +182,7 @@ export class OnlineGame {
     const shots = this.#shotRelay.record(this.#shotOwner, this.#shotSpawns, this.clock.matchSeconds);
     if (shots !== null) this.queueEvent(shots);
     this.#shotSpawns = [];
+    this.#settleMatch(game);
     if (phase === RunPhase.Ready) this.#updatesInRun = 0;
     else {
       this.#updatesInRun += 1;
@@ -181,6 +195,40 @@ export class OnlineGame {
       this.#lastPingSessionSeconds = sessionSeconds;
       this.transport.send(TransportChannel.Events, encodeEvent(this.clock.ping()));
     }
+  }
+
+  // Host: the guest's wipes to the referee, its decision, and the result out once. Guest: the
+  // host's result.
+  #settleMatch(game) {
+    const match = game.versusMatch;
+    if (match === null) return;
+    if (this.isGuest) {
+      for (const event of this.receivedEvents) {
+        if (event.type === 'result') this.#endMatch(game, { winner: event.winner, draw: event.draw, hives: event.hives });
+      }
+      return;
+    }
+    for (const event of this.receivedEvents) {
+      if (event.type === 'wiped' && event.seat === this.remoteSeatIndex) this.referee.reportWipe(event.seat, event.matchSeconds - this.clock.matchOffsetSeconds);
+    }
+    if (game.run.phase === RunPhase.Playing && !match.over) {
+      const result = this.referee.decide(this.clock.matchSeconds, (this.clock.roundTripSeconds ?? 0) / 2);
+      if (result !== null) this.#endMatch(game, result);
+    }
+    if (match.result !== null && !this.#resultSent) {
+      const { winner, draw } = match.result;
+      this.queueEvent({ type: 'result', winner, draw, hives: Boolean(match.result.hives) });
+      this.#resultSent = true;
+    }
+  }
+
+  // The match end both machines run: the result announced, then the run's one death at the losing
+  // seat's swarm (its point when it has no ships).
+  #endMatch(game, result) {
+    if (game.versusMatch.announce(result) === null) return;
+    const loser = game.seats[losingSeat(result)];
+    const point = loser.aliveCount > 0 ? loser.centroid : loser.point;
+    endMatch(game, result, game.simulation.frameSequence, { x: point.x, y: point.y });
   }
 
   #sendSnapshot(game) {
