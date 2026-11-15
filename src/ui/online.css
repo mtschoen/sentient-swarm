@@ -1,0 +1,13 @@
+/* The Host and Join panels (online-panel.js): same font, backdrop and focus look as the menus. Every control is laid out in both modes; a mode only toggles visibility and ghosting. */
+.online-panel { position: fixed; inset: 0; z-index: 22; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  padding: 1rem; background: rgba(5, 6, 10, 0.82); font-family: system-ui, sans-serif; font-weight: 800; text-transform: uppercase; color: #e8f6ff; }
+.online-panel[hidden] { display: none; }
+.online-panel-status { font-size: clamp(14px, 3.4vmin, 22px); letter-spacing: 0.08em; text-align: center; color: #19e6ff; text-shadow: 0 0 10px #19e6ff; min-height: 2.8em; }
+.online-panel-message { font-size: clamp(11px, 2.6vmin, 16px); letter-spacing: 0.06em; text-align: center; color: #ffe84a; min-height: 2.8em; max-width: min(560px, 86vw); }
+.online-panel-button { font: inherit; font-size: clamp(14px, 3.4vmin, 22px); padding: 10px 24px; min-width: min(260px, 70vw); color: #cfe8ff; background: rgba(25, 230, 255, 0.08);
+  border: 2px solid rgba(25, 230, 255, 0.45); border-radius: 6px; text-transform: uppercase; cursor: pointer; touch-action: manipulation; }
+.online-panel-button:hover, .online-panel-button:focus-visible { outline: 3px solid #ffe84a; outline-offset: 3px; box-shadow: 0 0 16px #ffe84a; }
+.online-panel-button.online-panel-disabled { opacity: 0.35; cursor: default; box-shadow: none; }
+.online-panel-box { font: 600 14px/1.3 monospace; width: min(560px, 86vw); box-sizing: border-box; padding: 8px; resize: none; color: #e8f6ff;
+  background: rgba(25, 230, 255, 0.06); border: 2px solid rgba(25, 230, 255, 0.45); border-radius: 6px; }
+.online-panel-box:focus { outline: 3px solid #ffe84a; outline-offset: 3px; }
