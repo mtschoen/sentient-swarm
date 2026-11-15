@@ -15,6 +15,7 @@ function createFakeDocument() {
       attributes: {},
       setAttribute(name, value) { this.attributes[name] = value; },
       append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = [...nodes]; },
       addEventListener(type, listener) { (listeners[type] ??= []).push(listener); },
       fire(type, event = {}) { (listeners[type] ?? []).forEach((listener) => listener(event)); },
     };
@@ -219,6 +220,76 @@ test('the warp bar sits under the turret readout, drains with the warp and hides
   assert.equal(fill.style.width, '25%');
   hud.update({ ...STATE });
   assert.equal(warp.style.visibility, 'hidden');
+});
+
+// Beam shards and beam time: a pips row that is always present, then a bar whose row is reserved.
+const pipsOf = (root) => find(root, 'hud-beam-pips').children;
+const filledCount = (root) => pipsOf(root).filter((pip) => pip.classList.contains('hud-pip-filled')).length;
+
+test('the beam pips row shows needed ghost pips at 0 shards and fills the first ones as shards arrive', () => {
+  const { hud, root } = setup();
+  const pips = find(root, 'hud-beam-pips');
+  assert.ok(pips, 'a pips row exists');
+  assert.equal(pips.attributes['aria-label'], 'Beam shards');
+  const panel = find(root, 'hud-right');
+  assert.equal(panel.children.indexOf(pips), panel.children.indexOf(find(root, 'hud-warp')) + 1, 'after the warp row');
+  assert.equal(panel.children.indexOf(find(root, 'hud-beam')), panel.children.indexOf(pips) + 1, 'the bar follows the pips');
+  hud.update({ ...STATE, beamShards: 0, beamShardsNeeded: 6 });
+  assert.equal(pipsOf(root).length, 6);
+  assert.ok(pipsOf(root).every((pip) => pip.classList.contains('hud-pip')));
+  assert.equal(filledCount(root), 0);
+  hud.update({ ...STATE, beamShards: 3, beamShardsNeeded: 6 });
+  assert.deepEqual(pipsOf(root).map((pip) => pip.classList.contains('hud-pip-filled')), [true, true, true, false, false, false]);
+  hud.update({ ...STATE, beamShards: 6, beamShardsNeeded: 6 });
+  assert.equal(filledCount(root), 6);
+  hud.update({ ...STATE, beamShards: 1, beamShardsNeeded: 6 });
+  assert.equal(filledCount(root), 1, 'pips can empty again');
+  assert.equal(pips.hidden, false);
+});
+
+test('the beam bar fills from beamTime and hides by visibility at 0 while its row and the pips stay', () => {
+  const { hud, root } = setup();
+  const bar = find(root, 'hud-beam');
+  assert.ok(bar, 'a beam bar exists');
+  assert.equal(find(bar, 'hud-beam-label').textContent, 'BEAM');
+  const fill = find(bar, 'hud-beam-fill');
+  hud.update({ ...STATE, beamShards: 6, beamShardsNeeded: 6, beamTime: 1 });
+  assert.equal(bar.style.visibility, 'visible');
+  assert.equal(fill.style.width, '100%');
+  hud.update({ ...STATE, beamShards: 6, beamShardsNeeded: 6, beamTime: 0.5 });
+  assert.equal(fill.style.width, '50%');
+  hud.update({ ...STATE, beamShards: 0, beamShardsNeeded: 6, beamTime: 0 });
+  assert.equal(bar.style.visibility, 'hidden');
+  assert.equal(bar.hidden, false, 'the row stays in the layout');
+  assert.equal(find(root, 'hud-beam-pips').hidden, false);
+  assert.equal(pipsOf(root).length, 6);
+});
+
+test('the pips rebuild only when the needed count changes', () => {
+  const { hud, root } = setup();
+  hud.update({ ...STATE, beamShards: 0, beamShardsNeeded: 6 });
+  const before = pipsOf(root)[0];
+  hud.update({ ...STATE, beamShards: 2, beamShardsNeeded: 6 });
+  assert.equal(pipsOf(root)[0], before, 'same span objects while needed is unchanged');
+  hud.update({ ...STATE, beamShards: 2, beamShardsNeeded: 4 });
+  assert.equal(pipsOf(root).length, 4);
+  assert.equal(filledCount(root), 2);
+});
+
+test('missing beam fields read as 0 shards of 6 and do not throw', () => {
+  const { hud, root } = setup();
+  hud.update({ ...STATE });
+  assert.equal(pipsOf(root).length, 6);
+  assert.equal(filledCount(root), 0);
+  assert.equal(find(root, 'hud-beam').style.visibility, 'hidden');
+});
+
+test('the pips row and the beam bar live in the right panel, which is excluded from touch sticks', () => {
+  const { root } = setup();
+  const panel = find(root, 'hud-right');
+  assert.ok(panel.children.includes(find(root, 'hud-beam-pips')));
+  assert.ok(panel.children.includes(find(root, 'hud-beam')));
+  assert.equal('data-touch-exclusive' in panel.attributes, true);
 });
 
 test('the time warp offer reads NEXT TIME WARP', () => {

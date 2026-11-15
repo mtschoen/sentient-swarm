@@ -22,3 +22,13 @@ test('the readout backdrop grows by box-shadow, so it moves no layout and a hidd
   assert.match(body, /box-shadow: 0 0 0 3px/);
   assert.doesNotMatch(body, /padding|margin|display|position/);
 });
+
+test('the beam rows reserve their height, keep the 13 px floor and have a compact top-mode variant', () => {
+  const source = css('hud.css');
+  assert.match(rule(source, '.hud-beam-pips'), /min-height: 16px/);
+  assert.match(rule(source, '.hud-beam'), /min-height: 16px/);
+  assert.match(rule(source, '.hud-beam'), /font-size: 13px/);
+  assert.doesNotMatch(rule(source, '.hud-beam-pips'), /display: none/);
+  assert.match(rule(source, '.hud-top .hud-beam'), /width: 70px/);
+  assert.match(rule(source, '.hud-top .hud-pip'), /width: 8px/);
+});

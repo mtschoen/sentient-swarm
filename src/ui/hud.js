@@ -22,6 +22,8 @@ export const MINIMUM_BAND_FONT_CSS_PIXELS = 13;
 const TOP_OPACITY = '0.6';
 const RESTART_GUARD_MILLISECONDS = 700;
 const BOMB_ICON = '●';
+// Pips shown before the game reports its count (the contract's BeamShards.needed default).
+const DEFAULT_BEAM_SHARDS_NEEDED = 6;
 
 // Font sizes (CSS px) that fit each band element's widest text into a band of this width.
 export function bandFontSizes(bandWidth) {
@@ -75,6 +77,12 @@ export function createHud(rootElement, {
   // by visibility at 0 so its row stays reserved, like the turrets.
   const warpFill = make('div', 'hud-warp-fill');
   const warp = row('hud-warp', [make('div', 'hud-warp-label', 'WARP'), row('hud-warp-track', [warpFill])]);
+  // Beam shards: a row of ghost pips that is always present (never hidden, never added or removed
+  // during play) and fills left to right; then the BEAM time bar, reserved by visibility like WARP.
+  const beamPips = make('div', 'hud-beam-pips');
+  beamPips.setAttribute('aria-label', 'Beam shards');
+  const beamFill = make('div', 'hud-beam-fill');
+  const beam = row('hud-beam', [make('div', 'hud-beam-label', 'BEAM'), row('hud-beam-track', [beamFill])]);
   const chargeFill = make('div', 'hud-charge-fill');
   const charge = row('hud-charge', [chargeFill]);
   const offer = make('div', 'hud-offer');
@@ -90,7 +98,7 @@ export function createHud(rootElement, {
   const seats = row('hud-seats', seatRows);
   seats.hidden = true;
   const leftPanel = row('hud-panel hud-left', [score, multiplier]);
-  const rightPanel = row('hud-panel hud-right', [weapon, turrets, warp, charge, offer, row('hud-icons', [lives, bombs]), seats]);
+  const rightPanel = row('hud-panel hud-right', [weapon, turrets, warp, beamPips, beam, charge, offer, row('hud-icons', [lives, bombs]), seats]);
 
   const finalScore = make('div', 'hud-final-score');
   const playAgain = make('button', 'hud-play-again', 'Play again');
@@ -126,6 +134,23 @@ export function createHud(rootElement, {
     lastText.set(element, text);
     element.textContent = text;
   };
+
+  // The pips rebuild only when the needed count changes (the lab alone changes it); a shard
+  // collected or spent only toggles a class, and only on the pips whose state changed.
+  let pips = [];
+  const setBeamPips = (collected, needed) => {
+    if (pips.length !== needed) {
+      pips = Array.from({ length: needed }, () => make('span', 'hud-pip'));
+      beamPips.replaceChildren(...pips);
+    }
+    pips.forEach((pip, index) => {
+      const filled = index < collected;
+      if (pip.classList.contains('hud-pip-filled') === filled) return;
+      if (filled) pip.classList.add('hud-pip-filled');
+      else pip.classList.remove('hud-pip-filled');
+    });
+  };
+  setBeamPips(0, DEFAULT_BEAM_SHARDS_NEEDED);
 
   let restartHandler = null;
   let shownAt = 0;
@@ -164,6 +189,11 @@ export function createHud(rootElement, {
       const warpLeft = Math.min(1, Math.max(0, state.timeWarp ?? 0));
       warp.style.visibility = warpLeft > 0 ? 'visible' : 'hidden';
       warpFill.style.width = `${Math.round(warpLeft * 100)}%`;
+      const needed = Math.max(0, Math.floor(state.beamShardsNeeded ?? DEFAULT_BEAM_SHARDS_NEEDED));
+      setBeamPips(Math.max(0, state.beamShards ?? 0), needed);
+      const beamLeft = Math.min(1, Math.max(0, state.beamTime ?? 0));
+      beam.style.visibility = beamLeft > 0 ? 'visible' : 'hidden';
+      beamFill.style.width = `${Math.round(beamLeft * 100)}%`;
       // Player swarm spike: lives is the swarm size (up to 256), shown as one icon and the count.
       setText(lives, `${LIFE_ICON} ${Math.max(0, state.lives ?? 0)}`);
       setText(bombs, BOMB_ICON.repeat(Math.max(0, state.bombs ?? 0)));

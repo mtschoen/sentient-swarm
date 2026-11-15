@@ -21,6 +21,17 @@
   color: #d8ccff; text-shadow: 0 0 6px #a68cff; }
 .hud-warp-track { flex: 1; height: 6px; border: 1px solid #d8ccff; border-radius: 3px; }
 .hud-warp-fill { height: 100%; background: #d8ccff; box-shadow: 0 0 8px #a68cff; }
+/* Beam shards (hud.js): a pips row that is always present (ghost rings when empty, filled with glow when
+   collected) and the BEAM time bar under it, its row reserved while hidden like WARP. Both ride the panel
+   backdrop; the 13 px floor and fixed min-heights keep every row in place. */
+.hud-beam-pips { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; min-height: 16px;
+  max-width: 100%; box-sizing: border-box; padding: 0 2px; }
+.hud-pip { width: 10px; height: 10px; box-sizing: border-box; border: 2px solid hsl(331, 90%, 66%); border-radius: 50%; opacity: 0.55; }
+.hud-pip-filled { background: hsl(331, 90%, 66%); opacity: 1; box-shadow: 0 0 8px hsl(331, 90%, 66%); }
+.hud-beam { display: flex; align-items: center; gap: 6px; width: 100%; max-width: 120px; min-height: 16px; font-size: 13px; line-height: 16px;
+  color: hsl(331, 90%, 66%); text-shadow: 0 0 6px hsl(331, 90%, 66%); }
+.hud-beam-track { flex: 1; height: 6px; border: 1px solid hsl(331, 90%, 66%); border-radius: 3px; }
+.hud-beam-fill { height: 100%; background: hsl(331, 90%, 66%); box-shadow: 0 0 8px hsl(331, 90%, 66%); }
 .hud-offer { font-size: 12px; opacity: 0.8; color: #7dff6b; text-shadow: 0 0 6px #7dff6b; }
 .hud-charge { width: 100%; max-width: 120px; height: 6px; border: 1px solid #ffe84a; border-radius: 3px; }
 .hud-charge-fill { height: 100%; background: #ffe84a; box-shadow: 0 0 8px #ffe84a; }
@@ -55,6 +66,9 @@
 .hud-top .hud-offer { display: none; }
 .hud-top .hud-charge { width: 40px; align-self: center; }
 .hud-top .hud-warp { width: 70px; align-self: center; }
+.hud-top .hud-beam { width: 70px; align-self: center; }
+.hud-top .hud-beam-pips { gap: 3px; flex-wrap: nowrap; align-self: center; }
+.hud-top .hud-pip { width: 8px; height: 8px; border-width: 1px; }
 .hud-top .hud-icons { flex-direction: row; gap: 6px; font-size: 12px; }
 
 .hud-gameover { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
