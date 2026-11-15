@@ -6,7 +6,8 @@
 // into a ball while pressure 0 lets it collapse, (e) the neighbor cap bounds the fine pass: one
 // dense-cell step matches a CPU port of the capped sampling and differs from the uncapped one, (f) the default five-species mix does not pack into a clump around the player at full capacity, at a sparse
 // population and at the initial ramp, (g) with a second player point, each of two Chaser groups seeks the
-// nearer point.
+// nearer point, (h) a seek range: groups inside it close on the nearest seek point as without a range, groups
+// beyond it do not, for one and two seek points.
 import { createGpuContext } from '/src/gpu/device.js';
 import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
@@ -149,6 +150,8 @@ class Harness {
     this.speciesBuffer = createStorageBuffer(this.device, packSpeciesTable(defaultSpecies(), defaultMatrix()).byteLength, 'steer-check-species');
     // [x, y] of a second seek point, set before initialize(), or null for one player.
     this.secondPlayerPosition = null;
+    // Seek range in world units, set before initialize(); 0 is unlimited.
+    this.seekRange = 0;
   }
 
   async initialize() {
@@ -157,6 +160,7 @@ class Harness {
       dt: STEP_SECONDS,
       playerPosition: PLAYER,
       secondPlayerPosition: this.secondPlayerPosition,
+      seekRange: this.seekRange,
       worldBounds: ARENA_BOUNDS,
       neighborRadius: NEIGHBOR_RADIUS,
       gridColumns: this.dimensions.columns,
@@ -295,6 +299,69 @@ async function checkNearestPlayer(gpu, common) {
     pass: meanA < 4.7 && meanB > 11.3,
     detail: `nearest player: group A mean x ${meanA.toFixed(2)} (need < 4.7), group B mean x ${meanB.toFixed(2)} (need > 11.3)`,
   };
+}
+
+// (h) Seek range. Chaser groups in discs of radius 0.5, 60 steps, 200 Chasers each. A group's closure is its
+// mean distance to the nearest seek point before minus after. Each scenario runs once with seekRange 0 (the
+// control: every group closes, so the check can see seek) and once ranged.
+const RANGE_GROUP_SIZE = 200;
+const RANGE_DISC_RADIUS = 0.5;
+const RANGE_STEPS = 60;
+// The ranged far groups may close by at most this fraction of their control closure.
+const RANGE_FAR_CLOSURE_FRACTION = 0.25;
+// The ranged near groups must close at least this fraction of their control closure.
+const RANGE_NEAR_CLOSURE_FRACTION = 0.8;
+// A control far group must close by at least this many world units.
+const RANGE_CONTROL_MINIMUM_CLOSURE = 0.5;
+
+async function seekRangeClosures({ gpu, common, seekRange, points, centers, seed }) {
+  const random = randomSource(seed);
+  const positions = centers.flatMap((center) => Array.from({ length: RANGE_GROUP_SIZE }, () => {
+    const angle = random() * Math.PI * 2;
+    const radius = RANGE_DISC_RADIUS * Math.sqrt(random());
+    return [center[0] + radius * Math.cos(angle), center[1] + radius * Math.sin(angle)];
+  }));
+  const nearest = (x, y) => Math.min(...points.map(([pointX, pointY]) => Math.hypot(x - pointX, y - pointY)));
+  const harness = new Harness(gpu, common, positions.length);
+  harness.seekRange = seekRange;
+  harness.secondPlayerPosition = points[1] ?? null;
+  await harness.initialize();
+  harness.device.queue.writeBuffer(harness.paramsBuffer, 8, new Float32Array(points[0]));
+  harness.seed(packAgents(positions, CHASER, random), defaultSpecies());
+  const before = centers.map((_, group) => mean(positions.slice(group * RANGE_GROUP_SIZE, (group + 1) * RANGE_GROUP_SIZE).map(([x, y]) => nearest(x, y))));
+  await harness.run(RANGE_STEPS);
+  const agents = await harness.readAgents();
+  const failure = validityFailure(agents);
+  const after = centers.map((_, group) => mean(agents.slice(group * RANGE_GROUP_SIZE, (group + 1) * RANGE_GROUP_SIZE).map((agent) => nearest(agent.x, agent.y))));
+  return { failure, closures: before.map((distance, group) => distance - after[group]) };
+}
+
+async function checkSeekRange(gpu, common) {
+  const details = [];
+  let pass = true;
+  const verdict = (condition, text) => { pass = pass && condition; details.push(`${condition ? 'ok' : 'FAIL'} ${text}`); };
+  const format = (closures) => closures.map((closure) => closure.toFixed(2)).join('/');
+  // One seek point (8, 4.5): near disc at distance 3 (inside 0.6 * 6 = 3.6), far disc at 7.16 (nearest member 6.66, past 6).
+  const single = { points: [PLAYER], centers: [[11, 4.5], [1.5, 7.5]], seed: 11 };
+  const singleControl = await seekRangeClosures({ gpu, common, ...single, seekRange: 0 });
+  const singleRanged = await seekRangeClosures({ gpu, common, ...single, seekRange: 6 });
+  verdict(singleControl.failure === null && singleRanged.failure === null, `one point valid (${singleControl.failure ?? singleRanged.failure ?? 'all agents valid'})`);
+  verdict(singleControl.closures[1] >= RANGE_CONTROL_MINIMUM_CLOSURE, `one point control far closure ${format(singleControl.closures)} (far need >= ${RANGE_CONTROL_MINIMUM_CLOSURE})`);
+  verdict(singleRanged.closures[0] >= RANGE_NEAR_CLOSURE_FRACTION * singleControl.closures[0], `one point ranged near ${format(singleRanged.closures)} (near need >= ${RANGE_NEAR_CLOSURE_FRACTION} of control)`);
+  verdict(singleRanged.closures[1] <= RANGE_FAR_CLOSURE_FRACTION * singleControl.closures[1], `one point ranged far (need <= ${RANGE_FAR_CLOSURE_FRACTION} of control)`);
+  // Two seek points (3, 4.5) and (13, 4.5), range 3.5: two discs 2 from their nearest point (inside 2.1), one at (8, 8.3), 6.3 from both.
+  const double = { points: [[3, 4.5], [13, 4.5]], centers: [[5, 4.5], [11, 4.5], [8, 8.3]], seed: 13 };
+  const doubleControl = await seekRangeClosures({ gpu, common, ...double, seekRange: 0 });
+  const doubleRanged = await seekRangeClosures({ gpu, common, ...double, seekRange: 3.5 });
+  verdict(doubleControl.failure === null && doubleRanged.failure === null, `two points valid (${doubleControl.failure ?? doubleRanged.failure ?? 'all agents valid'})`);
+  verdict(doubleControl.closures[2] >= RANGE_CONTROL_MINIMUM_CLOSURE, `two points control far closure ${format(doubleControl.closures)} (far need >= ${RANGE_CONTROL_MINIMUM_CLOSURE})`);
+  verdict(doubleRanged.closures[0] >= RANGE_NEAR_CLOSURE_FRACTION * doubleControl.closures[0]
+    && doubleRanged.closures[1] >= RANGE_NEAR_CLOSURE_FRACTION * doubleControl.closures[1], `two points ranged near groups ${format(doubleRanged.closures)}`);
+  verdict(doubleRanged.closures[2] <= RANGE_FAR_CLOSURE_FRACTION * doubleControl.closures[2], `two points ranged far group (need <= ${RANGE_FAR_CLOSURE_FRACTION} of control)`);
+  // A tiny range switches seek off almost everywhere; nothing may go non-finite or leave the arena.
+  const tiny = await seekRangeClosures({ gpu, common, ...single, seekRange: 0.5 });
+  verdict(tiny.failure === null, `tiny range valid (${tiny.failure ?? 'all agents valid'})`);
+  return { pass, detail: `seek range: ${details.join(', ')}` };
 }
 
 // Alternates agentsIn and agentsOut every step with no copy back, as a frame loop would.
@@ -594,7 +661,7 @@ async function runCheck() {
   gpu.device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
   const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
   const results = [];
-  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNearestPlayer, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp, infoNoClumpSparse, infoNoClumpInitialRamp]) {
+  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNearestPlayer, checkSeekRange, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp, infoNoClumpSparse, infoNoClumpInitialRamp]) {
     results.push(await check(gpu, common));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${results.map((result) => result.detail).join('; ')}` };
   }
