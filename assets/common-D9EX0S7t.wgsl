@@ -50,7 +50,7 @@ struct Agent {
   hueJitter: f32,
 }
 
-// Uniform layout (byte offsets), total 256 bytes:
+// Uniform layout (byte offsets), total 272 bytes:
 //   0 dt                 f32
 //   4 time               f32
 //   8 playerPosition     vec2f
@@ -88,6 +88,7 @@ struct Agent {
 // 232 coarseFieldPressure u32 (1: steer applies the coarse-field pressure term, 0: it does not)
 // 236 projectileDt       f32 (the projectile step's dt: unscaled real time during a time warp)
 // 240 worldBounds        vec4f (the playable rectangle inside the world: minX, minY, maxX, maxY)
+// 256 seekRange          f32 (seek fades to zero at this distance from the nearest seek point; 0 is unlimited)
 struct SimParams {
   dt: f32,
   time: f32,
@@ -126,6 +127,7 @@ struct SimParams {
   coarseFieldPressure: u32,
   projectileDt: f32,
   worldBounds: vec4f,
+  seekRange: f32,
 }
 
 // The player the neutral swarm seeks and spawns keep away from: the nearer of the one or two live
