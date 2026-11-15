@@ -6,6 +6,8 @@ import { PICKUP_TYPE_NAMES } from './weaponTypes.js';
 
 // Hives (stage 3, hives.js) is versus plus three capturable hives; everything versus does applies.
 export const GameMode = Object.freeze({ Coop: 'coop', Versus: 'versus', Hives: 'hives' });
+// The modes an online match can play, in wire order (net/protocol.js re-exports it).
+export const ONLINE_MODES = Object.freeze([GameMode.Hives, GameMode.Versus]);
 const MODES = new Set(Object.values(GameMode));
 
 // Throws RangeError unless mode is a GameMode value.

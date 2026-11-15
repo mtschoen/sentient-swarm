@@ -47,6 +47,50 @@ function titleWithMode() {
   return { control, menu, calls };
 }
 
+test('online the host mode starts on hives and cycles versus and hives only', () => {
+  const choice = new ModeChoice();
+  choice.setOnline('host');
+  assert.equal(choice.mode, 'hives');
+  assert.equal(choice.toggle(), true);
+  assert.equal(choice.mode, 'versus');
+  choice.toggle();
+  assert.equal(choice.mode, 'hives');
+  assert.deepEqual(modeItemView(choice), { label: 'MODE: HIVES', enabled: true });
+});
+
+test('the guest sees the host mode read-only', () => {
+  const choice = new ModeChoice();
+  choice.setOnline('guest');
+  choice.setRemoteMode('versus');
+  assert.deepEqual(modeItemView(choice), { label: 'MODE: VERSUS', enabled: false });
+  assert.equal(choice.toggle(), false);
+  assert.equal(choice.mode, 'versus');
+});
+
+test('leaving online returns the couch mode choice', () => {
+  const choice = new ModeChoice();
+  choice.setOnline('host');
+  choice.setOnline(null);
+  assert.deepEqual(modeItemView(choice), { label: 'MODE: SOLO', enabled: false });
+  assert.equal(choice.mode, 'coop');
+});
+
+test('the mode control ignores the per-frame joined update while an online role holds it, and restores after', () => {
+  const { control, menu } = titleWithMode();
+  control.setOnline('host');
+  control.update({ joined: false });
+  assert.equal(control.mode, 'hives');
+  assert.equal(modeButton(menu).textContent, 'MODE: HIVES');
+  control.setOnline('guest');
+  control.setRemoteMode('versus');
+  control.update({ joined: false });
+  assert.equal(modeButton(menu).textContent, 'MODE: VERSUS');
+  control.setOnline(null);
+  control.update({ joined: false });
+  assert.equal(modeButton(menu).textContent, 'MODE: SOLO');
+  assert.equal(control.mode, 'coop');
+});
+
 test('ModeChoice is co-op until player 2 joins, toggles only then, and resets when player 2 leaves', () => {
   const choice = new ModeChoice();
   assert.equal(choice.mode, 'coop');

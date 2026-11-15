@@ -151,6 +151,26 @@ test('the title menu links to the source repository in a new tab, and following 
   assert.equal(allButtons(menu.element).length, 3, 'the link is outside the focus list');
 });
 
+test('the title keeps its button count with and without a session', () => {
+  const noop = () => {};
+  const menu = createMenu({
+    onStart: noop, onLab: noop, onSettings: noop,
+    modeItem: { id: 'mode', label: 'MODE: SOLO', enabled: false, action: noop },
+    onlineItem: { id: 'online', label: 'ONLINE', action: noop },
+    documentObject: createFakeDocument(),
+  });
+  assert.equal(allButtons(menu.element).length, 5);
+  for (const view of [
+    { online: 'DISCONNECT', play: 'WAITING FOR THE HOST TO START', playEnabled: false, labEnabled: false },
+    { online: 'ONLINE', play: 'Play', playEnabled: true, labEnabled: true },
+  ]) {
+    menu.setItem('play', { label: view.play, enabled: view.playEnabled });
+    menu.setItem('lab', { label: 'Lab', enabled: view.labEnabled });
+    menu.setItem('online', { label: view.online, enabled: true });
+    assert.equal(allButtons(menu.element).length, 5);
+  }
+});
+
 test('the pause menu carries no source link', () => {
   const menu = createPauseMenu({ onResume() {}, onSettings() {}, onRestart() {}, onQuit() {}, documentObject: createFakeDocument() });
   assert.equal(menu.element.children.filter((node) => node.tagName === 'A').length, 0);

@@ -1,4 +1,4 @@
-import { GameMode } from '../game/versus.js';
+import { ONLINE_MODES } from '../game/versus.js';
 import { WEAPON_TYPE_NAMES } from '../game/weaponTypes.js';
 
 export const PROTOCOL_VERSION = 1;
@@ -9,7 +9,7 @@ export const MESSAGE_SNAPSHOT = 1;
 export const FIRST_EVENT_CODE = 16;
 
 export const WEAPON_KIND_CODES = Object.freeze(['base', ...WEAPON_TYPE_NAMES]);
-export const ONLINE_MODES = Object.freeze([GameMode.Hives, GameMode.Versus]);
+export { ONLINE_MODES };
 
 // Fixed updates between snapshots (30 per second) and between host-state blocks (10 per second).
 export const SNAPSHOT_UPDATE_INTERVAL = 2;

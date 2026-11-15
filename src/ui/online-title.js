@@ -1,0 +1,53 @@
+// The connected title: what the title menu shows once an online session exists. onlineTitleView is the
+// pure mapping from the session to the ONLINE item's label, the status line and the Play and Lab items;
+// createOnlineTitle draws the one status line in seat 2's color, always laid out (visibility only).
+import { SEAT_COLORS } from '../game/seat-colors.js';
+
+export const ONLINE_ITEM_ID = 'online';
+
+function latencyText(roundTripMilliseconds) {
+  return Number.isFinite(roundTripMilliseconds) ? ` (${Math.round(roundTripMilliseconds)} MS)` : '';
+}
+
+export function onlineTitleView({ connected, role, roundTripMilliseconds = null, waitingFor = null }) {
+  if (!connected) return { onlineLabel: 'ONLINE', statusLine: '', playLabel: 'Play', playEnabled: true, labEnabled: true };
+  if (role === 'host') {
+    return {
+      onlineLabel: 'DISCONNECT',
+      statusLine: `PLAYER 2 CONNECTED ONLINE${latencyText(roundTripMilliseconds)}`,
+      playLabel: waitingFor === null ? 'Play' : 'WAITING FOR PLAYER 2 TO LOAD',
+      playEnabled: waitingFor === null,
+      labEnabled: false,
+    };
+  }
+  return {
+    onlineLabel: 'DISCONNECT',
+    statusLine: `CONNECTED TO PLAYER 1 ONLINE${latencyText(roundTripMilliseconds)}`,
+    playLabel: 'WAITING FOR THE HOST TO START',
+    playEnabled: false,
+    labEnabled: false,
+  };
+}
+
+export function createOnlineTitle(menuElement, { documentObject = document } = {}) {
+  const element = documentObject.createElement('div');
+  element.className = 'online-status';
+  element.style.color = SEAT_COLORS[1].css;
+  element.style.visibility = 'hidden';
+  menuElement.append(element);
+  let lastText = null;
+  let lastVisible = false;
+  return {
+    element,
+    update(view, { visible }) {
+      if (view.statusLine !== lastText) {
+        element.textContent = view.statusLine;
+        lastText = view.statusLine;
+      }
+      if (visible !== lastVisible) {
+        element.style.visibility = visible ? 'visible' : 'hidden';
+        lastVisible = visible;
+      }
+    },
+  };
+}

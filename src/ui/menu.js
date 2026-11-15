@@ -138,16 +138,18 @@ function buildMenu({ documentObject, className, title, items, footerLink = null,
   };
 }
 
-// modeItem (optional): { id, label, enabled, action } for the mode choice, placed beside Play.
-export function createMenu({ onStart, onLab, onSettings, modeItem = null, documentObject = document }) {
+// modeItem (optional): { id, label, enabled, action } for the mode choice, placed beside Play; onlineItem (optional, the same shape, id 'online')
+// is the ONLINE / DISCONNECT item after it. Play ('play') and Lab ('lab') carry ids so online-title.js can relabel and ghost them.
+export function createMenu({ onStart, onLab, onSettings, modeItem = null, onlineItem = null, documentObject = document }) {
   return buildMenu({
     documentObject,
     className: 'menu-title-screen',
     title: 'SENTIENT SWARM',
     items: [
-      { label: 'Play', primary: true, action: () => onStart() },
+      { id: 'play', label: 'Play', primary: true, action: () => onStart() },
       ...(modeItem === null ? [] : [{ ...modeItem, className: 'menu-mode' }]),
-      { label: 'Lab', action: () => onLab() },
+      ...(onlineItem === null ? [] : [{ ...onlineItem, className: 'menu-online' }]),
+      { id: 'lab', label: 'Lab', action: () => onLab() },
       { label: 'Settings', action: () => onSettings() },
     ],
     footerLink: { label: 'Source on GitHub', url: SOURCE_URL },

@@ -42,3 +42,10 @@
 .pad-status-pressed { opacity: 1; text-shadow: 0 0 8px currentColor; }
 .pad-status-pressed::before { opacity: 1; }
 .pad-status[hidden] { display: none; }
+
+/* The ONLINE item (online-title.js) is an ordinary list item. The list has a fixed width and Play a two-line height so the long connected labels (WAITING FOR PLAYER 2 TO LOAD) wrap in place instead of resizing the list. */
+.menu-title-screen .menu-list { width: min(300px, 80vw); }
+.menu-title-screen .menu-item { white-space: normal; line-height: 1.15; }
+.menu-title-screen .menu-primary { display: flex; align-items: center; justify-content: center; min-height: 3.2em; font-size: clamp(16px, 4.6vmin, 30px); }
+/* The connected status line: seat 2 color (set in script), above the source link, always laid out, never taking a touch. */
+.online-status { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 48px); transform: translateX(-50%); width: min(560px, 86vw); min-height: 1.4em; text-align: center; font-size: clamp(11px, 2.4vmin, 15px); font-weight: 700; letter-spacing: 0.08em; line-height: 1.4; text-shadow: 0 0 10px currentColor; pointer-events: none; }
