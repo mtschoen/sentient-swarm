@@ -3,7 +3,9 @@
 // inside the world bounds and inside a view-sized rectangle centered on the player, so it appears
 // near enough to reach; the annulus radii (minimumDistance and maximumDistance, for the 16:9 view)
 // scale with the view's half-diagonal (setView), so a narrow window places them closer.
-import { PICKUP_TYPE_NAMES } from './weaponTypes.js';
+// Beam shards are not placed here: `beam-shards.js` decides where and when, and `spawnShard` only
+// stores the result as a persistent pickup that never ages.
+import { BEAM_SHARD_TYPE, PICKUP_TYPE_NAMES } from './weaponTypes.js';
 import { VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS } from '../sim/layout.js';
 
 const PLACEMENT_ATTEMPTS = 16;
@@ -62,6 +64,15 @@ export class PickupDirector {
     this.pityTimer = 0;
   }
 
+  // A beam shard waits where it was placed until collected.
+  spawnShard(x, y) {
+    this.pickups.push({ x, y, type: BEAM_SHARD_TYPE, age: 0, fade: 1, persistent: true });
+  }
+
+  get waitingShards() {
+    return this.pickups.filter((pickup) => pickup.type === BEAM_SHARD_TYPE).length;
+  }
+
   get offeredType() {
     return PICKUP_TYPE_NAMES[this.rotationIndex];
   }
@@ -76,10 +87,11 @@ export class PickupDirector {
     }
 
     for (const pickup of this.pickups) {
+      if (pickup.persistent) continue;
       pickup.age += deltaSeconds;
       pickup.fade = Math.max(0, 1 - pickup.age / this.fadeSeconds);
     }
-    this.pickups = this.pickups.filter((pickup) => pickup.age < this.fadeSeconds);
+    this.pickups = this.pickups.filter((pickup) => pickup.persistent || pickup.age < this.fadeSeconds);
 
     if (onBaseGun) {
       this.pityTimer += deltaSeconds;

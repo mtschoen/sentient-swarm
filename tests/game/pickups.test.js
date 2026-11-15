@@ -314,3 +314,47 @@ test('setView scales the annulus by the view half-diagonal and narrows the place
   assert.equal(director.minimumDistance, 3);
   assert.equal(director.maximumDistance, 5);
 });
+
+test('a beam shard is persistent: it never ages or fades while an ordinary pickup vanishes', () => {
+  const director = makeDirector();
+  director.spawnShard(3, 4);
+  director.update(STEP, { playerX: 8, playerY: 4.5, onBaseGun: false, milestone: true, phasePlaying: true });
+  assert.equal(director.pickups.length, 2);
+  run(director, 60, { onBaseGun: false });
+  assert.equal(director.pickups.length, 1);
+  assert.deepEqual(director.pickups[0], { x: 3, y: 4, type: 'beamshard', age: 0, fade: 1, persistent: true });
+  assert.equal(director.waitingShards, 1);
+});
+
+test('collecting a beam shard returns its type and empties waitingShards', () => {
+  const director = makeDirector();
+  director.spawnShard(3, 4);
+  assert.equal(director.collect(3.1, 4), 'beamshard');
+  assert.equal(director.waitingShards, 0);
+});
+
+test('reset clears beam shards', () => {
+  const director = makeDirector();
+  director.spawnShard(3, 4);
+  director.reset();
+  assert.equal(director.waitingShards, 0);
+  assert.equal(director.pickups.length, 0);
+});
+
+test('a hundred spawns across the rotation, milestones and pity never yield the beam or a shard', () => {
+  const director = new PickupDirector({ random: sequenceRandom(), fadeSeconds: 1e9 });
+  for (let index = 0; index < 100; index += 1) {
+    director.update(STEP, { ...FAR_FROM_EVERYTHING, onBaseGun: index % 2 === 0, milestone: index % 3 === 0, phasePlaying: true });
+    director.spawn(8, 4.5, null, { pity: index % 2 === 0 });
+    director.rotationIndex = (director.rotationIndex + 1) % 5;
+  }
+  assert.ok(director.pickups.length >= 100);
+  assert.equal(director.pickups.some((pickup) => pickup.type === 'beam' || pickup.type === 'beamshard'), false);
+});
+
+test('a shard is untouched outside the playing phase', () => {
+  const director = makeDirector();
+  director.spawnShard(3, 4);
+  for (let step = 0; step < 600; step += 1) director.update(STEP, { ...FAR_FROM_EVERYTHING, phasePlaying: false });
+  assert.deepEqual(director.pickups, [{ x: 3, y: 4, type: 'beamshard', age: 0, fade: 1, persistent: true }]);
+});
