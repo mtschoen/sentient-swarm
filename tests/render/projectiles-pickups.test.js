@@ -16,7 +16,7 @@ test('packSwarmView writes the header and one vec4 per ship, capped at the swarm
   const { floats, count } = packSwarmView({ viewport, time: 1, ships, facing: 0.25, pointX: 8, pointY: 4.5, pointShown: true, armed: 'pulse' });
   assert.equal(count, 256);
   assert.equal(floats.byteLength, SWARM_VIEW_BYTES);
-  assert.deepEqual(Array.from(floats.slice(8, 20)), [0.25, 8, 4.5, 1, Math.fround(WEAPON_HUES.pulse), 256, Math.fround(SWARM_SHIP_SIZE), 0, 1, 1, 1, 0]);
+  assert.deepEqual(Array.from(floats.slice(8, 20)), [0.25, 8, 4.5, 1, Math.fround(WEAPON_HUES.pulse), 256, Math.fround(SWARM_SHIP_SIZE), Math.fround(WEAPON_HUES.rail), 1, 1, 1, 0]);
   assert.deepEqual(Array.from(floats.slice(20 + 4 * 255, 20 + 4 * 256)), [255, 1, 0.5, 0.75]);
 });
 
