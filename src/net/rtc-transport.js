@@ -1,0 +1,146 @@
+// The WebRTC transport: one RTCPeerConnection with two pre-negotiated data channels, behind the endpoint interface of transport.js.
+// Signalling is copy and paste, so ICE is not trickled: each description is used once gathering completes (or after the cap).
+
+import { TransportState, TransportChannel, validateChannel } from './transport.js';
+import { ICE_SERVERS, ICE_GATHER_CAP_SECONDS } from './ice-configuration.js';
+
+export const STATE_CHANNEL_OPTIONS = Object.freeze({ ordered: false, maxRetransmits: 0, negotiated: true, id: 0 });
+export const EVENTS_CHANNEL_OPTIONS = Object.freeze({ ordered: true, negotiated: true, id: 1 });
+export const CLOSE_FLUSH_CAP_SECONDS = 1;
+
+export function createRtcConnection({
+  PeerConnection,
+  iceServers = ICE_SERVERS,
+  gatherCapSeconds = ICE_GATHER_CAP_SECONDS,
+  setTimer,
+  clearTimer,
+}) {
+  const peer = new PeerConnection({ iceServers: [...iceServers] });
+  const channels = {
+    [TransportChannel.State]: peer.createDataChannel('state', { ...STATE_CHANNEL_OPTIONS }),
+    [TransportChannel.Events]: peer.createDataChannel('events', { ...EVENTS_CHANNEL_OPTIONS }),
+  };
+  const messageHandlers = [];
+  const stateHandlers = [];
+  const pendingEvents = [];
+  let state = TransportState.Connecting;
+  let answered = false;
+  let closing = false;
+
+  function setState(next) {
+    if (state === next || state === TransportState.Closed) return;
+    state = next;
+    for (const handler of [...stateHandlers]) handler(next);
+  }
+
+  function channelsOpen() {
+    return Object.values(channels).every((channel) => channel.readyState === 'open');
+  }
+
+  function flushEvents() {
+    while (pendingEvents.length > 0) channels[TransportChannel.Events].send(pendingEvents.shift());
+  }
+
+  function recompute() {
+    if (state === TransportState.Closed) return;
+    const connection = peer.connectionState;
+    if (connection === 'failed' || connection === 'closed') setState(TransportState.Closed);
+    else if (connection === 'disconnected') setState(TransportState.Disconnected);
+    else if (connection === 'connected' && channelsOpen()) {
+      setState(TransportState.Open);
+      flushEvents();
+    }
+  }
+
+  peer.addEventListener('connectionstatechange', recompute);
+  for (const [name, channel] of Object.entries(channels)) {
+    channel.binaryType = 'arraybuffer';
+    channel.addEventListener('open', recompute);
+    // A closed channel cannot recover, and a departed page closes its channels promptly, so this ends the connection at once.
+    channel.addEventListener('close', () => setState(TransportState.Closed));
+    channel.addEventListener('message', (event) => {
+      const bytes = new Uint8Array(event.data.slice(0));
+      for (const handler of [...messageHandlers]) handler(name, bytes);
+    });
+  }
+
+  function waitForGathering() {
+    return new Promise((resolve) => {
+      if (peer.iceGatheringState === 'complete') {
+        resolve(peer.localDescription.sdp);
+        return;
+      }
+      let timer = null;
+      const finish = () => {
+        peer.removeEventListener('icegatheringstatechange', onChange);
+        if (timer !== null) clearTimer(timer);
+        resolve(peer.localDescription.sdp);
+      };
+      const onChange = () => { if (peer.iceGatheringState === 'complete') finish(); };
+      peer.addEventListener('icegatheringstatechange', onChange);
+      timer = setTimer(finish, gatherCapSeconds);
+    });
+  }
+
+  async function createOffer() {
+    await peer.setLocalDescription(await peer.createOffer());
+    return waitForGathering();
+  }
+
+  async function acceptOffer(offerSdp) {
+    await peer.setRemoteDescription({ type: 'offer', sdp: offerSdp });
+    await peer.setLocalDescription(await peer.createAnswer());
+    return waitForGathering();
+  }
+
+  async function acceptAnswer(answerSdp) {
+    if (answered) throw new Error('the invite was already answered');
+    answered = true;
+    await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+  }
+
+  function shutDown() {
+    for (const channel of Object.values(channels)) channel.close();
+    peer.close();
+    setState(TransportState.Closed);
+  }
+
+  // Waits for the events channel to drain (so a quit message is delivered) or the cap, then closes.
+  function close() {
+    if (closing || state === TransportState.Closed) return;
+    closing = true;
+    const events = channels[TransportChannel.Events];
+    if (events.readyState !== 'open' || events.bufferedAmount === 0) {
+      shutDown();
+      return;
+    }
+    let timer = null;
+    const finish = () => {
+      events.removeEventListener('bufferedamountlow', finish);
+      if (timer !== null) clearTimer(timer);
+      shutDown();
+    };
+    events.bufferedAmountLowThreshold = 0;
+    events.addEventListener('bufferedamountlow', finish);
+    timer = setTimer(finish, CLOSE_FLUSH_CAP_SECONDS);
+  }
+
+  const transport = {
+    send(channel, bytes) {
+      validateChannel(channel);
+      if (closing || state === TransportState.Closed) return;
+      const copy = Uint8Array.from(bytes);
+      if (state !== TransportState.Open) {
+        if (channel === TransportChannel.Events) pendingEvents.push(copy);
+        return;
+      }
+      channels[channel].send(copy);
+    },
+    onMessage: (handler) => { messageHandlers.push(handler); },
+    onStateChange: (handler) => { stateHandlers.push(handler); },
+    get state() { return state; },
+    close,
+  };
+
+  return { transport, createOffer, acceptOffer, acceptAnswer, close };
+}
