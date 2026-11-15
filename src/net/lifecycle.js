@@ -176,13 +176,17 @@ export class SessionLifecycle {
       this.#countdownEnd = null;
       // A pending start leaves the game in Ready, which refuses a pause: it is held until the start.
       if (this.#lostFrom === LifecyclePhase.Starting) return result();
+      // A finished match sits on the game over screen, which refuses a pause: wait without one.
+      if (this.#matchOver && this.#lostFrom === LifecyclePhase.Playing) return result();
       return result([], [{ type: 'pause', by: null, lost: true }]);
     }
     if (state === 'open' && this.#phase === LifecyclePhase.Lost) {
       this.#pausedBy = null;
       if (this.#lostFrom === LifecyclePhase.Starting) {
         this.#phase = LifecyclePhase.Starting;
-        this.#heldPause = { by: null, lost: true };
+        if (this.#heldPause === null) this.#heldPause = { by: null, lost: true };
+      } else if (this.#matchOver && this.#lostFrom === LifecyclePhase.Playing) {
+        this.#phase = LifecyclePhase.Playing;
       } else {
         this.#phase = LifecyclePhase.Paused;
       }
@@ -216,6 +220,7 @@ export class SessionLifecycle {
       case 'ready':
         return this.setRemoteReady();
       case 'start':
+        if (this.#role !== 'guest') return result();
         return this.receiveStart(event, toLocalSession(event.startSessionSeconds));
       case 'restartRequest':
         return this.#role === 'host' ? this.requestRestart(sessionSeconds) : result();

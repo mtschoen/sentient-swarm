@@ -196,3 +196,43 @@ test('the ready flag is announced once and the remote one arrives through receiv
   host.receive({ type: 'ready' }, 0, identity);
   assert.equal(host.bothReady, true);
 });
+
+test('a disconnect after game over waits without a pause and returns to Playing', () => {
+  const host = playingHost();
+  host.setMatchOver(true);
+  assert.deepEqual(host.connectionChanged('disconnected', 50), nothing);
+  assert.equal(host.phase, LifecyclePhase.Lost);
+  assert.deepEqual(host.connectionChanged('open', 52), nothing);
+  assert.equal(host.phase, LifecyclePhase.Playing);
+  assert.deepEqual(host.tick(53).actions, []);
+  const lost = playingHost();
+  lost.setMatchOver(true);
+  lost.connectionChanged('disconnected', 50);
+  assert.deepEqual(lost.tick(60).actions, [{ type: 'end', reason: 'lost' }]);
+});
+
+test('only the guest accepts a start event', () => {
+  const host = readyHost();
+  assert.deepEqual(host.receive({ type: 'start', mode: 'versus', startSessionSeconds: 5 }, 1, identity), nothing);
+  assert.equal(host.phase, LifecyclePhase.Title);
+});
+
+test('a reconnect during Starting keeps a held user pause', () => {
+  const host = readyHost();
+  host.requestStart('hives', 5);
+  host.pause(1);
+  host.connectionChanged('disconnected', 5.1);
+  host.connectionChanged('open', 6);
+  assert.deepEqual(host.tick(6).actions, [{ type: 'start', mode: 'hives' }, { type: 'pause', by: 1 }]);
+  assert.equal(host.pausedBy, 1);
+});
+
+test('a disconnect during the countdown pauses and a reconnect lands in Paused', () => {
+  const host = pausedHost();
+  host.requestResume(30);
+  assert.deepEqual(host.connectionChanged('disconnected', 31).actions, [{ type: 'pause', by: null, lost: true }]);
+  assert.deepEqual(host.tick(33).actions, []);
+  host.connectionChanged('open', 33.5);
+  assert.equal(host.phase, LifecyclePhase.Paused);
+  assert.equal(host.countdownNumber, null);
+});
