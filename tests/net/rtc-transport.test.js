@@ -238,6 +238,29 @@ test('a failed connection releases the peer and channels', () => {
   assert.ok(peer.channels.every((channel) => channel.closed));
 });
 
+test('an answerer that has not opened yet keeps connecting through failed, and closes on failed once it has opened', async () => {
+  const { connection, peer } = build();
+  peer.iceGatheringState = 'complete';
+  await connection.acceptOffer('their-offer');
+  const seen = [];
+  connection.transport.onStateChange((value) => seen.push(value));
+  peer.setConnection('connecting');
+  peer.setConnection('disconnected');
+  peer.setConnection('failed');
+  assert.equal(connection.transport.state, 'connecting', 'the offerer may still paste the reply');
+  assert.equal(peer.peerClosed, false);
+  openAll(peer);
+  assert.equal(connection.transport.state, 'open');
+  peer.setConnection('failed');
+  assert.equal(connection.transport.state, 'closed');
+  assert.deepEqual(seen, ['open', 'closed']);
+
+  const offerer = build();
+  await offerer.connection.acceptAnswer('sdp');
+  offerer.peer.setConnection('failed');
+  assert.equal(offerer.connection.transport.state, 'closed', 'the offerer\'s failure before open is final');
+});
+
 test('a bad answer paste does not block a retry, but an accepted answer does', async () => {
   const { connection, peer } = build();
   const original = peer.setRemoteDescription.bind(peer);

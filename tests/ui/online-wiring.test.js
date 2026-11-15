@@ -44,8 +44,6 @@ async function settleUntil(condition, label) {
   assert.ok(condition(), `settled: ${label}`);
 }
 
-const panelStatus = (online) => allNodes(online.panel.element).find((node) => node.className === 'online-panel-status').textContent;
-
 function createTimers() {
   let seconds = 0;
   let nextHandle = 1;
@@ -147,7 +145,7 @@ function createFakes({ runPhase = 'ready', padIndex = 0 } = {}) {
     modeControl,
     coopJoin: { resets: 0, reset() { this.resets += 1; } },
     input: { seatOnePadIndex: () => padIndex },
-    audio: { paused: [], restarts: 0, setPaused(on) { this.paused.push(on); }, restartRun() { this.restarts += 1; } },
+    audio: { paused: [], restarts: 0, unlocks: 0, setPaused(on) { this.paused.push(on); }, restartRun() { this.restarts += 1; }, unlock() { this.unlocks += 1; } },
     documentObject,
     clipboard,
     locationObject: { href: 'https://example.test/game/', pathname: '/game/', search: '', hash: '' },
@@ -240,38 +238,49 @@ test('the local pad dropping out pauses an online match, and a couch partner pad
   assert.equal(session.calls.pause, 1);
 });
 
-test('the guest connect timeout counts from Copy reply', async () => {
-  const factory = countingConnectionFactory();
-  const { fakes, timers } = createFakes();
-  const online = createOnlineWiring({ ...fakes, createConnection: factory.create });
+// The guest's reply panel, ready to copy (the invite decoded and answered).
+async function openGuestPanel(online) {
   const offer = await encodeSignal({ kind: 'offer', sdp: SAMPLE_SDP });
   online.openFromHash(`#join=${offer}`);
   online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
   await settleUntil(() => online.replyText !== null, 'the reply is ready to copy');
-  assert.ok(online.replyText !== null, 'the reply is ready to copy');
+  return allNodes(online.panel.element).find((node) => node.tagName === 'BUTTON' && node.textContent === 'Copy reply');
+}
+
+test('the guest waits for the host to paste its reply with no timeout', async () => {
+  const factory = countingConnectionFactory();
+  const { fakes, timers, clipboard } = createFakes();
+  const online = createOnlineWiring({ ...fakes, createConnection: factory.create });
+  const copyReply = await openGuestPanel(online);
   timers.advanceTo(30);
   assert.equal(online.panel.messageText, '', 'no timeout before Copy reply');
-  const copyReply = allNodes(online.panel.element).find((node) => node.tagName === 'BUTTON' && node.textContent === 'Copy reply');
   await copyReply.fire('click');
-  await settleUntil(() => fakes.clipboard.written.length === 1, 'the reply copied');
-  timers.advanceTo(30 + 9.99);
-  assert.equal(online.panel.messageText, '');
-  timers.advanceTo(30 + 10);
-  assert.equal(online.panel.messageText, 'Your two networks cannot connect directly.');
+  await settleUntil(() => clipboard.written.length === 1, 'the reply copied');
+  assert.equal(online.panel.statusText, 'Waiting for your friend to paste your reply.');
+  timers.advanceTo(30 + 600);
+  assert.equal(online.panel.messageText, '', 'the host may take as long as it likes');
+  assert.equal(factory.connections[0].closed, false);
+  assert.equal(online.panel.visible, true);
 });
 
-test('after a guest connect timeout the panel keeps the start until it is cancelled, and stays gone after', async () => {
+test('the guest audio unlocks inside the Copy reply press, before the clipboard write', async () => {
   const factory = countingConnectionFactory();
-  const { fakes, timers, items } = createFakes();
+  const { fakes } = createFakes();
   const online = createOnlineWiring({ ...fakes, createConnection: factory.create });
-  const offer = await encodeSignal({ kind: 'offer', sdp: SAMPLE_SDP });
-  online.openFromHash(`#join=${offer}`);
-  online.update({ titleOpen: true, warmUpDone: true, deltaSeconds: STEP });
-  await settleUntil(() => online.replyText !== null, 'the reply is ready to copy');
-  const copyReply = allNodes(online.panel.element).find((node) => node.tagName === 'BUTTON' && node.textContent === 'Copy reply');
+  const copyReply = await openGuestPanel(online);
+  const pressed = copyReply.fire('click');
+  assert.equal(fakes.audio.unlocks, 1);
+  await pressed;
+});
+
+test('after a guest connection fails before it opens the panel keeps the start until it is cancelled, and stays gone after', async () => {
+  const factory = countingConnectionFactory();
+  const { fakes, items, sessions, clipboard } = createFakes();
+  const online = createOnlineWiring({ ...fakes, createConnection: factory.create });
+  const copyReply = await openGuestPanel(online);
   await copyReply.fire('click');
-  await settleUntil(() => fakes.clipboard.written.length === 1, 'the reply copied');
-  timers.advanceTo(10);
+  await settleUntil(() => clipboard.written.length === 1, 'the reply copied');
+  sessions.at(-1).act({ type: 'end', reason: 'lost' });
   assert.equal(online.panel.messageText, 'Your two networks cannot connect directly.');
   assert.equal(online.panel.visible, true);
   assert.equal(online.active, true, 'the panel still holds the title');
@@ -314,7 +323,7 @@ test('the host connect timeout counts from an accepted reply and returns a fresh
   const box = allNodes(online.panel.element).find((node) => node.tagName === 'TEXTAREA');
   box.value = answer;
   await box.fire('keydown', { key: 'Enter' });
-  await settleUntil(() => factory.connections[0].answers.length === 1 && panelStatus(online) === 'Connecting...', 'the reply accepted');
+  await settleUntil(() => factory.connections[0].answers.length === 1 && online.panel.statusText === 'Connecting...', 'the reply accepted');
   assert.deepEqual(factory.connections[0].answers, [SAMPLE_SDP]);
   timers.advanceTo(29.99);
   assert.equal(factory.count, 1);
@@ -400,3 +409,4 @@ test('cancelling the panel, or a connection that fails before it opens, leaves n
   assert.equal(factory.count, 3, 'the host gets a fresh invite');
   await settleUntil(() => online.inviteUrl !== null, 'the fresh invite');
 });
+

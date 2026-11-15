@@ -7,8 +7,11 @@
 // main.js keeps its couch handlers and gives each one guard line (handleStart, handlePause, ...),
 // which returns true when online play took the request. While a connection or session exists the
 // couch join, the mode item's couch rule, the Lab and the sparring dummy are out of play.
-// The connect timeout (CONNECT_TIMEOUT_SECONDS) counts on the host from an accepted reply and on
-// the guest from Copy reply; on expiry both show NO_DIRECT_ROUTE and the host gets a fresh invite.
+// The connect timeout (CONNECT_TIMEOUT_SECONDS) counts on the host from an accepted reply; on expiry
+// it shows NO_DIRECT_ROUTE with a fresh invite. The guest has no timeout: it cannot see when the host
+// pastes its reply (its ICE checks start, and Chrome may call them failed, before that), so after
+// Copy reply it waits for the host (Cancel ends the wait) and shows NO_DIRECT_ROUTE only if its
+// connection ends before it opens.
 // Timers: setTimer(callback, seconds) -> handle and clearTimer(handle).
 
 import { createRtcConnection } from '../net/rtc-transport.js';
@@ -52,7 +55,9 @@ export function createOnlineWiring({
   createSession = (options) => new OnlineSession(options),
 }) {
   const panel = createOnlinePanel(menu.element, {
-    documentObject, clipboard, onReply: (text) => acceptReply(text), onCopyReply: () => copiedReply(), onCancel: () => cancel(),
+    documentObject, clipboard, onReply: (text) => acceptReply(text), onCopyReply: () => panel.setWaiting(), onCancel: () => cancel(),
+    // Every panel press is a gesture: the audio unlocks inside it (the match starts from the host).
+    onPress: () => audio?.unlock?.(),
   });
   panel.hide();
   const onlineTitle = createOnlineTitle(menu.element, { documentObject });
@@ -164,12 +169,6 @@ export function createOnlineWiring({
         teardown();
         beginHost(STALE_REPLY);
       });
-  }
-
-  // The guest's Copy reply: a gesture, so the audio unlocks here (the match starts from the host).
-  function copiedReply() {
-    audio?.unlock?.();
-    startConnectTimer();
   }
 
   function startConnectTimer() {

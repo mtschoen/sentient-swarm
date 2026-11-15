@@ -2,7 +2,8 @@
 // creation and a mode only changes text, visibility and the ghosting of the copy buttons, so nothing
 // pops in or moves. Host: copy the invite link, paste the friend's reply (Paste reply, the Enter key or
 // a paste into the box). Join: copy the reply and send it back. A reply is checked with decodeSignal
-// before onReply sees it, and only one reply is accepted until showHost() again.
+// before onReply sees it, and only one reply is accepted until showHost() again. onPress runs
+// synchronously at the start of every button press (a gesture, for the audio unlock).
 import { SignalError, decodeSignal } from '../net/signal-codec.js';
 
 const MESSAGES = Object.freeze({
@@ -13,7 +14,7 @@ const MESSAGES = Object.freeze({
 const CLIPBOARD_REFUSED = 'Paste the reply into the box.';
 const COPY_REFUSED = 'Copying was refused. Try again.';
 
-export function createOnlinePanel(parent, { documentObject = document, clipboard = navigator.clipboard, onReply, onCopyReply = () => {}, onCancel }) {
+export function createOnlinePanel(parent, { documentObject = document, clipboard = navigator.clipboard, onReply, onCopyReply = () => {}, onCancel, onPress = () => {} }) {
   const make = (tagName, className, textContent = '') => {
     const created = documentObject.createElement(tagName);
     created.className = className;
@@ -79,6 +80,7 @@ export function createOnlinePanel(parent, { documentObject = document, clipboard
     onReply(text);
   }
 
+  for (const button of [copyInvite, pasteReply, copyReply, cancel]) button.addEventListener('click', () => onPress());
   copyInvite.addEventListener('click', () => copy(inviteText));
   copyReply.addEventListener('click', () => copy(replyText, onCopyReply));
   pasteReply.addEventListener('click', async () => {
@@ -145,6 +147,12 @@ export function createOnlinePanel(parent, { documentObject = document, clipboard
       status.textContent = 'Connecting...';
       message.textContent = '';
     },
+    // The guest copied its reply: it waits for the host to paste it (with no timeout).
+    setWaiting() {
+      status.textContent = 'Waiting for your friend to paste your reply.';
+      message.textContent = '';
+    },
+    get statusText() { return status.textContent; },
     showMessage(text) {
       message.textContent = text;
     },

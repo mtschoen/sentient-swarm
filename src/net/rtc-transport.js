@@ -1,5 +1,8 @@
 // The WebRTC transport: one RTCPeerConnection with two pre-negotiated data channels, behind the endpoint interface of transport.js.
 // Signalling is copy and paste, so ICE is not trickled: each description is used once gathering completes (or after the cap).
+// The answerer (acceptOffer) starts its ICE checks before the offerer has its answer, and Chrome reports such a connection
+// failed after about 15 s of unanswered checks, then connects once the offerer's own checks arrive: so until an answerer's
+// connection first opens, failed and disconnected leave it connecting (only the offerer's paste can end the wait).
 
 import { TransportState, TransportChannel, validateChannel } from './transport.js';
 import { ICE_SERVERS, ICE_GATHER_CAP_SECONDS } from './ice-configuration.js';
@@ -25,6 +28,8 @@ export function createRtcConnection({
   const pendingEvents = [];
   let state = TransportState.Connecting;
   let answered = false;
+  let answering = false;
+  let everOpened = false;
   let closing = false;
 
   let released = false;
@@ -57,9 +62,11 @@ export function createRtcConnection({
   function recompute() {
     if (state === TransportState.Closed) return;
     const connection = peer.connectionState;
+    if (answering && !everOpened && (connection === 'failed' || connection === 'disconnected')) return;
     if (connection === 'failed' || connection === 'closed') setState(TransportState.Closed);
     else if (connection === 'disconnected') setState(TransportState.Disconnected);
     else if (connection === 'connected' && channelsOpen()) {
+      everOpened = true;
       setState(TransportState.Open);
       flushEvents();
     }
@@ -104,6 +111,7 @@ export function createRtcConnection({
   }
 
   async function acceptOffer(offerSdp) {
+    answering = true;
     await peer.setRemoteDescription({ type: 'offer', sdp: offerSdp });
     await peer.setLocalDescription(await peer.createAnswer());
     return waitForGathering();
