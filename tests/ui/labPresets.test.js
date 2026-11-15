@@ -69,7 +69,7 @@ test('decodeMix returns null for wrong shapes', () => {
     knobRange: { ...good, knobs: { spawnDensityBias: 5 } },
     seekRangeHigh: { ...good, knobs: { seekRange: 41 } },
     seekRangeLow: { ...good, knobs: { seekRange: -1 } },
-    knobType:{ ...good, knobs: { rampSeconds: '60' } },
+    knobType: { ...good, knobs: { rampSeconds: '60' } },
     knobsArray: { ...good, knobs: [1] },
   };
   for (const [name, mix] of Object.entries(cases)) {

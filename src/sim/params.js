@@ -112,7 +112,7 @@ const PROJECTILE_DT_OFFSET = 236;
 // The playable rectangle (Simulation.setWorldBounds) as vec4f (minX, minY, maxX, maxY); the whole
 // world (WORLD_BOUNDS) when omitted.
 const WORLD_BOUNDS_OFFSET = 240;
-// The seek range (Simulation.setSeekRange), f32; 0 is unlimited.
+// The seek range (the Simulation seek range setter), f32; 0 is unlimited.
 const SEEK_RANGE_OFFSET = 256;
 const UNSIGNED_FIELDS = {
   gridColumns: 20, gridRows: 24, capacity: 32, frameSequence: 84,

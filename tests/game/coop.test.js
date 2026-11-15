@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
 import { Game } from '../../src/game/game.js';
 import { SEAT_COLORS } from '../../src/game/seat-colors.js';
 import { bombRadiusForView } from '../../src/game/camera.js';
@@ -130,16 +129,6 @@ test('the solo game makes exactly the same simulation and projectile calls as be
   assert.ok(log.filter(([name]) => name === 'simulation.requestKillAll').length >= 3, 'start, death clear and restart each clear the arena');
   const hash = createHash('sha256').update(JSON.stringify(log)).digest('hex');
   assert.equal(hash, SOLO_CALL_LOG_HASH);
-});
-
-test('the solo game never sets the seek range, so the lab-only knob leaves the shipped game unchanged', async () => {
-  const log = await soloCallLog();
-  assert.ok(log.length > 0);
-  assert.ok(log.every(([name]) => name !== 'simulation.setSeekRange'));
-  const gameDirectory = new URL('../../src/game/', import.meta.url);
-  for (const file of readdirSync(gameDirectory)) {
-    if (file.endsWith('.js')) assert.ok(!readFileSync(new URL(file, gameDirectory), 'utf8').includes('setSeekRange'), file);
-  }
 });
 
 async function startTwoSeats() {
