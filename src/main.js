@@ -378,7 +378,10 @@ async function boot() {
     const state = game.state;
     hud.update(state);
     edgeIndicators.update(edgeIndicatorTargets(game.pickups.pickups, game.simulation.spawnGates?.gates ?? []), viewport.visibleBounds, cssArenaRect());
-    beamShardPointers.update(beamShardTargets(game.pickups.pickups), viewport.visibleBounds, cssArenaRect(), [hud.settingsButton, document.getElementById('audio-hint')].filter(Boolean).map((element) => element.getBoundingClientRect()));
+    // The keep-out rectangles force a layout, so they are measured only while a shard waits.
+    const shardTargets = beamShardTargets(game.pickups.pickups);
+    const keepOuts = shardTargets.length === 0 ? [] : [hud.settingsButton, document.getElementById('audio-hint')].filter(Boolean).map((element) => element.getBoundingClientRect());
+    beamShardPointers.update(shardTargets, viewport.visibleBounds, cssArenaRect(), keepOuts);
     beamTimeTitle.update(state.beamTime, deltaSeconds);
     touchOverlay.update(state);
     fireDebug?.update(fireLog);
