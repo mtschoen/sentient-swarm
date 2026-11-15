@@ -1,7 +1,7 @@
 // Beam time: the timed beam window the last beam shard opens. It counts real time (the game calls
 // update every unpaused update), so a pause keeps it. update returns true on the one call in which
 // the timer ran out, so the caller can play the expiry cue once.
-export const BEAM_TIME_SECONDS = 8;
+export const BEAM_TIME_SECONDS = 12;
 export const BEAM_TIME_TIER = 1;
 
 export class BeamTime {

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { BeamTime, BEAM_TIME_SECONDS, BEAM_TIME_TIER } from '../../src/game/beam-time.js';
 
 test('constants', () => {
-  assert.equal(BEAM_TIME_SECONDS, 8);
+  assert.equal(BEAM_TIME_SECONDS, 12);
   assert.equal(BEAM_TIME_TIER, 1);
 });
 
@@ -20,14 +20,14 @@ test('start gives a full fraction and update counts down', () => {
   beamTime.start();
   assert.equal(beamTime.fraction, 1);
   assert.equal(beamTime.active, true);
-  assert.equal(beamTime.update(4), false);
+  assert.equal(beamTime.update(6), false);
   assert.equal(beamTime.fraction, 0.5);
 });
 
 test('the crossing update returns true exactly once', () => {
   const beamTime = new BeamTime();
   beamTime.start();
-  assert.equal(beamTime.update(7), false);
+  assert.equal(beamTime.update(11), false);
   assert.equal(beamTime.update(2), true);
   assert.equal(beamTime.active, false);
   assert.equal(beamTime.update(1), false);
@@ -57,7 +57,7 @@ test('setDuration rejects bad values', () => {
 
 test('durationSeconds reports the configured duration', () => {
   const beamTime = new BeamTime();
-  assert.equal(beamTime.durationSeconds, 8);
+  assert.equal(beamTime.durationSeconds, 12);
   beamTime.setDuration(5);
   assert.equal(beamTime.durationSeconds, 5);
   beamTime.start();
@@ -65,17 +65,17 @@ test('durationSeconds reports the configured duration', () => {
   assert.equal(beamTime.active, false);
 });
 
-test('480 updates of 1/60 end within one update of 8 seconds', () => {
+test('720 updates of 1/60 end within one update of 12 seconds', () => {
   const beamTime = new BeamTime();
   beamTime.start();
   let endedAt = -1;
-  for (let index = 1; index <= 480; index += 1) {
+  for (let index = 1; index <= 720; index += 1) {
     if (beamTime.update(1 / 60)) {
       endedAt = index;
       break;
     }
   }
-  assert.ok(endedAt >= 479 && endedAt <= 480, `ended at ${endedAt}`);
+  assert.ok(endedAt >= 719 && endedAt <= 720, `ended at ${endedAt}`);
   assert.equal(beamTime.active, false);
 });
 

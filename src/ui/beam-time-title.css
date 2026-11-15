@@ -1,0 +1,19 @@
+/* The BEAM TIME! title (beam-time-title.js): fixed, centered, in the beam hue (hue 331,
+   WEAPON_HUES.beam in weaponTypes.js). Opacity and transform are set inline each frame from the
+   timeline, so there is no CSS animation to switch off for reduced motion; the script drops the
+   scale and the fade in under `html[data-reduced-motion]`. It takes no touches and never affects layout. */
+.beam-time-title {
+  position: fixed;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  white-space: nowrap;
+  font-family: system-ui, sans-serif;
+  font-weight: 900;
+  font-size: clamp(40px, 11vw, 140px);
+  letter-spacing: 0.06em;
+  color: hsl(331, 100%, 70%);
+  text-shadow: 0 0 18px hsl(331, 100%, 60%), 0 0 48px hsl(331, 100%, 50%), 0 4px 0 rgba(0, 0, 0, 0.5);
+  opacity: 0;
+}

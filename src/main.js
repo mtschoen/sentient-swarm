@@ -23,6 +23,7 @@ import { createHud } from './ui/hud.js';
 import { createTouchOverlay, withHaptics } from './ui/touchOverlay.js';
 import { createEdgeIndicators, edgeIndicatorTargets } from './ui/edgeIndicators.js';
 import { beamShardTargets, createBeamShardPointers } from './ui/beam-shard-pointer.js';
+import { createBeamTimeTitle } from './ui/beam-time-title.js';
 import { STICK_RADIUS } from './input/touch.js';
 import { setGamepadDeadZone } from './input/gamepad.js';
 import { createLifeWatcher, createRumble } from './input/rumble.js';
@@ -248,6 +249,7 @@ async function boot() {
   // Chevrons on the view edge for off-screen pickups and the telegraphed wave gate.
   const edgeIndicators = createEdgeIndicators(document.body);
   const beamShardPointers = createBeamShardPointers(document.body);
+  const beamTimeTitle = createBeamTimeTitle(document.body, { isReducedMotion: () => document.documentElement.hasAttribute('data-reduced-motion') });
 
   // Menus (owner ruling R17). The title menu is the one input from load to play: its buttons, a tap
   // on the arena, Enter, Space or a gamepad face button start the run, and audio unlocks inside
@@ -376,6 +378,7 @@ async function boot() {
     hud.update(state);
     edgeIndicators.update(edgeIndicatorTargets(game.pickups.pickups, game.simulation.spawnGates?.gates ?? []), viewport.visibleBounds, cssArenaRect());
     beamShardPointers.update(beamShardTargets(game.pickups.pickups), viewport.visibleBounds, cssArenaRect());
+    beamTimeTitle.update(state.beamTime, deltaSeconds);
     touchOverlay.update(state);
     fireDebug?.update(fireLog);
     lifeWatcher.update(state);

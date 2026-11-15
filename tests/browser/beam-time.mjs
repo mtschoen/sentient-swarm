@@ -2,7 +2,8 @@
 // Chromium with fire held throughout. Every run is on a fresh page:
 //   A. solo at 1280 by 720: a shard spawns by itself off screen and inside the world, its pointer
 //      throbs (and stops under reduced motion), six shards are collected, the sixth arms the beam and
-//      surges the spawning, and 8 s later the old weapon, the count and the surge are back.
+//      surges the spawning, the BEAM TIME! title is hidden before and shows when it starts (and fades
+//      out again), and 12 s later the old weapon, the count and the surge are back.
 //   B. solo at 844 by 390: the pips row and the BEAM bar overlap neither the pause button, the
 //      weapon text nor Settings, and no HUD element that shows at 1280 is missing (nothing pops).
 //      In A and B a shard straight above the view gets a visible pointer that intersects neither
@@ -34,6 +35,8 @@ const SAMPLE_FRAMES = 15;
 const BEAM_FRAME_LIMIT = 3000;
 const AFTER_FRAMES = 120;
 const SURGE_RATIO = 1.5;
+const TITLE_SHOT_FRAMES = 20;
+const TITLE_GONE_FRAMES = 150;
 const POINTER_WIDTH = 28;
 const SHOULDER_BUTTON = 5;
 const HOLD_FRAMES = 4;
@@ -53,6 +56,7 @@ function installSyntheticGamepads() {
   Object.defineProperty(Navigator.prototype, 'getGamepads', { configurable: true, value: () => window.__pads });
 }
 
+const titleOpacity = (page) => page.evaluate(() => Number(getComputedStyle(document.querySelector('.beam-time-title')).opacity));
 const currentFrame = (page) => page.evaluate(() => window.__murmuration.frame);
 const waitFrames = async (page, count) => {
   const target = (await currentFrame(page)) + count;
@@ -246,6 +250,11 @@ async function collectAll(page, seat, { onCount = null } = {}) {
 async function runBeamTime(page, before, { screenshots, seats = 1 }) {
   const started = await gameState(page);
   expect(started.beamTime > 0, `beam time did not start (beamTime ${started.beamTime})`);
+  expect(await titleOpacity(page) > 0, 'the BEAM TIME! title is not visible when beam time starts');
+  if (screenshots.title) {
+    await waitFrames(page, TITLE_SHOT_FRAMES);
+    await screenshot(page, screenshots.title);
+  }
   expect(started.armed === 'beam', `the armed weapon is ${started.armed} in beam time`);
   expect(started.surge === started.surgeTarget && started.surge > 1, `the surge is ${started.surge}, not ${started.surgeTarget}`);
   if (seats === 2) {
@@ -257,6 +266,13 @@ async function runBeamTime(page, before, { screenshots, seats = 1 }) {
   while ((await gameState(page)).beamTime > 0 && frames < BEAM_FRAME_LIMIT) {
     await waitFrames(page, SAMPLE_FRAMES);
     frames += SAMPLE_FRAMES;
+    // A weapon pickup collected during beam time legitimately changes the weapon restored at its
+    // end (the stash), and the window is long enough for one to spawn by the swarm; drop them so the
+    // return to the old weapon stays checkable.
+    await page.evaluate(() => {
+      const { game } = window.__murmuration;
+      game.pickups.pickups = game.pickups.pickups.filter((pickup) => pickup.type === 'beamshard');
+    });
     const state = await gameState(page);
     peak = Math.max(peak, state.alive);
     if (afterSurge === null && frames >= SURGE_FRAMES) {
@@ -312,11 +328,14 @@ async function runA(browser, server) {
   await checkPointer(page, 'A');
   await screenshot(page, 'beam-pointer-1280x720.png');
   await pointerAboveView(page, 'beam-pointer-top-1280x720.png');
+  expect(await titleOpacity(page) === 0, 'A: the BEAM TIME! title shows before beam time');
   const before = await collectAll(page, 0, {
     onCount: async (count) => { if (count === 3) { await waitFrames(page, 10); await screenshot(page, 'beam-pips-1280x720.png'); } },
   });
-  const numbers = await runBeamTime(page, before, { screenshots: { during: 'beam-time-1280x720.png', after: 'beam-after-1280x720.png' } });
+  const numbers = await runBeamTime(page, before, { screenshots: { title: 'beam-title.png', during: 'beam-time-1280x720.png', after: 'beam-after-1280x720.png' } });
   printNumbers('beam A', numbers);
+  await waitFrames(page, TITLE_GONE_FRAMES);
+  expect(await titleOpacity(page) === 0, 'A: the BEAM TIME! title did not fade out');
   globalThis.desktopHud = await shownHudElements(page);
   await finish('A', page, context);
 }
