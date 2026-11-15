@@ -174,6 +174,7 @@ async function boot() {
     input.touch.setTuning({ deadZone: current.stickDeadZone, radius: STICK_RADIUS * current.stickRadius });
     setGamepadDeadZone(current.stickDeadZone);
     document.documentElement.toggleAttribute('data-reduced-motion', Boolean(current.reducedMotion));
+    game.setReducedMotion(Boolean(current.reducedMotion));
   };
   applySettings(settings);
   // The select shows the preset in effect (the stored one is null until the probe settles).

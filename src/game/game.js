@@ -95,6 +95,8 @@ import { SpawnDirector } from '../sim/spawn-director.js';
 import { MAXIMUM_PLAYER_SEATS, SPECIES_COUNT, VIEW_HEIGHT, VIEW_WIDTH, WORLD_BOUNDS, WORLD_HEIGHT, WORLD_WIDTH, viewSizeForAspect } from '../sim/layout.js';
 import { Camera, bombRadiusForView, fitZoom, framingCenter } from './camera.js';
 import { SeatRevival } from './seat-revival.js';
+import { SoloZoomController } from './solo-zoom.js';
+import { soloZoomOptions } from './solo-zoom-step.js';
 import { applySwarmHits, fireSeats, framedFocuses, gameSeekTargets, partnerFor, pickupAnchor, primarySeat, reviveSeats, seatStarts, tickInvulnerability, uploadSwarms } from './seats.js';
 
 const NO_SPAWNS = new Uint32Array(SPECIES_COUNT);
@@ -172,6 +174,10 @@ export class Game {
     // The renderer draws around this camera (Viewport.setCamera with camera.sample); followCamera
     // moves it every update.
     this.camera = new Camera({ centerX: WORLD_WIDTH / 2, centerY: WORLD_HEIGHT / 2 });
+    // Solo zoom (lab knobs, default off), forced off by reduced motion; bombedThisUpdate holds its target.
+    this.soloZoom = new SoloZoomController();
+    this.reducedMotion = false;
+    this.bombedThisUpdate = false;
     // One seat per player; the first is the solo player.
     this.random = random;
     this.seats = [new PlayerSeat({ index: 0, random, bounds: this.worldBounds })];
@@ -366,9 +372,31 @@ export class Game {
     const focuses = framedFocuses(this.seats);
     const focus = framingCenter(focuses);
     const view = { viewWidth: this.viewSize.width, viewHeight: this.viewSize.height, bounds: this.worldBounds };
-    const targetZoom = fitZoom(focuses, view.viewWidth, view.viewHeight);
-    if (cut) this.camera.cut(focus.x, focus.y, { ...view, zoom: targetZoom });
-    else if (!this.watching) this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view, targetZoom });
+    if (cut) {
+      this.soloZoom.reset();
+      this.camera.cut(focus.x, focus.y, { ...view, zoom: fitZoom(focuses, view.viewWidth, view.viewHeight) });
+      return;
+    }
+    const solo = soloZoomOptions(this, deltaSeconds);
+    if (this.watching) return;
+    if (solo !== null) this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view, ...solo });
+    else this.camera.update(deltaSeconds, { focusX: focus.x, focusY: focus.y, ...view, targetZoom: fitZoom(focuses, view.viewWidth, view.viewHeight) });
+  }
+
+  // Delegates to the controller (RangeError for a bad name or value); only the lab calls it.
+  setSoloZoomSetting(name, value) {
+    this.soloZoom.set(name, value);
+  }
+
+  // Reduced motion pins the solo zoom to 1 (the controller idles); the settings panel sets it.
+  setReducedMotion(flag) {
+    this.reducedMotion = Boolean(flag);
+  }
+
+  // The spawn director's view: the camera's, with the zoom capped at 1 so a punch-in never pulls the gates inside the safe radius.
+  get ringView() {
+    const zoom = Math.min(1, this.camera.zoom);
+    return { ...this.view, width: this.viewSize.width / zoom, height: this.viewSize.height / zoom };
   }
 
   get watching() {
@@ -451,9 +479,11 @@ export class Game {
       this.updateGameOver(deltaSeconds, seats.some((seat, index) => firingPressed[index] || (inputs[index].bomb && !seat.bombHeld)));
     }
 
+    this.bombedThisUpdate = false;
     seats.forEach((seat, index) => {
       const pressed = seat.bombEdge(inputs[index]);
       if (pressed && !seat.down && this.run.useBomb(seat.point)) {
+        this.bombedThisUpdate = true;
         // The bomb clears around the swarm out past the view's corners (bombRadiusForView), not the whole world.
         const center = seat.aliveCount > 0 ? seat.centroid : seat.point;
         this.simulation.requestRadialKill(center.x, center.y, bombRadiusForView(this.viewSize.width, this.viewSize.height));
@@ -576,7 +606,7 @@ export class Game {
       safeDistance: pressure.spawnDistanceFraction * this.viewSize.width,
       bounds: this.worldBounds,
       // Gates open in a ring just outside what the camera shows.
-      view: this.view,
+      view: this.ringView,
       filling: pressure.filling,
       shares: this.simulation.shares,
       // The Ready arena (before a run) trickles from every gate; waves start with the run.
