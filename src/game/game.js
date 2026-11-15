@@ -159,6 +159,9 @@ export class Game {
     // Updates per simulation step (1 full rate, 2 half rate), updates since the last step and the
     // game seconds they covered (the next step's delta).
     this.simulationStepInterval = 1;
+    // The rate setSimulationRate asked for, and the online lock that holds full rate (setFullRateLock).
+    this.requestedSimulationRate = 'full';
+    this.fullRateLocked = false;
     this.updatesSinceSimulationStep = 0;
     this.pendingSimulationSeconds = 0;
     // Real seconds for the same steps (the projectile step's delta, unscaled by a time warp), and
@@ -483,9 +486,16 @@ export class Game {
   }
 
   // 'full' steps the simulation every update, 'half' every other update with twice the delta (the
-  // renderer then interpolates glyphs between the last two steps).
+  // renderer then interpolates glyphs between the last two steps). The rate asked for is kept;
+  // while setFullRateLock(true) holds (online) every update steps, and unlocking restores it.
   setSimulationRate(rate) {
-    this.simulationStepInterval = rate === 'half' ? 2 : 1;
+    this.requestedSimulationRate = rate;
+    this.simulationStepInterval = rate === 'half' && !this.fullRateLocked ? 2 : 1;
+  }
+
+  setFullRateLock(locked) {
+    this.fullRateLocked = Boolean(locked);
+    this.setSimulationRate(this.requestedSimulationRate);
   }
 
   get simulationRate() { return this.simulationStepInterval === 2 ? 'half' : 'full'; }
