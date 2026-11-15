@@ -1,7 +1,7 @@
-// Pickup pass (pickups.wgsl): up to MAXIMUM_PICKUPS rotating hexagons (a clock for the time warp),
+// Pickup pass (pickups.wgsl): up to MAXIMUM_PICKUPS rotating hexagons (a clock for the time warp, a diamond for a beam shard),
 // uploaded each frame into a small uniform array, one instance each.
 import { createUniformBuffer } from '../gpu/buffers.js';
-import { PICKUP_HUES, PICKUP_SHAPE_CLOCK, WEAPON_HUES } from '../game/weaponTypes.js';
+import { BEAM_SHARD_TYPE, PICKUP_HUES, PICKUP_SHAPE_CLOCK, PICKUP_SHAPE_SHARD, WEAPON_HUES } from '../game/weaponTypes.js';
 import { MAX_BLEND, WORLD_VIEW_FLOATS, packWorldView } from './world-view.js';
 import { SCENE_FORMAT, loadQuadShader } from './render-shaders.js';
 
@@ -11,6 +11,12 @@ const VIEW_FLOATS = WORLD_VIEW_FLOATS + MAXIMUM_PICKUPS * FLOATS_PER_PICKUP;
 export const PICKUP_VIEW_BYTES = VIEW_FLOATS * Float32Array.BYTES_PER_ELEMENT;
 const VERTICES_PER_QUAD = 4;
 
+// The hue slot also carries the shape: floor(hue) is 0 hexagon, 1 clock, 2 shard (pickups.wgsl).
+const SHAPED_HUES = Object.freeze({
+  timewarp: PICKUP_HUES.timewarp + PICKUP_SHAPE_CLOCK,
+  [BEAM_SHARD_TYPE]: PICKUP_HUES[BEAM_SHARD_TYPE] + PICKUP_SHAPE_SHARD,
+});
+
 // Matches the PickupView table in pickups.wgsl; fills floats (a new array by default) and returns
 // it with the pickup count. Slots past the count keep their old values.
 export function packPickupView({ viewport, time, pickups }, floats = new Float32Array(VIEW_FLOATS)) {
@@ -18,7 +24,7 @@ export function packPickupView({ viewport, time, pickups }, floats = new Float32
   const count = Math.min(pickups.length, MAXIMUM_PICKUPS);
   for (let index = 0; index < count; index += 1) {
     const { x, y, type, fade } = pickups[index];
-    const hue = type === 'timewarp' ? PICKUP_HUES.timewarp + PICKUP_SHAPE_CLOCK : WEAPON_HUES[type] ?? WEAPON_HUES.base;
+    const hue = SHAPED_HUES[type] ?? WEAPON_HUES[type] ?? WEAPON_HUES.base;
     floats.set([x, y, hue, fade], WORLD_VIEW_FLOATS + index * FLOATS_PER_PICKUP);
   }
   return { floats, count };

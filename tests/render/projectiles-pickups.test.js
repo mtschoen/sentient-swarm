@@ -69,3 +69,9 @@ test('a time warp pickup packs its cold hue plus the clock shape flag', async ()
   assert.equal(floats[10], Math.fround(PICKUP_HUES.timewarp + PICKUP_SHAPE_CLOCK));
   assert.equal(floats[14], Math.fround(WEAPON_HUES.rail));
 });
+
+test('a beam shard pickup packs the beam hue plus the shard shape flag', async () => {
+  const { BEAM_SHARD_TYPE, PICKUP_SHAPE_SHARD } = await import('../../src/game/weaponTypes.js');
+  const { floats } = packPickupView({ viewport, time: 0, pickups: [{ x: 3, y: 4, type: BEAM_SHARD_TYPE, fade: 1 }] });
+  assert.deepEqual(Array.from(floats.slice(8, 12)), [3, 4, Math.fround(WEAPON_HUES.beam + PICKUP_SHAPE_SHARD), 1]);
+});
