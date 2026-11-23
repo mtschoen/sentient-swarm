@@ -97,3 +97,29 @@ test('withHaptics rumbles the bomb on the pad of the seat that bombed, and on no
   solo.bomb();
   assert.deepEqual(calls, ['bomb undefined', 'effect 0']);
 });
+
+test('the bomb button only cancels touch events the browser allows to be cancelled', () => {
+  const touch = {
+    origins: { move: null, aim: null }, move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, radius: 60,
+    pressBomb() {}, releaseBomb() {},
+  };
+  const overlay = createTouchOverlay({ append() {} }, {
+    touch, canvas: { getBoundingClientRect: () => ({ left: 0, top: 0 }) }, documentObject: createFakeOverlayDocument(),
+  });
+  const makeEvent = (cancelable) => ({
+    cancelable, cancelCalls: 0,
+    preventDefault() {
+      // A browser logs a console error when this runs on an event that is not cancelable.
+      if (!this.cancelable) throw new Error('preventDefault on a non-cancelable event');
+      this.cancelCalls += 1;
+    },
+    stopPropagation() {},
+  });
+  for (const type of ['touchstart', 'touchend']) {
+    const fixed = makeEvent(false);
+    assert.doesNotThrow(() => overlay.bombButton.listeners[type](fixed), `${type} not cancelable`);
+    const allowed = makeEvent(true);
+    overlay.bombButton.listeners[type](allowed);
+    assert.equal(allowed.cancelCalls, 1, `${type} still cancelled when allowed`);
+  }
+});
