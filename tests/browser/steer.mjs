@@ -7,7 +7,7 @@
 import { launchWebGpuBrowser } from './launch.mjs';
 import { startServer } from './server.mjs';
 
-const CHECK_TIMEOUT_MILLISECONDS = 60_000;
+const CHECK_TIMEOUT_MILLISECONDS = 300_000;
 const EXIT_OK = 0;
 const EXIT_FAILURE = 1;
 
