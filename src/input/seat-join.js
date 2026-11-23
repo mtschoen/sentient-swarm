@@ -75,6 +75,8 @@ export class SeatJoin {
   reconnect(padIndex, gamepads) {
     if (!this.joined || this.seatTwoConnected(gamepads)) return false;
     this.seatTwoPad = padIndex;
+    // Buttons held right now count as held, so a press that is already down is not a leave press.
+    this.previousHeld.set(padIndex, this.snapshot(gamepads).get(padIndex) ?? new Set());
     return true;
   }
 
