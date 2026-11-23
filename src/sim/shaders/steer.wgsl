@@ -51,10 +51,10 @@ const STEERING_RESPONSE: f32 = 4.0;
 // Gradients (agents per coarse cell per cell) at or above this length steer at full weight;
 // weaker gradients steer proportionally, so field noise does not steer at full strength.
 const GRADIENT_SATURATION: f32 = 2.0;
-// Orbiters within this fraction of orbitRadius from the circle move along its tangent.
 // Danger gradients (danger units per cell) at or above this length dodge at full weight; a steady
 // stream of shots down one lane saturates it.
 const DANGER_GRADIENT_SATURATION: f32 = 0.5;
+// Orbiters within this fraction of orbitRadius from the circle move along its tangent.
 const ORBIT_TANGENT_BAND: f32 = 0.2;
 // Fraction of the time-optimal stopping speed that straight seek allows, leaving acceleration
 // headroom for the other terms that share the maximumTurn budget. The lab may expose it.
