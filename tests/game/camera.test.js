@@ -277,3 +277,49 @@ test('an omitted option is today\'s behavior', () => {
   }
   assert.deepEqual([plain.zoom, plain.centerX, plain.centerY], [explicit.zoom, explicit.centerX, explicit.centerY]);
 });
+
+// Below zoom 1 the view covers 1 / zoom times more world, so the dead zone and the clamp scale with it.
+const ZOOM_BELOW_ONE = 0.7;
+
+function cameraAtZoom(centerX, centerY) {
+  const camera = new Camera();
+  camera.cut(centerX, centerY, { ...VIEW, zoom: ZOOM_BELOW_ONE });
+  return camera;
+}
+
+function runAtZoom(camera, seconds, focusX, focusY) {
+  const steps = Math.round(seconds / STEP);
+  for (let index = 0; index < steps; index += 1) {
+    camera.update(STEP, { focusX, focusY, ...VIEW, targetZoom: ZOOM_BELOW_ONE });
+  }
+}
+
+test('below zoom 1 the dead zone is a fraction of the zoomed view, not of the base view', () => {
+  const halfZone = CAMERA_DEAD_ZONE_FRACTION * (16 / ZOOM_BELOW_ONE);
+  assert.ok(halfZone > CAMERA_DEAD_ZONE_FRACTION * 16, 'wider than the zoom 1 dead zone');
+  const inside = cameraAtZoom(16, 9);
+  runAtZoom(inside, 1, 16 + halfZone - 0.01, 9);
+  assert.equal(inside.centerX, 16, 'a focus inside the wider zone does not move the camera');
+  assert.equal(inside.zoom, ZOOM_BELOW_ONE);
+  // The same focus would have moved a zoom 1 camera, so the widened zone is what holds this one still.
+  assert.ok(16 + halfZone - 0.01 > 16 + CAMERA_DEAD_ZONE_FRACTION * 16);
+  const outside = cameraAtZoom(16, 9);
+  runAtZoom(outside, 2, 16 + halfZone + 2, 9);
+  assert.ok(Math.abs(outside.centerX - (16 + 2)) < 1e-3, `x ${outside.centerX}`);
+});
+
+test('below zoom 1 the overshoot clamp uses the zoomed extent on both axes', () => {
+  const extentX = 16 / ZOOM_BELOW_ONE;
+  const extentY = 9 / ZOOM_BELOW_ONE;
+  const reachX = extentX / 2 - CAMERA_OVERSHOOT_FRACTION * extentX;
+  const reachY = extentY / 2 - CAMERA_OVERSHOOT_FRACTION * extentY;
+  const camera = cameraAtZoom(16, 9);
+  runAtZoom(camera, 4, -5, -5);
+  assert.ok(Math.abs(camera.centerX - reachX) < 1e-3, `x ${camera.centerX} vs ${reachX}`);
+  assert.ok(Math.abs(camera.centerY - reachY) < 1e-3, `y ${camera.centerY} vs ${reachY}`);
+  runAtZoom(camera, 4, 40, 40);
+  assert.ok(Math.abs(camera.centerX - (32 - reachX)) < 1e-3, `x ${camera.centerX}`);
+  assert.ok(Math.abs(camera.centerY - (18 - reachY)) < 1e-3, `y ${camera.centerY}`);
+  // The zoom 1 limit is further out, so the zoomed clamp is the tighter one.
+  assert.ok(reachX > 8 - CAMERA_OVERSHOOT_FRACTION * 16);
+});

@@ -471,3 +471,17 @@ test('a halved wave period starts about twice the waves, and the wave state carr
   assert.ok(plain > 5);
   assert.ok(Math.abs(wavesIn(0.5) - 2 * plain) <= 3);
 });
+
+// canEmit alone, on a hand-built gate: advanceGate would close the gate first at the same
+// threshold, so only a direct call isolates the partner distance term.
+test('canEmit refuses a fully open gate inside the safe distance of the partner only', () => {
+  const director = new SpawnDirector({ random: seededRandom(3) });
+  const gate = { x: 16, y: 9, radius: 1, age: GATE_FADE_SECONDS * 2, lifetime: 100, closing: false, site: undefined };
+  const context = { playerX: 2, playerY: 2, aimX: 0, aimY: 0, safeDistance: SAFE_DISTANCE, partner: null, bounds: null };
+  assert.equal(director.canEmit(gate, context), true, 'no partner: the far player leaves the gate free');
+  const threshold = SAFE_DISTANCE + gate.radius;
+  const partnerAtDistance = (distance) => ({ x: gate.x + distance, y: gate.y, aimX: 0, aimY: 0 });
+  assert.equal(director.canEmit(gate, { ...context, partner: partnerAtDistance(threshold - 0.01) }), false);
+  assert.equal(director.canEmit(gate, { ...context, partner: partnerAtDistance(threshold) }), true, 'exactly at the threshold still emits');
+  assert.equal(director.canEmit(gate, { ...context, partner: partnerAtDistance(threshold + 5) }), true);
+});
