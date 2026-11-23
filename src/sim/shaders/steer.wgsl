@@ -19,6 +19,12 @@
 //   (saturatedDirection), so float noise in a flat over-dense interior pushes weakly instead of at
 //   full strength in a random direction.
 //
+// Dodge: the danger channel (live projectiles' look-ahead, projectiles_step.wgsl) is read from the
+// same five samples; the agent steers down its gradient (a sidestep off a lane of fire, which is a
+// ridge) with weight speciesField(FIELD_DODGE) times its direction saturated at
+// DANGER_GRADIENT_SATURATION. A species with dodge 0 adds exactly nothing; an agent dead on the
+// ridge sees no gradient.
+//
 // Seek aims at seekPointFor (common.wgsl): the nearest seek point, unless the agent's target flag
 // bits (hives only: a spawn from a hive a seat owns) name the opposing seat's point.
 // Seek also fades with distance from the nearest seek point when params.seekRange is above 0
@@ -46,6 +52,9 @@ const STEERING_RESPONSE: f32 = 4.0;
 // weaker gradients steer proportionally, so field noise does not steer at full strength.
 const GRADIENT_SATURATION: f32 = 2.0;
 // Orbiters within this fraction of orbitRadius from the circle move along its tangent.
+// Danger gradients (danger units per cell) at or above this length dodge at full weight; a steady
+// stream of shots down one lane saturates it.
+const DANGER_GRADIENT_SATURATION: f32 = 0.5;
 const ORBIT_TANGENT_BAND: f32 = 0.2;
 // Fraction of the time-optimal stopping speed that straight seek allows, leaving acceleration
 // headroom for the other terms that share the maximumTurn budget. The lab may expose it.
@@ -258,6 +267,9 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   let threatGradient = vec2f(channelOf(gradientX, THREAT_CHANNEL), channelOf(gradientY, THREAT_CHANNEL));
   desired = desired - saturatedDirection(threatGradient) * speciesField(species, FIELD_FLEE) * maximumSpeed;
+
+  let dangerGradient = vec2f(channelOf(gradientX, DANGER_CHANNEL), channelOf(gradientY, DANGER_CHANNEL));
+  desired = desired - dangerGradient / max(length(dangerGradient), DANGER_GRADIENT_SATURATION) * speciesField(species, FIELD_DODGE) * maximumSpeed;
 
   if (params.coarseFieldPressure != 0u && density > targetDensity) {
     let totalGradient = vec2f(totalDensity(gradientX), totalDensity(gradientY));

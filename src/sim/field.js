@@ -1,7 +1,9 @@
 // Coarse species field: per coarse cell, the density of each species (agents per coarse cell)
-// plus a decaying threat channel, downsampled from the sorted fine grid every frame and blurred.
-// Writers add threat in fixed point (1 unit = 1 / THREAT_FIXED_POINT_SCALE) with atomicAdd into
-// buffers.threatAccumulator; the convert step folds it into channel 5 and zeroes it.
+// plus a decaying threat channel and an undecayed danger channel, downsampled from the sorted fine
+// grid every frame and blurred. Writers add in fixed point (1 unit = 1 / THREAT_FIXED_POINT_SCALE)
+// with atomicAdd into buffers.threatAccumulator, which holds two cell-indexed arrays: threat words
+// [0, cells) and danger words [cells, 2 * cells). The convert step folds them into channels 5 and
+// 6 and zeroes them.
 import { BindGroupCache } from '../gpu/bind-group-cache.js';
 import { createStorageBuffer } from '../gpu/buffers.js';
 import { loadShader, prependCommon, substituteConstants } from '../gpu/shaders.js';
@@ -24,7 +26,7 @@ export class CoarseField {
     this.buffers = {
       raw: createStorageBuffer(this.device, fieldBytes, 'coarse-field-raw'),
       blurred: createStorageBuffer(this.device, fieldBytes, 'coarse-field-blurred'),
-      threatAccumulator: createStorageBuffer(this.device, COARSE_CELL_COUNT * BYTES_PER_FLOAT, 'coarse-field-threat-accumulator'),
+      threatAccumulator: createStorageBuffer(this.device, 2 * COARSE_CELL_COUNT * BYTES_PER_FLOAT, 'coarse-field-threat-accumulator'),
     };
     this.densityAccumulator = createStorageBuffer(this.device, COARSE_CELL_COUNT * SPECIES_COUNT * BYTES_PER_FLOAT, 'coarse-field-density-accumulator');
     this.pipelines = null;

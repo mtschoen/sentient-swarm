@@ -667,7 +667,7 @@ export class Simulation {
 
   // Browser checks only, never the game loop: resolves with a copy of the blurred coarse field as
   // a Float32Array of COARSE_COLUMNS * COARSE_ROWS cells, COARSE_CHANNELS floats each (species
-  // densities 0..4, threat, padding), as of the last submitted step.
+  // densities 0..4, threat, danger, padding), as of the last submitted step.
   async readCoarseField() {
     const source = this.field.buffers.blurred;
     const staging = this.device.createBuffer({ label: 'coarse-field-readback', size: source.size, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });

@@ -9,7 +9,10 @@
 //   early: every workgroupBarrier must stay in uniform control flow (FXC enforces this).
 // convert: one thread per coarse cell turns the density accumulators into floats (agents per
 //   coarse cell) and folds the threat accumulator into channel 5 with a 0.85 decay, then zeroes
-//   the threat accumulator entry. densityAccumulator is cleared by the encoder every frame.
+//   the threat accumulator entry. The danger words (DANGER_ACCUMULATOR_OFFSET past the threat
+//   words of the same buffer) fold into channel 6 with no decay, since every live projectile
+//   splats again each step, and are zeroed likewise. densityAccumulator is cleared by the
+//   encoder every frame.
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read> agents: array<Agent>;
@@ -90,7 +93,8 @@ fn convert(@builtin(global_invocation_id) globalId: vec3u) {
   }
   let accumulatedThreat = f32(atomicExchange(&threatAccumulator[cell], 0u)) / THREAT_FIXED_POINT_SCALE;
   raw[base + THREAT_CHANNEL] = raw[base + THREAT_CHANNEL] * THREAT_DECAY + accumulatedThreat;
-  for (var padding = THREAT_CHANNEL + 1u; padding < COARSE_CHANNELS; padding = padding + 1u) {
+  raw[base + DANGER_CHANNEL] = f32(atomicExchange(&threatAccumulator[DANGER_ACCUMULATOR_OFFSET + cell], 0u)) / THREAT_FIXED_POINT_SCALE;
+  for (var padding = DANGER_CHANNEL + 1u; padding < COARSE_CHANNELS; padding = padding + 1u) {
     raw[base + padding] = 0.0;
   }
 }

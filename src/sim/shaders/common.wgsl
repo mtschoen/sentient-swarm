@@ -240,8 +240,13 @@ fn coarseCellIndexFor(position: vec2f) -> u32 {
   return column + row * COARSE_COLUMNS;
 }
 
-// Coarse field channels: species densities 0..4 (agents per coarse cell), threat at 5, 6 and 7 padding.
+// Coarse field channels: species densities 0..4 (agents per coarse cell), threat at 5, danger at 6
+// (live projectiles' look-ahead, refreshed every step and not decayed), 7 padding.
 const THREAT_CHANNEL: u32 = 5u;
+const DANGER_CHANNEL: u32 = 6u;
+// threatAccumulator holds two cell-indexed u32 arrays: the threat words [0, cells) the kill shaders
+// write, then the danger words [cells, 2 * cells) the projectile step writes.
+const DANGER_ACCUMULATOR_OFFSET: u32 = COARSE_COLUMNS * COARSE_ROWS;
 
 fn coarseCellCoordinate(position: vec2f) -> vec2i {
   let cell = coarseCellIndexFor(position);
@@ -264,6 +269,8 @@ const FIELD_FLEE: u32 = 7u;
 const FIELD_PRESSURE: u32 = 8u;
 const FIELD_TARGET_DENSITY: u32 = 9u;
 const SPECIES_FIELD_HUE: u32 = 10u;
+// How strongly the species steers down the danger gradient (away from lanes of fire); 0 is neutral.
+const FIELD_DODGE: u32 = 11u;
 
 // Index helpers only: common.wgsl declares no bindings, so the shader that binds the table
 // wraps these in speciesField and matrixWeight.

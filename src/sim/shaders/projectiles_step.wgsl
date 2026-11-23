@@ -21,17 +21,33 @@
 // step); the detonations here are for an orb that met nothing.
 // A sidewinder's detonation ring is made by projectiles_collide.wgsl (MISSILE_RING_LIFETIME, the
 // missile flag); this pass grows and expires it like any ring. Ring constants are in common.wgsl.
-// Storage buffers: projectiles, field, stats = 3.
+// Danger: after a live projectile of any kind but the beam and the rings has moved (and still has
+// lifetime left, so a bullet that expired or an orb that detonates this step adds none), it adds
+// danger to the coarse field ahead of its new position along its velocity direction: points one
+// coarse cell apart covering DANGER_LOOKAHEAD_SECONDS of its own flight (at most
+// DANGER_MAXIMUM_SAMPLES), weights falling linearly from DANGER_NEAR_WEIGHT to DANGER_FAR_WEIGHT,
+// points outside the world skipped. The words are the danger half of the field's accumulator
+// (DANGER_ACCUMULATOR_OFFSET); the next step's convert folds them into channel 6 before steer.
+// Storage buffers: projectiles, field, stats, dangerAccumulator = 4.
 
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read_write> projectiles: array<Projectile>;
 @group(0) @binding(2) var<storage, read> field: array<vec4f>;
 @group(0) @binding(3) var<storage, read_write> stats: array<atomic<u32>, STATS_WORD_COUNT>;
+// The field's threatAccumulator buffer: only the danger words (from DANGER_ACCUMULATOR_OFFSET) are written here.
+@group(0) @binding(4) var<storage, read_write> dangerAccumulator: array<atomic<u32>>;
 
 const MINIMUM_LENGTH: f32 = 0.000001;
 // Sidewinder weave: radians per second and radians per second of lifetime.
 const WEAVE_TURN_RATE: f32 = 3.0;
 const WEAVE_FREQUENCY: f32 = 10.0;
+// Seconds of the projectile's own flight the danger look-ahead covers, and the most points it uses.
+const DANGER_LOOKAHEAD_SECONDS: f32 = 0.3;
+const DANGER_MAXIMUM_SAMPLES: u32 = 16u;
+// Weight (agents' worth of danger) at the projectile and at the far end of the look-ahead.
+const DANGER_NEAR_WEIGHT: f32 = 1.0;
+const DANGER_FAR_WEIGHT: f32 = 0.25;
+const DANGER_CELL_SIZE: f32 = WORLD_WIDTH / f32(COARSE_COLUMNS);
 
 // Species densities are channels 0..4 (SPECIES_COUNT): the low vector plus the high vector's x.
 fn totalDensity(coordinate: vec2i) -> f32 {
@@ -89,6 +105,25 @@ fn detonate(orb: Projectile) -> Projectile {
   return ring;
 }
 
+// Adds the look-ahead danger of a moving projectile at its new position.
+fn splatDanger(position: vec2f, velocity: vec2f) {
+  let speed = length(velocity);
+  if (speed < MINIMUM_LENGTH) {
+    return;
+  }
+  let direction = velocity / speed;
+  let sampleCount = clamp(u32(ceil(speed * DANGER_LOOKAHEAD_SECONDS / DANGER_CELL_SIZE)), 1u, DANGER_MAXIMUM_SAMPLES);
+  for (var index = 0u; index < sampleCount; index = index + 1u) {
+    let point = position + direction * (DANGER_CELL_SIZE * f32(index));
+    if (any(point < vec2f(0.0, 0.0)) || point.x >= WORLD_WIDTH || point.y >= WORLD_HEIGHT) {
+      continue;
+    }
+    let along = select(f32(index) / f32(sampleCount - 1u), 0.0, sampleCount == 1u);
+    let weight = mix(DANGER_NEAR_WEIGHT, DANGER_FAR_WEIGHT, along);
+    atomicAdd(&dangerAccumulator[DANGER_ACCUMULATOR_OFFSET + coarseCellIndexFor(point)], u32(weight * THREAT_FIXED_POINT_SCALE));
+  }
+}
+
 @compute @workgroup_size(WORKGROUP_SIZE)
 fn main(@builtin(global_invocation_id) globalId: vec3u) {
   let slot = globalId.x;
@@ -141,6 +176,9 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
       // skips rings), and the next step converts the orb before it moves.
       projectile.lifetime = 0.0;
     }
+  }
+  if (projectile.lifetime > 0.0) {
+    splatDanger(projectile.position, projectile.velocity);
   }
   projectiles[slot] = projectile;
 }

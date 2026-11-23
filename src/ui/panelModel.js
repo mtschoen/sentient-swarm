@@ -36,6 +36,7 @@ export const SPECIES_SLIDERS = [
   { key: 'flee', label: 'flee', minimum: 0, maximum: 4, step: 0.05 },
   { key: 'pressure', label: 'pressure', minimum: 0, maximum: 2, step: 0.01 },
   { key: 'targetDensity', label: 'target density', minimum: 1, maximum: 200, step: 1 },
+  { key: 'dodge', label: 'dodge (away from shots)', minimum: 0, maximum: 4, step: 0.05 },
 ];
 
 export const SHARE_SLIDER = { minimum: 0, maximum: 1, step: 0.01 };
