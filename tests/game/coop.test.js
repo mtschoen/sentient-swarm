@@ -581,3 +581,16 @@ test('a game-over restart from seat 2 alone works while seat 1 holds bomb or fir
     assert.equal(game.playerCount, 2);
   }
 });
+
+test('setPlayerCount(2) in watch mode throws and leaves the lab solo; 1 stays allowed', async () => {
+  const { game } = await createGame();
+  game.setWatch(0.5);
+  assert.equal(game.watching, true);
+  assert.throws(() => game.setPlayerCount(2), Error);
+  assert.equal(game.playerCount, 1);
+  game.setPlayerCount(1);
+  assert.equal(game.playerCount, 1);
+  game.setWatch(null);
+  game.setPlayerCount(2);
+  assert.equal(game.playerCount, 2);
+});
