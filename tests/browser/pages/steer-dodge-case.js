@@ -5,6 +5,10 @@
 //      step as live projectiles would) over sparse Chasers on both sides, 3 steps. With dodge 1.5 each
 //      agent's x velocity moves away from the ridge by at least MINIMUM_DODGE_SPEED compared with the
 //      same layout and no ridge; agents past the stencil (two cells out) are barely moved.
+// (j4) Flock: a probe Chaser on the near slope of a weak ridge (0.4 units, so the danger gradient is far
+//      from saturated) with a dense clump of Chasers across the ridge top. Alone it is pushed away from
+//      the ridge; with the clump it ends up moving toward the clump's side (the dodge direction is biased
+//      toward the flockmates), in both mirrorings, so a group straddling a lane picks the flock's side.
 // (j3) Neutral: with dodge 0 (every Chaser, and the shipped Orbiter) the ridge changes no velocity or
 //      position bit. Agents are sparse (no neighbor inside the neighbor radius), so runs are
 //      bit-reproducible despite the grid scatter's atomics.
@@ -30,9 +34,9 @@ function layout() {
   return [...NEAR_X, ...EDGE_X, ...FAR_X].flatMap((x) => ROW_Y.map((y) => [x, y]));
 }
 
-function writeRidge(harness) {
+function writeRidge(harness, units = RIDGE_UNITS) {
   const words = new Uint32Array(CELLS * 2);
-  for (let row = 0; row < RIDGE_ROWS; row += 1) words[CELLS + row * COARSE_COLUMNS + RIDGE_COLUMN] = RIDGE_UNITS * FIXED_POINT;
+  for (let row = 0; row < RIDGE_ROWS; row += 1) words[CELLS + row * COARSE_COLUMNS + RIDGE_COLUMN] = units * FIXED_POINT;
   harness.device.queue.writeBuffer(harness.field.buffers.threatAccumulator, 0, words);
 }
 
@@ -74,6 +78,28 @@ async function velocities(gpu, common, helpers, { species, rows, ridge }) {
   });
 }
 
+// x velocity of a probe Chaser at PROBE_X after DODGE_STEPS steps in a weak ridge, with or without a clump of
+// FLOCK_SIZE Chasers on the ridge top and beyond; mirrored reflects the layout about the ridge center.
+const PROBE_X = 7.85;
+const FLOCK_SIZE = 60;
+const WEAK_RIDGE_UNITS = 0.4;
+async function probeVelocity(gpu, common, helpers, { flock, mirrored }) {
+  const reflect = (x) => (mirrored ? 2 * (RIDGE_COLUMN + 0.5) * COARSE_CELL_SIZE - x : x);
+  const positions = [[reflect(PROBE_X), 5]];
+  if (flock) {
+    for (let index = 0; index < FLOCK_SIZE; index += 1) positions.push([reflect(8.05 + 0.08 * (index % 6)), 4.7 + 0.06 * Math.floor(index / 6)]);
+  }
+  const harness = new helpers.Harness(gpu, common, positions.length);
+  await harness.initialize();
+  harness.seed(helpers.packAgents(positions, helpers.chaser, helpers.randomSource(9)), defaultSpecies());
+  for (let step = 0; step < DODGE_STEPS; step += 1) {
+    writeRidge(harness, WEAK_RIDGE_UNITS);
+    await harness.run(1);
+  }
+  const view = new DataView(await harness.readBuffer(harness.agentsIn, positions.length * AGENT_STRIDE_BYTES));
+  return view.getFloat32(AGENT_OFFSETS.velocity, true);
+}
+
 function identical(first, second) {
   return first.every((agent, index) => Object.keys(agent).every((key) => Object.is(agent[key], second[index][key])));
 }
@@ -101,6 +127,13 @@ export async function checkDodge(gpu, common, helpers) {
   verdict(least(speeds.near) >= MINIMUM_DODGE_SPEED, `near agents gain at least ${MINIMUM_DODGE_SPEED} away from the ridge in ${DODGE_STEPS} steps (least ${least(speeds.near).toFixed(3)})`);
   verdict(least(speeds.edge) >= MINIMUM_DODGE_SPEED / 2, `agents two cells out gain at least ${MINIMUM_DODGE_SPEED / 2} (least ${least(speeds.edge).toFixed(3)}, so the plain stencil reaches them)`);
   verdict(most(speeds.far) <= FAR_DODGE_SPEED, `agents beyond the stencil move by at most ${FAR_DODGE_SPEED} (most ${most(speeds.far).toFixed(3)})`);
+
+  for (const mirrored of [false, true]) {
+    const side = mirrored ? -1 : 1;
+    const alone = side * await probeVelocity(gpu, common, helpers, { flock: false, mirrored });
+    const withFlock = side * await probeVelocity(gpu, common, helpers, { flock: true, mirrored });
+    verdict(alone < 0 && withFlock > 0, `${mirrored ? 'mirrored ' : ''}probe on a weak ridge moves ${alone.toFixed(3)} toward the ridge side alone (away: need < 0) and ${withFlock.toFixed(3)} with a flock across it (need > 0)`);
+  }
 
   const stoic = defaultSpecies().map((row) => ({ ...row, dodge: 0 }));
   verdict(identical(await velocities(gpu, common, helpers, { species: chaser, rows: stoic, ridge: true }), await velocities(gpu, common, helpers, { species: chaser, rows: stoic, ridge: false })), 'dodge 0 Chasers are bit-identical with and without the ridge');
