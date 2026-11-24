@@ -47,7 +47,7 @@
 @group(0) @binding(0) var<uniform> params: SimParams;
 @group(0) @binding(1) var<storage, read_write> agents: array<Agent>;
 @group(0) @binding(2) var<storage, read_write> spawnBudget: array<atomic<i32>, SPECIES_COUNT>;
-// The blurred coarse field, two vec4f per cell: species 0..3, then species 4, threat, padding.
+// The blurred coarse field, two vec4f per cell: species 0..3, then species 4, threat, danger, padding.
 @group(0) @binding(3) var<storage, read> field: array<vec4f>;
 
 const POSITION_ATTEMPTS: u32 = 16u;
