@@ -22,8 +22,11 @@
 // Dodge: the danger channel (live projectiles' look-ahead, projectiles_step.wgsl) is read from the
 // same five samples; the agent steers down its gradient (a sidestep off a lane of fire, which is a
 // ridge) with weight speciesField(FIELD_DODGE) times its direction saturated at
-// DANGER_GRADIENT_SATURATION. A species with dodge 0 adds exactly nothing; an agent dead on the
-// ridge sees no gradient.
+// DANGER_GRADIENT_SATURATION. While dodging the acceleration cap is also multiplied by
+// 1 + DODGE_ACCELERATION_BOOST * dodge * saturation (saturation: the 0 to 1 length of the
+// saturated direction), a dart off the lane; speed stays clamped to maximumSpeed. A species with
+// dodge 0, or an agent where danger is zero, gets exactly nothing and a multiplier of exactly 1;
+// an agent dead on the ridge sees no gradient.
 //
 // Seek aims at seekPointFor (common.wgsl): the nearest seek point, unless the agent's target flag
 // bits (hives only: a spawn from a hive a seat owns) name the opposing seat's point.
@@ -54,6 +57,8 @@ const GRADIENT_SATURATION: f32 = 2.0;
 // Danger gradients (danger units per cell) at or above this length dodge at full weight; a steady
 // stream of shots down one lane saturates it.
 const DANGER_GRADIENT_SATURATION: f32 = 0.5;
+// Extra acceleration cap share per unit of dodge at full saturation.
+const DODGE_ACCELERATION_BOOST: f32 = 1.0;
 // Orbiters within this fraction of orbitRadius from the circle move along its tangent.
 const ORBIT_TANGENT_BAND: f32 = 0.2;
 // Fraction of the time-optimal stopping speed that straight seek allows, leaving acceleration
@@ -269,7 +274,10 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   desired = desired - saturatedDirection(threatGradient) * speciesField(species, FIELD_FLEE) * maximumSpeed;
 
   let dangerGradient = vec2f(channelOf(gradientX, DANGER_CHANNEL), channelOf(gradientY, DANGER_CHANNEL));
-  desired = desired - dangerGradient / max(length(dangerGradient), DANGER_GRADIENT_SATURATION) * speciesField(species, FIELD_DODGE) * maximumSpeed;
+  let dangerDirection = dangerGradient / max(length(dangerGradient), DANGER_GRADIENT_SATURATION);
+  let dodge = speciesField(species, FIELD_DODGE);
+  desired = desired - dangerDirection * dodge * maximumSpeed;
+  let dartCap = maximumAcceleration * (1.0 + DODGE_ACCELERATION_BOOST * dodge * length(dangerDirection));
 
   if (params.coarseFieldPressure != 0u && density > targetDensity) {
     let totalGradient = vec2f(totalDensity(gradientX), totalDensity(gradientY));
@@ -278,8 +286,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   var steering = (desired - agent.velocity) * STEERING_RESPONSE;
   let steeringLength = length(steering);
-  if (steeringLength > maximumAcceleration) {
-    steering = steering * (maximumAcceleration / steeringLength);
+  if (steeringLength > dartCap) {
+    steering = steering * (dartCap / steeringLength);
   }
   var velocity = agent.velocity + steering * params.dt;
   let speed = length(velocity);

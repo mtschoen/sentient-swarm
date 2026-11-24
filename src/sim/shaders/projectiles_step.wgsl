@@ -26,7 +26,11 @@
 // danger to the coarse field ahead of its new position along its velocity direction: points one
 // coarse cell apart covering DANGER_LOOKAHEAD_SECONDS of its own flight (at most
 // DANGER_MAXIMUM_SAMPLES), weights falling linearly from DANGER_NEAR_WEIGHT to DANGER_FAR_WEIGHT,
-// points outside the world skipped. The words are the danger half of the field's accumulator
+// points outside the world skipped. Each point also splats the DANGER_SIDE_CELLS cells either side
+// of it perpendicular to the velocity, weight falling linearly to zero one cell past the last, so
+// a lane is a wide ridge whose slope reaches about a unit sideways after the blur. The atomicAdd
+// count per projectile per step is bounded: at most DANGER_MAXIMUM_SAMPLES * (2 * DANGER_SIDE_CELLS + 1)
+// (24 by 7 = 168). The words are the danger half of the field's accumulator
 // (DANGER_ACCUMULATOR_OFFSET); the next step's convert folds them into channel 6 before steer.
 // Storage buffers: projectiles, field, stats, dangerAccumulator = 4.
 
@@ -42,8 +46,10 @@ const MINIMUM_LENGTH: f32 = 0.000001;
 const WEAVE_TURN_RATE: f32 = 3.0;
 const WEAVE_FREQUENCY: f32 = 10.0;
 // Seconds of the projectile's own flight the danger look-ahead covers, and the most points it uses.
-const DANGER_LOOKAHEAD_SECONDS: f32 = 0.3;
-const DANGER_MAXIMUM_SAMPLES: u32 = 16u;
+const DANGER_LOOKAHEAD_SECONDS: f32 = 0.5;
+const DANGER_MAXIMUM_SAMPLES: u32 = 24u;
+// Cells splatted each side of a look-ahead point, perpendicular to the velocity.
+const DANGER_SIDE_CELLS: i32 = 3;
 // Weight (agents' worth of danger) at the projectile and at the far end of the look-ahead.
 const DANGER_NEAR_WEIGHT: f32 = 1.0;
 const DANGER_FAR_WEIGHT: f32 = 0.25;
@@ -112,6 +118,7 @@ fn splatDanger(position: vec2f, velocity: vec2f) {
     return;
   }
   let direction = velocity / speed;
+  let perpendicular = vec2f(-direction.y, direction.x);
   let sampleCount = clamp(u32(ceil(speed * DANGER_LOOKAHEAD_SECONDS / DANGER_CELL_SIZE)), 1u, DANGER_MAXIMUM_SAMPLES);
   for (var index = 0u; index < sampleCount; index = index + 1u) {
     let point = position + direction * (DANGER_CELL_SIZE * f32(index));
@@ -120,7 +127,14 @@ fn splatDanger(position: vec2f, velocity: vec2f) {
     }
     let along = select(f32(index) / f32(sampleCount - 1u), 0.0, sampleCount == 1u);
     let weight = mix(DANGER_NEAR_WEIGHT, DANGER_FAR_WEIGHT, along);
-    atomicAdd(&dangerAccumulator[DANGER_ACCUMULATOR_OFFSET + coarseCellIndexFor(point)], u32(weight * THREAT_FIXED_POINT_SCALE));
+    for (var side = -DANGER_SIDE_CELLS; side <= DANGER_SIDE_CELLS; side = side + 1) {
+      let sidePoint = point + perpendicular * (DANGER_CELL_SIZE * f32(side));
+      if (any(sidePoint < vec2f(0.0, 0.0)) || sidePoint.x >= WORLD_WIDTH || sidePoint.y >= WORLD_HEIGHT) {
+        continue;
+      }
+      let sideWeight = weight * (1.0 - f32(abs(side)) / f32(DANGER_SIDE_CELLS + 1));
+      atomicAdd(&dangerAccumulator[DANGER_ACCUMULATOR_OFFSET + coarseCellIndexFor(sidePoint)], u32(sideWeight * THREAT_FIXED_POINT_SCALE));
+    }
   }
 }
 

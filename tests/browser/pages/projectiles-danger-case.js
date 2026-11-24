@@ -11,10 +11,13 @@ const CELL_SIZE = 0.25;
 const SPEED = 8;
 const START = [5, 4.5];
 const STEP_SECONDS = 1 / 60;
-// ceil(SPEED * 0.3 / CELL_SIZE) samples, weights falling linearly from 1 to 0.25.
-const SAMPLE_COUNT = 10;
-const EXPECTED_TOTAL = (SAMPLE_COUNT * (1 + 0.25)) / 2;
-const TOTAL_TOLERANCE = 0.05;
+// ceil(SPEED * 0.5 / CELL_SIZE) samples, weights falling linearly from 1 to 0.25, each splatted across
+// 7 cells weighted 1, 0.75, 0.5, 0.25 outward (sum 4).
+const SAMPLE_COUNT = 16;
+const SIDE_CELLS = 3;
+const SIDE_WEIGHT_SUM = 1 + 2 * (0.75 + 0.5 + 0.25);
+const EXPECTED_TOTAL = ((SAMPLE_COUNT * (1 + 0.25)) / 2) * SIDE_WEIGHT_SUM;
+const TOTAL_TOLERANCE = 0.3;
 
 function spawnOf(kind, overrides = {}) {
   return { x: START[0], y: START[1], velocityX: SPEED, velocityY: 0, radius: 0.05, lifetime: 2, kind, extra: 0, ...overrides };
@@ -42,8 +45,10 @@ export async function runDangerCase(harness) {
   const occupied = danger.map((value, cell) => [value, cell]).filter(([value]) => value > 1e-6).map(([, cell]) => columnOf(cell));
   const row = Math.floor(START[1] / CELL_SIZE);
   check(Math.abs(total(danger) - EXPECTED_TOTAL) <= TOTAL_TOLERANCE, `a bullet's splat totals ${total(danger).toFixed(3)} (need ${EXPECTED_TOTAL} within ${TOTAL_TOLERANCE})`);
+  const occupiedRows = danger.map((value, cell) => [value, cell]).filter(([value]) => value > 1e-6).map(([, cell]) => Math.floor(cell / COARSE_COLUMNS));
+  check(Math.min(...occupiedRows) >= row - SIDE_CELLS - 1 && Math.max(...occupiedRows) <= row + SIDE_CELLS + 1 && Math.max(...occupiedRows) - Math.min(...occupiedRows) >= 2 * SIDE_CELLS, `the ridge is ${SIDE_CELLS} cells wide each side: rows ${Math.min(...occupiedRows)} to ${Math.max(...occupiedRows)} around row ${row}`);
   check(Math.min(...occupied) >= headColumn - 1, `nothing behind the bullet: least column ${Math.min(...occupied)} (head column ${headColumn}, one cell of blur allowed)`);
-  check(Math.max(...occupied) >= headColumn + SAMPLE_COUNT - 2, `danger reaches ahead: greatest column ${Math.max(...occupied)} (need >= ${headColumn + SAMPLE_COUNT - 2})`);
+  check(Math.max(...occupied) >= headColumn + SAMPLE_COUNT - 3, `danger reaches ahead: greatest column ${Math.max(...occupied)} (need >= ${headColumn + SAMPLE_COUNT - 3})`);
   const near = danger[row * COARSE_COLUMNS + headColumn + 1];
   const far = danger[row * COARSE_COLUMNS + headColumn + SAMPLE_COUNT - 2];
   check(near > far && far > 0, `danger falls with distance ahead: near ${near.toFixed(3)} then far ${far.toFixed(3)}`);
