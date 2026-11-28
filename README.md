@@ -21,7 +21,7 @@ Play it at https://mtschoen.com/games/sentient-swarm/ or https://mtschoen.github
 
 ## How to play
 
-You are a one-hit ship in an arena full of flocking enemies. One touch kills you. Shoot to score, grab weapon pickups, and survive. The game waits on a Ready screen until your first click, tap or button press (moving also starts it); starting clears the arena.
+You fly a swarm of 12 small ships in an arena full of flocking enemies. Each enemy touch kills the ship it hits, and you lose when the last ship is gone. Every 100 kills adds a ship, up to 256. Shoot to score, grab weapon pickups, and survive. The game waits on a Ready screen until your first click, tap or button press (moving also starts it); starting clears the arena.
 
 ### Controls
 
@@ -32,10 +32,10 @@ You are a one-hit ship in an arena full of flocking enemies. One touch kills you
 | Touch | Left half of the screen, a floating stick | Right half, a floating stick that aims and fires | The bomb button, lower right | The pause button at the top centre of the arena |
 
 - The title menu has Play, Online (two players on different networks, hives or versus), Lab and Settings; the pause menu has Resume, Settings, Restart run and Quit to title. Arrow keys, the d-pad, the left stick, Enter, Space and the face buttons drive both menus. Play also starts on a tap or click anywhere on the title screen. The game pauses itself when the tab is hidden, the window loses focus or a phone is held in portrait (an overlay asks you to rotate to landscape).
-- A bomb kills every agent in the arena and scores nothing. You start with 3 bombs and 3 lives, and a press with no bombs left does nothing.
-- After a hit you die, the arena clears (that scores nothing either), and you respawn after a short pause with 2 seconds of invulnerability. With no lives left the run ends; use Play again (or tap), or press fire or bomb on a gamepad or Space on the keyboard, to restart.
+- A bomb kills every agent within 1.2 view half-diagonals of your swarm and scores nothing. You start with 3 bombs (one pool, shared by both players in co-op), and a press with no bombs left does nothing.
+- There is one life: when your last ship is lost the arena clears (that scores nothing either) and the run ends after a short pause. In co-op a wiped swarm only goes down while the other player still flies (see Two players). Use Play again (or tap), or press fire or bomb on a gamepad or Space on the keyboard, to restart.
 - The right mouse button is only a bomb in the game. The 4x inspect zoom it used to hold exists in the Lab only.
-- On a gamepad, rumble plays on a bomb, a death, a pickup and an extra life (a trigger rumble where the pad supports it, else the dual motors); a phone buzzes briefly on a bomb and a death where the platform allows it.
+- On a gamepad, rumble plays on a bomb, a death and a pickup (a trigger rumble where the pad supports it, else the dual motors); a phone buzzes briefly on a bomb and a death where the platform allows it.
 - Keys: M mutes or resumes all sound, O opens the settings panel (so does the Settings button at the bottom left), backquote opens the Lab.
 
 ### Two players

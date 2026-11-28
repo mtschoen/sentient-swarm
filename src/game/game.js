@@ -320,6 +320,7 @@ export class Game {
   setPlayerCount(count) {
     if (!(count === 1 || count === MAXIMUM_PLAYER_SEATS)) throw new RangeError(`player count must be 1 or ${MAXIMUM_PLAYER_SEATS}, got ${count}`);
     if (this.run.phase !== RunPhase.Ready) throw new Error('the player count changes only in Ready');
+    if (count === MAXIMUM_PLAYER_SEATS && this.watching) throw new Error('the lab is solo: leave watch mode before seating a second player');
     if (count === this.seats.length) return;
     if (count === 2) {
       this.seats.push(new PlayerSeat({ index: 1, random: this.random, bounds: this.worldBounds }));

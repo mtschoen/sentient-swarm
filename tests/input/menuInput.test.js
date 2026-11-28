@@ -118,3 +118,50 @@ test('a button held on the extra pad when it is set gives no action until releas
   second.buttons[0].pressed = true;
   assert.deepEqual(input.poll(), ['confirm']);
 });
+
+test('an extra pad set before the first poll and held then gives no action', () => {
+  const { input, second } = twoPadSetup();
+  input.setExtraPad(1);
+  second.buttons[0].pressed = true;
+  assert.deepEqual(input.poll(), [], 'the first poll only records what is held');
+  assert.deepEqual(input.poll(), [], 'still held, still nothing');
+  second.buttons[0].pressed = false;
+  input.poll();
+  second.buttons[0].pressed = true;
+  assert.deepEqual(input.poll(), ['confirm']);
+});
+
+test('clearing the extra pad and setting it again while its button is held gives no action', () => {
+  const { input, second } = twoPadSetup();
+  input.poll();
+  input.setExtraPad(1);
+  input.poll();
+  second.buttons[0].pressed = true;
+  assert.deepEqual(input.poll(), ['confirm']);
+  input.setExtraPad(null);
+  input.setExtraPad(1);
+  assert.deepEqual(input.poll(), [], 'the held button is not a new press');
+  second.buttons[0].pressed = false;
+  input.poll();
+  second.buttons[0].pressed = true;
+  assert.deepEqual(input.poll(), ['confirm']);
+});
+
+test('pads are matched by their index, not their position, when the list has null holes', () => {
+  const windowObject = { addEventListener() {}, removeEventListener() {} };
+  const makePad = (index) => ({ index, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false })) });
+  const first = makePad(0);
+  const third = makePad(2);
+  // Index 2 sits at array position 3, so position and index differ, with holes before it.
+  const navigatorObject = { getGamepads: () => [first, null, null, third] };
+  const input = createMenuInput({ windowObject, navigatorObject });
+  input.setExtraPad(2);
+  input.poll();
+  third.buttons[9].pressed = true;
+  assert.deepEqual(input.poll(), ['pause'], 'the extra pad is found by its index');
+  third.buttons[9].pressed = false;
+  input.poll();
+  first.buttons[0].pressed = true;
+  third.buttons[0].pressed = true;
+  assert.deepEqual(input.poll(), ['confirm', 'confirm']);
+});

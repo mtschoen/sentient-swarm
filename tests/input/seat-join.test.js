@@ -136,6 +136,20 @@ test('a pad seated by reconnect with R1 held does not leave on the next poll', (
   assert.equal(join.poll(returned, { open: true }), null);
 });
 
+test('a pad already listed with nothing held, seated by reconnect with R1 down, does not leave on the next poll', () => {
+  const join = primed([pad(0), pad(1)]);
+  join.poll([pad(0), pad(1, [0])], { open: true });
+  join.poll([pad(0), null], { open: true });
+  // The returned pad is listed idle first, so the join logic already holds an empty entry for it.
+  join.poll([pad(0), null, pad(2)], { open: true });
+  const pressed = [pad(0), null, pad(2, [5])];
+  assert.equal(join.reconnect(2, pressed), true);
+  assert.equal(join.poll(pressed, { open: true }), null, 'the held R1 was seeded by reconnect');
+  assert.equal(join.seatTwoPad, 2);
+  assert.equal(join.poll([pad(0), null, pad(2)], { open: true }), null);
+  assert.equal(join.poll(pressed, { open: true }), 'left', 'a fresh press still leaves');
+});
+
 test('a pad that appears while the title is closed is primed when it reopens', () => {
   const join = primed([pad(0)]);
   assert.equal(join.poll([pad(0), pad(1, [5])], { open: false }), null);

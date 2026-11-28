@@ -546,3 +546,51 @@ test('setNeutralImmuneSeats marks only the named seat neutral-immune in its uplo
   assert.equal(second.neutralImmune, true);
   assert.equal(second.invulnerable, false);
 });
+
+test('the 100th revive kill and the survivor wipe in one stats frame revive seat 2 and take seat 1 down', async () => {
+  const { game, simulation } = await startTwoSeats();
+  // 50 kills first leave seat 1 half way to its next ship, so the final 40 do not grow a ship that the wipe mask would spare.
+  updateWithStats(game, simulation, { killsSinceLastRead: 50 });
+  updateWithStats(game, simulation, SECOND_WIPE);
+  updateWithStats(game, simulation, { killsSinceLastRead: 60 });
+  assert.equal(game.seats[1].down, true);
+  const events = [];
+  game.effects = { seatDown: (index) => events.push(index), death: () => events.push('death') };
+  updateWithStats(game, simulation, { killsSinceLastRead: 40, swarmHitMask: SWARM_WIPE_MASK });
+  assert.equal(game.state.phase, 'playing', 'the revived seat keeps the run alive');
+  assert.equal(game.seats[1].down, false);
+  assert.equal(game.seats[1].aliveCount, 12);
+  assert.equal(game.seats[0].down, true);
+  assert.equal(game.seats[0].aliveCount, 0);
+  assert.deepEqual(events, [0]);
+});
+
+test('a game-over restart from seat 2 alone works while seat 1 holds bomb or fire', async () => {
+  for (const heldControl of ['bomb', 'firing']) {
+    const harness = await startTwoSeats();
+    const { game, input } = harness;
+    input.state[heldControl] = true;
+    game.update(STEP);
+    reachTwoSeatGameOver(harness, { seatTwoDown: false });
+    assert.equal(game.state.phase, 'gameOver');
+    game.update(STEP);
+    assert.equal(game.state.phase, 'gameOver', `seat 1 holding ${heldControl} through game over is not a fresh press`);
+    input.seatTwoState.bomb = true;
+    game.update(STEP);
+    assert.equal(game.state.phase, 'playing', `seat 2's fresh press restarts while seat 1 holds ${heldControl}`);
+    assert.equal(game.playerCount, 2);
+  }
+});
+
+test('setPlayerCount(2) in watch mode throws and leaves the lab solo; 1 stays allowed', async () => {
+  const { game } = await createGame();
+  game.setWatch(0.5);
+  assert.equal(game.watching, true);
+  assert.throws(() => game.setPlayerCount(2), Error);
+  assert.equal(game.playerCount, 1);
+  game.setPlayerCount(1);
+  assert.equal(game.playerCount, 1);
+  game.setWatch(null);
+  game.setPlayerCount(2);
+  assert.equal(game.playerCount, 2);
+});
