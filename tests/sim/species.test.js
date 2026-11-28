@@ -16,7 +16,7 @@ test('default species follow the field and name tables', () => {
   assert.equal(SPECIES_FIELDS.length, 12);
   assert.deepEqual(rows.map((row) => row.name), SPECIES_NAMES);
   assert.deepEqual(rows.map((row) => row.glyph), [0, 1, 2, 3, 4]);
-  for (const row of rows) { assert.equal(row.reserved1, 0); }
+  assert.deepEqual(rows.map((row) => row.dodge), [1.5, 0, 0, 0, 0]);
 });
 
 test('normalizeShares sums to one and handles all zeros', () => {
@@ -171,4 +171,10 @@ test('Simulation.create defaults shares to the normalized DEFAULT_SHARES', async
   const { readFile } = await import('node:fs/promises');
   const source = await readFile(new URL('../../src/sim/simulation.js', import.meta.url), 'utf8');
   assert.match(source, /^\s*shares = normalizeShares\(DEFAULT_SHARES\),$/m);
+});
+
+test('packSpeciesTable packs dodge at field index 11: Chaser 1.5, every other species 0', () => {
+  const table = packSpeciesTable(defaultSpecies(), defaultMatrix());
+  assert.equal(SPECIES_FIELDS[11], 'dodge');
+  assert.deepEqual([0, 1, 2, 3, 4].map((index) => table[index * 12 + 11]), [Math.fround(1.5), 0, 0, 0, 0]);
 });

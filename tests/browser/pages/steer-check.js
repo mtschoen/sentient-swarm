@@ -8,7 +8,8 @@
 // population and at the initial ramp, (g) with a second player point, each of two Chaser groups seeks the
 // nearer point, (h) a seek range: groups inside it close on the nearest seek point as without a range, groups
 // beyond it do not, for one and two seek points, (i) hives seek targets: agents whose target flag bits name the
-// other seek point seek it, and spawns from an owned gate row carry those bits (steer-targets-case.js).
+// other seek point seek it, and spawns from an owned gate row carry those bits (steer-targets-case.js), (j) dodge:
+// the danger channel folds undecayed, Chasers step away from a ridge of danger, and dodge 0 is bit-neutral (steer-dodge-case.js).
 import { createGpuContext } from '/src/gpu/device.js';
 import { createStorageBuffer, createUniformBuffer } from '/src/gpu/buffers.js';
 import { loadShader, substituteConstants } from '/src/gpu/shaders.js';
@@ -20,6 +21,7 @@ import { CoarseField } from '/src/sim/field.js';
 import { Steering } from '/src/sim/steer.js';
 import { separationAverage } from './steer-reference.js';
 import { checkSeekTargets } from './steer-targets-case.js';
+import { checkDodge } from './steer-dodge-case.js';
 
 const NEIGHBOR_RADIUS = 0.1;
 const STEP_SECONDS = 1 / 60;
@@ -658,6 +660,8 @@ const infoNoClumpInitialRamp = (gpu, common) => shippedClump(gpu, common, INITIA
 
 const checkTargets = (gpu, common) => checkSeekTargets(gpu, common, { Harness, packAgents, randomSource, validityFailure, mean, chaser: CHASER });
 
+const checkDodgeCase = (gpu, common) => checkDodge(gpu, common, { Harness, packAgents, randomSource, chaser: CHASER });
+
 async function runCheck() {
   const gpu = await createGpuContext(document.getElementById('canvas'));
   let lostReason = null;
@@ -665,7 +669,7 @@ async function runCheck() {
   gpu.device.addEventListener('uncapturederror', (event) => { console.error(`uncaptured WebGPU error: ${event.error.message}`); });
   const common = substituteConstants(await loadShader('common'), SHADER_CONSTANTS);
   const results = [];
-  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNearestPlayer, checkSeekRange, checkTargets, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp, infoNoClumpSparse, infoNoClumpInitialRamp]) {
+  for (const check of [checkSeek, checkDenseCell, checkLatticeSpacing, checkPressure, checkNeighborCap, checkNearestPlayer, checkSeekRange, checkTargets, checkDodgeCase, checkNoClumpFull, checkNoClumpSparse, checkNoClumpInitialRamp, infoNoClumpSparse, infoNoClumpInitialRamp]) {
     results.push(await check(gpu, common));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${results.map((result) => result.detail).join('; ')}` };
   }

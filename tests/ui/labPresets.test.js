@@ -174,3 +174,18 @@ test('decodeMix rejects NaN-like and string numbers in a full-length mix', () =>
     assert.equal(decodeMix(encodeRaw({ ...good, shares: [bad, 1, 1, 1, 1] })), null, String(bad));
   }
 });
+
+test('a mix round trips dodge and an old link without it takes the shipped dodge of each species', () => {
+  const good = BUNDLED_MIXES.default;
+  const dodgeIndex = RULE_FIELDS.indexOf('dodge');
+  assert.equal(dodgeIndex, RULE_FIELDS.length - 1);
+  assert.deepEqual(good.rules.map((row) => row[dodgeIndex]), [1.5, 0, 0, 0, 0]);
+  const tuned = { ...good, rules: good.rules.map((row, index) => (index === 2 ? [...row.slice(0, dodgeIndex), 3.25] : row)) };
+  assert.equal(decodeMix(encodeMix(tuned)).rules[2][dodgeIndex], 3.25);
+  const legacy = { ...good, rules: good.rules.map((row) => row.slice(0, dodgeIndex)) };
+  const decoded = decodeMix(encodeMix(legacy));
+  assert.notEqual(decoded, null);
+  assert.deepEqual(decoded.rules, good.rules);
+  assert.equal(decodeMix(encodeMix({ ...good, rules: good.rules.map((row) => [...row.slice(0, dodgeIndex), 4.5]) })), null, 'dodge range is 0 to 4');
+  assert.equal(decodeMix(encodeMix({ ...good, rules: good.rules.map((row) => row.slice(0, dodgeIndex - 1)) })), null, 'other lengths stay invalid');
+});

@@ -5,7 +5,9 @@
 //   version: 1
 //   shares: 5 non-negative numbers, not all zero (spawn share per species, normalized on use)
 //   rules: 5 rows (species order of SPECIES_NAMES), each RULE_FIELDS.length numbers in the order of
-//          RULE_FIELDS, each within RULE_RANGES (hue and glyph are not part of a mix)
+//          RULE_FIELDS, each within RULE_RANGES (hue and glyph are not part of a mix). A row from
+//          before dodge was added has LEGACY_RULE_FIELD_COUNT numbers: decodeMix and the saved
+//          mixes complete it with the shipped dodge of that species row.
 //   matrix: 25 numbers in [-4, 4], row-major interaction matrix (row acts on column)
 //   neighborRadius: number in [0.05, 0.5]
 //   simulationRate: 'full' | 'half'
@@ -26,11 +28,13 @@ import { DEFAULT_SHARES, defaultMatrix, defaultSpecies } from '../sim/species.js
 
 export const MIX_VERSION = 1;
 export const SAVED_MIXES_KEY = 'murmuration.mixes.v1';
-export const RULE_FIELDS = ['seek', 'cohesion', 'alignment', 'separation', 'maximumSpeed', 'maximumTurn', 'orbitRadius', 'flee', 'pressure', 'targetDensity'];
+export const RULE_FIELDS = ['seek', 'cohesion', 'alignment', 'separation', 'maximumSpeed', 'maximumTurn', 'orbitRadius', 'flee', 'pressure', 'targetDensity', 'dodge'];
+// Rows saved or shared before dodge was a rule have the fields up to targetDensity only.
+export const LEGACY_RULE_FIELD_COUNT = RULE_FIELDS.length - 1;
 
 export const RULE_RANGES = {
   seek: [0, 5], cohesion: [0, 5], alignment: [0, 5], separation: [0, 5], maximumSpeed: [0, 20],
-  maximumTurn: [0, 5], orbitRadius: [0, 8], flee: [0, 10], pressure: [0, 5], targetDensity: [0, 200],
+  maximumTurn: [0, 5], orbitRadius: [0, 8], flee: [0, 10], pressure: [0, 5], targetDensity: [0, 200], dodge: [0, 4],
 };
 const MATRIX_RANGE = [-4, 4];
 const NEIGHBOR_RADIUS_RANGE = [0.05, 0.5];
@@ -84,7 +88,7 @@ function validKnobs(knobs) {
 
 function validRules(rules) {
   return Array.isArray(rules) && rules.length === SPECIES_COUNT && rules.every((row) =>
-    Array.isArray(row) && row.length === RULE_FIELDS.length && row.every((value, index) => inRange(value, RULE_RANGES[RULE_FIELDS[index]])));
+    Array.isArray(row) && (row.length === RULE_FIELDS.length || row.length === LEGACY_RULE_FIELD_COUNT) && row.every((value, index) => inRange(value, RULE_RANGES[RULE_FIELDS[index]])));
 }
 
 // Shares are normalized in a Float32Array (species.js), so a share past about 3.4e38 would become
@@ -94,6 +98,14 @@ const MAXIMUM_SHARE = 1e6;
 function validShares(shares) {
   return Array.isArray(shares) && shares.length === SPECIES_COUNT
     && shares.every((share) => inRange(share, [0, MAXIMUM_SHARE])) && shares.some((share) => share > 0);
+}
+
+// The mix with every rule row at full length: a legacy row takes the shipped values of the fields it lacks.
+function completeRules(mix) {
+  if (mix.rules.every((row) => row.length === RULE_FIELDS.length)) return mix;
+  const shipped = defaultSpecies();
+  const rules = mix.rules.map((row, index) => [...row, ...RULE_FIELDS.slice(row.length).map((field) => shipped[index][field])]);
+  return { ...mix, rules };
 }
 
 export function isValidMix(mix) {
@@ -118,7 +130,7 @@ export function decodeMix(text) {
   try {
     const padded = text.replaceAll('-', '+').replaceAll('_', '/');
     const mix = JSON.parse(atob(padded + '='.repeat((4 - (padded.length % 4)) % 4)));
-    return isValidMix(mix) ? mix : null;
+    return isValidMix(mix) ? completeRules(mix) : null;
   } catch {
     return null;
   }
@@ -150,7 +162,7 @@ function loadSaved(store) {
   try {
     const parsed = JSON.parse(store?.getItem(SAVED_MIXES_KEY) ?? 'null');
     if (!isPlainObject(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).filter(([name, mix]) => !Object.hasOwn(BUNDLED_MIXES, name) && isValidMix(mix)));
+    return Object.fromEntries(Object.entries(parsed).filter(([name, mix]) => !Object.hasOwn(BUNDLED_MIXES, name) && isValidMix(mix)).map(([name, mix]) => [name, completeRules(mix)]));
   } catch {
     return {};
   }
