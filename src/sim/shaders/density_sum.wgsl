@@ -1,5 +1,5 @@
 // Density readback sum (src/sim/density-readback.js): one thread per coarse cell adds the five
-// species density channels of the blurred coarse field into one f32 per cell. The threat and
+// species density channels of the blurred coarse field into one f32 per cell. The threat, danger and
 // padding channels are never read.
 @group(0) @binding(0) var<storage, read> field: array<f32>;
 @group(0) @binding(1) var<storage, read_write> density: array<f32>;

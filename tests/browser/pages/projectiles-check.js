@@ -59,6 +59,8 @@
 //     ring's reach) and spares one 4.5 away.
 // (q) second beam slot: with setBeamSlotCount(2) a beam in slot 1 kills the wall block while slot 0 is
 //     idle, and the frame after it clears kills nothing.
+// (r) danger (projectiles-danger-case.js): a live bullet splats danger ahead of itself and nothing behind, every kind but
+//     the beam and the rings does, and a pulse ring, the beam and an expired bullet add none.
 // Every case also asserts the stats kills sum equals the alive count drop (exact counting).
 import { createGpuContext } from '/src/gpu/device.js';
 import { Projectiles } from '/src/game/projectiles.js';
@@ -67,6 +69,7 @@ import { Simulation } from '/src/sim/simulation.js';
 import { DEFAULT_KILL_BURST_PARTICLES, DEFAULT_KILL_FRAGMENT_PARTICLES } from '/src/sim/params.js';
 import { defaultSpecies, normalizeShares } from '/src/sim/species.js';
 import { PROJECTILE_KINDS, WEAPON_TYPES } from '/src/game/weaponTypes.js';
+import { runDangerCase } from './projectiles-danger-case.js';
 
 const CAPACITY = 65536;
 const AGENT_COUNT = 10000;
@@ -738,7 +741,7 @@ async function runCheck() {
   simulation.registerPass((encoder, context) => projectiles.encode(encoder, context));
   const harness = new Harness(device, simulation, projectiles);
   const entries = [];
-  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runMissileBlastCase, runOrbFirstHitCase, runMissileMissCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase, runBeamReversalCase, runMixedBulletsCase, runSecondBeamSlotCase]) {
+  for (const run of [runRailCase, runOverlapCase, (target) => runBeamCase(target, () => lostReason !== null), runPulseCase, runSidewinderCase, runMissileBlastCase, runOrbFirstHitCase, runMissileMissCase, runSweptBeamCase, runEnergyBallCase, runKillBudgetCase, runSweepBudgetCase, runFinalSegmentCase, runBeamReversalCase, runMixedBulletsCase, runSecondBeamSlotCase, runDangerCase]) {
     entries.push(await run(harness));
     if (lostReason !== null) return { pass: false, detail: `device lost: ${lostReason}; ${entries.map((entry) => entry.detail).join('; ')}` };
   }

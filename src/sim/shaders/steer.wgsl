@@ -19,6 +19,19 @@
 //   (saturatedDirection), so float noise in a flat over-dense interior pushes weakly instead of at
 //   full strength in a random direction.
 //
+// Dodge: the danger channel (live projectiles' look-ahead, projectiles_step.wgsl) is read from the
+// same five samples; the agent steers down its gradient (a sidestep off a lane of fire, which is a
+// ridge) with weight speciesField(FIELD_DODGE) times its direction saturated at
+// DANGER_GRADIENT_SATURATION. While dodging the acceleration cap is also multiplied by
+// 1 + DODGE_ACCELERATION_BOOST * dodge * saturation (saturation: the 0 to 1 length of the
+// saturated direction), a dart off the lane; speed stays clamped to maximumSpeed. A species with
+// dodge 0, or an agent where danger is zero, gets exactly nothing and a multiplier of exactly 1;
+// an agent dead on the ridge sees no gradient. So that a group dodges as a group, the same
+// saturation also (a) adds DODGE_FLOCK_BIAS times the own-species cohesion direction to the dodge
+// direction (toward the flockmates, so a group straddling a lane picks one side), (b) lifts the
+// density fade of cohesion to full and (c) multiplies alignment by 1 + DODGE_ALIGNMENT_BOOST *
+// dodge * saturation; all three are exactly neutral when dodge or saturation is 0.
+//
 // Seek aims at seekPointFor (common.wgsl): the nearest seek point, unless the agent's target flag
 // bits (hives only: a spawn from a hive a seat owns) name the opposing seat's point.
 // Seek also fades with distance from the nearest seek point when params.seekRange is above 0
@@ -45,6 +58,15 @@ const STEERING_RESPONSE: f32 = 4.0;
 // Gradients (agents per coarse cell per cell) at or above this length steer at full weight;
 // weaker gradients steer proportionally, so field noise does not steer at full strength.
 const GRADIENT_SATURATION: f32 = 2.0;
+// Danger gradients (danger units per cell) at or above this length dodge at full weight; a steady
+// stream of shots down one lane saturates it.
+const DANGER_GRADIENT_SATURATION: f32 = 0.5;
+// Extra acceleration cap share per unit of dodge at full saturation.
+const DODGE_ACCELERATION_BOOST: f32 = 1.0;
+// While dodging: share of the cohesion direction added to the dodge direction (toward the flock),
+// and extra alignment weight per unit of dodge at full saturation.
+const DODGE_FLOCK_BIAS: f32 = 1.0;
+const DODGE_ALIGNMENT_BOOST: f32 = 1.0;
 // Orbiters within this fraction of orbitRadius from the circle move along its tangent.
 const ORBIT_TANGENT_BAND: f32 = 0.2;
 // Fraction of the time-optimal stopping speed that straight seek allows, leaving acceleration
@@ -222,7 +244,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   let neighbors = fineNeighborAverages(index, agent, species);
   desired = desired + neighbors.separation * speciesField(species, FIELD_SEPARATION) * maximumSpeed;
-  desired = desired + neighbors.alignment * speciesField(species, FIELD_ALIGNMENT);
+  // Dodge (see the header): the danger gradient is read from the coarse samples below, but its
+  // saturation scales alignment and cohesion here, so a group dodges as a group.
 
   let coordinate = coarseCellCoordinate(agent.position);
   let center = coarseSample(coordinate);
@@ -241,12 +264,22 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   let gradientY = CoarseSample(gradientLowY, gradientHighY);
   let density = totalDensity(center);
 
+  let dangerGradient = vec2f(channelOf(gradientX, DANGER_CHANNEL), channelOf(gradientY, DANGER_CHANNEL));
+  let dangerDirection = dangerGradient / max(length(dangerGradient), DANGER_GRADIENT_SATURATION);
+  let dodge = speciesField(species, FIELD_DODGE);
+  // 0 to dodge in size, 0 exactly for dodge 0 or where there is no danger gradient.
+  let dodging = dodge * length(dangerDirection);
+  desired = desired + neighbors.alignment * speciesField(species, FIELD_ALIGNMENT) * (1.0 + DODGE_ALIGNMENT_BOOST * dodging);
+
   var cohesionGradient = vec2f(channelOf(gradientX, species), channelOf(gradientY, species));
   if (params.sameSpeciesCohesion == 0u) {
     cohesionGradient = vec2f(totalDensity(gradientX), totalDensity(gradientY));
   }
-  let cohesionFade = clamp(1.0 - density / targetDensity, 0.0, 1.0);
-  desired = desired + saturatedDirection(cohesionGradient) * speciesField(species, FIELD_COHESION) * cohesionFade * maximumSpeed;
+  let densityFade = clamp(1.0 - density / targetDensity, 0.0, 1.0);
+  // While dodging the density fade lifts, so the group keeps pulling together.
+  let cohesionFade = densityFade + (1.0 - densityFade) * min(dodging, 1.0);
+  let cohesionDirection = saturatedDirection(cohesionGradient);
+  desired = desired + cohesionDirection * speciesField(species, FIELD_COHESION) * cohesionFade * maximumSpeed;
 
   var matrixGradient = vec2f(0.0, 0.0);
   for (var other = 0u; other < SPECIES_COUNT; other = other + 1u) {
@@ -259,6 +292,10 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
   let threatGradient = vec2f(channelOf(gradientX, THREAT_CHANNEL), channelOf(gradientY, THREAT_CHANNEL));
   desired = desired - saturatedDirection(threatGradient) * speciesField(species, FIELD_FLEE) * maximumSpeed;
 
+  // Descend the danger gradient, biased toward the flock's side so a group straddling a lane picks one side.
+  desired = desired - (dangerDirection - DODGE_FLOCK_BIAS * length(dangerDirection) * cohesionDirection) * dodge * maximumSpeed;
+  let dartCap = maximumAcceleration * (1.0 + DODGE_ACCELERATION_BOOST * dodging);
+
   if (params.coarseFieldPressure != 0u && density > targetDensity) {
     let totalGradient = vec2f(totalDensity(gradientX), totalDensity(gradientY));
     desired = desired - saturatedDirection(totalGradient) * min(speciesField(species, FIELD_PRESSURE) * (density - targetDensity), PRESSURE_MAXIMUM_MULTIPLE) * maximumSpeed;
@@ -266,8 +303,8 @@ fn main(@builtin(global_invocation_id) globalId: vec3u) {
 
   var steering = (desired - agent.velocity) * STEERING_RESPONSE;
   let steeringLength = length(steering);
-  if (steeringLength > maximumAcceleration) {
-    steering = steering * (maximumAcceleration / steeringLength);
+  if (steeringLength > dartCap) {
+    steering = steering * (dartCap / steeringLength);
   }
   var velocity = agent.velocity + steering * params.dt;
   let speed = length(velocity);

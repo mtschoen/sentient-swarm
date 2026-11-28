@@ -1,6 +1,6 @@
 import { SPECIES_COUNT } from './layout.js';
 
-export const SPECIES_FIELDS = ['seek', 'cohesion', 'alignment', 'separation', 'maximumSpeed', 'maximumTurn', 'orbitRadius', 'flee', 'pressure', 'targetDensity', 'hue', 'reserved1'];
+export const SPECIES_FIELDS = ['seek', 'cohesion', 'alignment', 'separation', 'maximumSpeed', 'maximumTurn', 'orbitRadius', 'flee', 'pressure', 'targetDensity', 'hue', 'dodge'];
 export const SPECIES_NAMES = ['Chaser', 'Orbiter', 'Skittish', 'Lattice', 'Predator'];
 
 const FIELD_COUNT = SPECIES_FIELDS.length;
@@ -12,8 +12,9 @@ const MATRIX_PADDED_FLOATS = 32;
 // instead of spreading into an even fog.
 const DEFAULT_ROWS = [
   // Chaser: alignment above cohesion with firm separation, so the mass reads as one creature with
-  // texture (owner ruling R37); moderate seek with a little flee so fire parts it.
-  { name: 'Chaser', hue: 0.02, glyph: 0, seek: 0.6, cohesion: 0.5, alignment: 1.4, separation: 0.9, maximumSpeed: 4.5, maximumTurn: 0.9, orbitRadius: 0, flee: 0.4, pressure: 0.6, targetDensity: 120 },
+  // texture (owner ruling R37); moderate seek with a little flee so fire parts it, and the only species
+  // that sidesteps the player's projectiles (dodge, steered down the danger channel).
+  { name: 'Chaser', hue: 0.02, glyph: 0, seek: 0.6, cohesion: 0.5, alignment: 1.4, separation: 0.9, maximumSpeed: 4.5, maximumTurn: 0.9, orbitRadius: 0, flee: 0.4, pressure: 0.6, targetDensity: 120, dodge: 1.5 },
   // Orbiter: medium seek, holds 2.4 units (15 percent of arena width), strong alignment.
   { name: 'Orbiter', hue: 0.55, glyph: 1, seek: 0.5, cohesion: 0.3, alignment: 0.9, separation: 0.3, maximumSpeed: 3.0, maximumTurn: 0.5, orbitRadius: 2.4, flee: 0, pressure: 0.2, targetDensity: 90 },
   // Skittish: medium seek, strong cohesion, very strong flee from fire.
@@ -25,7 +26,7 @@ const DEFAULT_ROWS = [
 ];
 
 export function defaultSpecies() {
-  return DEFAULT_ROWS.map((row) => ({ reserved1: 0, ...row }));
+  return DEFAULT_ROWS.map((row) => ({ dodge: 0, ...row }));
 }
 
 export function defaultMatrix() {
