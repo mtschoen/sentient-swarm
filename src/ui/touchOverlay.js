@@ -71,13 +71,18 @@ export function createTouchOverlay(rootElement, { touch, canvas, documentObject 
   bombButton.hidden = true;
   rootElement.append(bombButton);
 
+  // The browser marks some touch events non-cancelable (a scroll or fling in progress); cancelling
+  // one logs a console error, so only cancel when allowed. touch-action: none still blocks panning.
+  const cancelIfAllowed = (event) => {
+    if (event.cancelable !== false) event.preventDefault?.();
+  };
   const press = (event) => {
-    event.preventDefault?.();
+    cancelIfAllowed(event);
     event.stopPropagation?.();
     touch.pressBomb();
   };
   const release = (event) => {
-    event.preventDefault?.();
+    cancelIfAllowed(event);
     touch.releaseBomb();
   };
   bombButton.addEventListener('touchstart', press);
